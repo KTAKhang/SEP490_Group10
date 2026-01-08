@@ -2,8 +2,6 @@ const UserModel = require("../models/UserModel");
 const TempOTPModel = require("../models/TempOTPModel");
 const RoleModel = require("../models/RolesModel");
 const nodemailer = require("nodemailer");
-const { GoogleAuth } = require("google-auth-library");
-const cloudinary = require("../config/cloudinaryConfig");
 const { OAuth2Client } = require("google-auth-library");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
@@ -24,6 +22,7 @@ const transporter = nodemailer.createTransport({
 });
 
 
+
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const loginWithGoogle = async (idToken) => {
@@ -32,22 +31,18 @@ const loginWithGoogle = async (idToken) => {
             idToken,
             audience: process.env.GOOGLE_CLIENT_ID,
         });
+
         const payload = ticket.getPayload();
-        const { sub: googleId, email, name, picture, exp } = payload;
+        const { sub: googleId, email, name, picture } = payload;
 
-        const now = Math.floor(Date.now() / 1000);
-        if (exp < now) {
-            throw { status: "ERR", message: "Mã thông báo ID Google đã hết hạn" };
-        }
-
-
-        let user = await UserModel.findOne({ $or: [{ googleId }, { email }] });
+        let user = await UserModel.findOne({
+            $or: [{ googleId }, { email }],
+        });
 
         if (user) {
             if (!user.googleId) user.googleId = googleId;
             if (!user.isGoogleAccount) user.isGoogleAccount = true;
             if (picture && !user.avatar) user.avatar = picture;
-            await user.save();
         } else {
             user = new UserModel({
                 user_name: name,
@@ -55,26 +50,36 @@ const loginWithGoogle = async (idToken) => {
                 googleId,
                 isGoogleAccount: true,
                 avatar: picture,
-                role_id: new mongoose.Types.ObjectId("68c158d04aacbd32cdffce3b"),
+                role_id: new mongoose.Types.ObjectId(
+                    "68c158d04aacbd32cdffce3b" // customer
+                ),
             });
-            await user.save();
         }
 
         if (user.status === false) {
-            throw { status: "ERR", message: "Tài khoản bị chặn" };
+            const err = new Error("Tài khoản bị chặn");
+            err.status = "ERR";
+            throw err;
         }
-        const populatedUser = await UserModel.findById(user._id).populate("role_id", "name -_id");
+
+        await user.save();
+
+        const populatedUser = await UserModel
+            .findById(user._id)
+            .populate("role_id", "name -_id");
+
         const roleName = populatedUser?.role_id?.name || "customer";
 
         const accessToken = jwtService.generalAccessToken({
             _id: user._id,
-            isAdmin: roleName === "admin",
             role: roleName,
+            isAdmin: roleName === "admin",
         });
+
         const refreshToken = jwtService.generalRefreshToken({
             _id: user._id,
-            isAdmin: roleName === "admin",
             role: roleName,
+            isAdmin: roleName === "admin",
         });
 
         user.refreshToken = refreshToken;
@@ -90,7 +95,7 @@ const loginWithGoogle = async (idToken) => {
                 avatar: populatedUser.avatar,
                 role_name: roleName,
                 status: populatedUser.status,
-                isGoogleAccount: populatedUser.isGoogleAccount ?? false,
+                isGoogleAccount: populatedUser.isGoogleAccount,
                 createdAt: populatedUser.createdAt,
                 updatedAt: populatedUser.updatedAt,
             },
