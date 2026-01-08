@@ -1,51 +1,52 @@
-const UserModel = require("../models/UserModel");
+const jwt = require("jsonwebtoken");
+require("dotenv").config();
 
-// Middleware chỉ cho Admin
-const authAdminMiddleware = async (req, res, next) => {
-    try {
-        if (!req.user) {
-            return res.status(401).json({ message: "No user data", status: "ERR" });
-        }
-
-        const userData = await UserModel.findById(req.user._id).populate("role_id", "name");
-
-        if (!userData || userData.role_id?.name !== "admin") {
-            return res.status(403).json({ message: "Access denied", status: "ERR" });
-        }
-
-        req.user = userData;
-        next();
-    } catch (err) {
-        return res.status(500).json({ message: "Internal server error", status: "ERR" });
-    }
+const generalAccessToken = (payload) => {
+    return jwt.sign(payload, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn: "1d",
+        algorithm: "HS256",
+    });
 };
 
-// Middleware cho phép user truy cập chính họ hoặc admin
-const authMiddleware = async (req, res, next) => {
-    try {
-        if (!req.user) {
-            return res.status(401).json({ message: "No user data", status: "ERR" });
-        }
-
-        const userData = await UserModel.findById(req.user._id).populate("role_id", "name");
-
-        if (userData?.role_id?.name === "admin" || req.user._id === req.params.id) {
-            req.user = userData;
-            return next();
-        }
-
-        return res.status(403).json({ message: "Access denied", status: "ERR" });
-    } catch (err) {
-        return res.status(500).json({ message: "Internal server error", status: "ERR" });
-    }
+const generalRefreshToken = (payload) => {
+    return jwt.sign(payload, process.env.REFRESH_TOKEN_SECRET, {
+        expiresIn: "7d",
+        algorithm: "HS256",
+    });
 };
 
-// Middleware chỉ cần user login (không phân biệt role)
-const authUserMiddleware = (req, res, next) => {
-    if (!req.user) {
-        return res.status(401).json({ message: "No user data", status: "ERR" });
-    }
-    next();
+const refreshTokenJWT = (refreshToken) => {
+    return new Promise((resolve, reject) => {
+        jwt.verify(
+            refreshToken,
+            process.env.REFRESH_TOKEN_SECRET,
+            { algorithms: ["HS256"] },
+            async (err, user) => {
+                if (err) {
+                    return resolve({
+                        status: "ERR",
+                        message: "Refresh token không hợp lệ",
+                    });
+                }
+
+                const newAccessToken = generalAccessToken({
+                    _id: user._id,
+                    isAdmin: user.isAdmin,
+                    role: user.role,
+                });
+
+                resolve({
+                    status: "OK",
+                    message: "SUCCESS",
+                    access_token: newAccessToken,
+                });
+            }
+        );
+    });
 };
 
-module.exports = { authMiddleware, authAdminMiddleware, authUserMiddleware };
+module.exports = {
+    generalAccessToken,
+    generalRefreshToken,
+    refreshTokenJWT,
+};
