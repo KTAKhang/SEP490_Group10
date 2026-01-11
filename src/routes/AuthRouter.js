@@ -4,12 +4,6 @@ const AuthRouter = express.Router();
 const multer = require("multer");
 const upload = multer({ storage: multer.memoryStorage() });
 
-const {
-    authMiddleware,
-    authAdminMiddleware,
-    authUserMiddleware,
-} = require("../middleware/authMiddleware");
-
 /**
  * @swagger
  * tags:

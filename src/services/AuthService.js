@@ -261,6 +261,14 @@ const confirmRegisterOTP = async (email, otp) => {
     const hashedPassword = await bcrypt.hash(tempRecord.password, 10);
     const customerRole = await RoleModel.findOne({ name: "customer" });
 
+    // Kiểm tra role "customer" có tồn tại không
+    if (!customerRole) {
+        return {
+            status: "ERR",
+            message: "Role 'customer' không tồn tại trong hệ thống. Vui lòng liên hệ quản trị viên.",
+        };
+    }
+
     const newUser = new UserModel({
         user_name: tempRecord.user_name,
         email,
