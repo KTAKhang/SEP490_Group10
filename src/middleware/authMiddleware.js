@@ -1,52 +1,82 @@
 const jwt = require("jsonwebtoken");
-require("dotenv").config();
+const dotenv = require("dotenv");
+dotenv.config();
+const UserModel = require("../models/UserModel");
 
-const generalAccessToken = (payload) => {
-    return jwt.sign(payload, process.env.ACCESS_TOKEN_SECRET, {
-        expiresIn: "1d",
-        algorithm: "HS256",
-    });
+const authAdminMiddleware = async (req, res, next) => {
+    const authHeader = req.headers?.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ message: "No token provided", status: "ERR" });
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    try {
+        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        const userData = await UserModel.findById(decoded._id).populate("role_id", "name");
+
+        if (userData?.role_id?.name === "admin") {
+            req.user = decoded;
+            return next();
+        }
+
+        return res.status(403).json({ message: "Access denied", status: "ERR" });
+    } catch (err) {
+        return res.status(401).json({ message: "Invalid token", status: "ERR" });
+    }
 };
 
-const generalRefreshToken = (payload) => {
-    return jwt.sign(payload, process.env.REFRESH_TOKEN_SECRET, {
-        expiresIn: "7d",
-        algorithm: "HS256",
-    });
+
+const authMiddleware = async (req, res, next) => {
+    const authHeader = req.headers?.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ message: "No token provided", status: "ERR" });
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    try {
+        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        const userData = await UserModel.findById(decoded._id).populate("role_id", "name");
+
+        // Nếu là admin hoặc đang truy cập thông tin của chính họ
+        if (userData?.role_id?.name === "admin" || decoded._id === req.params._id) {
+            req.user = userData;
+            return next();
+        }
+
+        return res.status(403).json({ message: "Access denied", status: "ERR" });
+    } catch (err) {
+        return res.status(401).json({ message: "Invalid token", status: "ERR" });
+    }
 };
 
-const refreshTokenJWT = (refreshToken) => {
-    return new Promise((resolve, reject) => {
-        jwt.verify(
-            refreshToken,
-            process.env.REFRESH_TOKEN_SECRET,
-            { algorithms: ["HS256"] },
-            async (err, user) => {
-                if (err) {
-                    return resolve({
-                        status: "ERR",
-                        message: "Refresh token không hợp lệ",
-                    });
-                }
 
-                const newAccessToken = generalAccessToken({
-                    _id: user._id,
-                    isAdmin: user.isAdmin,
-                    role: user.role,
-                });
+const authUserMiddleware = (req, res, next) => {
+    try {
+        const authHeader = req.headers?.authorization;
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            return res
+                .status(401)
+                .json({ message: "No token provided", status: "ERR" });
+        }
 
-                resolve({
-                    status: "OK",
-                    message: "SUCCESS",
-                    access_token: newAccessToken,
-                });
+        const token = authHeader.split(" ")[1];
+
+        jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+            if (err) {
+                return res
+                    .status(403)
+                    .json({ message: "Token is not valid", status: "ERR" });
             }
-        );
-    });
-};
 
-module.exports = {
-    generalAccessToken,
-    generalRefreshToken,
-    refreshTokenJWT,
+            req.user = decoded;
+            next();
+        });
+    } catch (error) {
+        return res
+            .status(500)
+            .json({ message: "Internal server error", status: "ERR" });
+    }
 };
+module.exports = { authMiddleware, authAdminMiddleware, authUserMiddleware };

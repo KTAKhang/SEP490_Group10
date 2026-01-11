@@ -3,41 +3,47 @@ const dotenv = require("dotenv");
 const mongoose = require("mongoose");
 const bodyParser = require("body-parser");
 const routes = require("./routes");
-const swaggerDocs = require("./swagger");
 const cookieParser = require("cookie-parser");
+const cors = require("cors");
 
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = Number(process.env.PORT) || 3000;
+
+// ===== CORS (ĐỦ + ĐÚNG) =====
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
 
 // ===== Middleware =====
-// ❌ REMOVED: app.use(cors()) - API Gateway đã handle CORS
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use(cookieParser());
 
-// ===== Test route =====
+// ===== Health check =====
 app.get("/", (req, res) => {
-    res.json({ message: "🚀 Auth Service is running!" });
+  res.json({ message: "🚀 Auth Service is running!" });
 });
 
-// ===== Routes & Swagger =====
-routes(app); // 👉 trong này có "/auth"
-swaggerDocs(app);
+// ===== Routes =====
+routes(app);
 
 // ===== DB connect =====
 mongoose
-    .connect(process.env.MONGO_URL)
-    .then(() => {
-        console.log("✅ Connected to MongoDB");
-        console.log(`📘 Swagger Docs available at http://localhost:${port}/api-docs`);
-    })
-    .catch((error) => {
-        console.error("❌ MongoDB connection error:", error);
-    });
+  .connect(process.env.MONGO_URL)
+  .then(() => console.log("✅ Connected to MongoDB"))
+  .catch((error) =>
+    console.error("❌ MongoDB connection error:", error)
+  );
 
 // ===== Start Server =====
-app.listen(port, () => {
-    console.log(`🚀 Auth Service running on http://localhost:${port}`);
+app.listen(port, "0.0.0.0", () => {
+  console.log(`🚀 Auth Service running on http://localhost:${port}`);
 });
