@@ -302,23 +302,6 @@ const resetPassword = async (req, res) => {
     }
 };
 
-const verifyTokenController = async (req, res) => {
-    try {
-        const { access_token } = req.body;
-        const result = await AuthService.verifyAccessToken(access_token);
-
-        return res.status(result.code).json({
-            status: result.status,
-            message: result.message,
-            data: result.data || null,
-        });
-    } catch (error) {
-        return res.status(500).json({
-            status: "ERR",
-            message: error.message,
-        });
-    }
-};
 
 module.exports = {
     forgotPassword,
@@ -328,6 +311,5 @@ module.exports = {
     loginWithGoogle,
     loginUser,
     refreshTokenController,
-    logoutController,
-    verifyTokenController
+    logoutController
 };

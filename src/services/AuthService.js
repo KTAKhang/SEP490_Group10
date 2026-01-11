@@ -355,52 +355,7 @@ const resetPassword = async (email, otp, newPassword) => {
     return { status: "OK", message: "Đặt lại mật khẩu thành công!" };
 };
 
-const verifyAccessToken = async (access_token) => {
-    if (!access_token) {
-        return {
-            status: "ERR",
-            code: 400,
-            message: "Access token là bắt buộc",
-        };
-    }
-    let decoded;
-    try {
-        decoded = jwt.verify(access_token, process.env.ACCESS_TOKEN_SECRET);
-    } catch (err) {
-        return {
-            status: "ERR",
-            code: 401,
-            message: "Token không hợp lệ hoặc đã hết hạn",
-        };
-    }
-    const user = await UserModel.findById(decoded._id).populate("role_id", "name");
-    if (!user) {
-        return {
-            status: "ERR",
-            code: 404,
-            message: "Người dùng không tồn tại",
-        };
-    }
-    if (user.status === false) {
-        return {
-            status: "ERR",
-            code: 403,
-            message: "Tài khoản bị khóa",
-        };
-    }
-    return {
-        status: "OK",
-        code: 200,
-        message: "Token hợp lệ",
-        data: {
-            _id: user._id,
-            user_name: user.user_name,
-            email: user.email,
-            role: user.role_id?.name || "customer",
-            status: user.status,
-        },
-    };
-};
+
 
 module.exports = {
     sendResetPasswordOTP,
@@ -411,5 +366,4 @@ module.exports = {
     loginUser,
     refreshAccessToken,
     logoutUser,
-    verifyAccessToken
 };
