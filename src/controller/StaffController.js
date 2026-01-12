@@ -1,5 +1,7 @@
+/**
+ * author: KhoaNDCE170420
+ */
 const StaffService = require('../services/StaffService');
-
 /**
  * Update status (active/inactive) of a staff account
  * PUT /api/staff/:staffId/status

@@ -1,3 +1,6 @@
+/**
+ * author: KhoaNDCE170420
+ */
 const express = require('express');
 const router = express.Router();
 const { authAdminMiddleware } = require('../middleware/authMiddleware');
