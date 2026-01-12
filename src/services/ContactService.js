@@ -52,10 +52,10 @@ const createContact = async (userId, { subject, message, category }) => {
         }
 
         // BR-C-03: Category được set mặc định hoặc từ backend, không cho user tự set priority
-        // Nếu category không được cung cấp, mặc định là MEDIUM
-        const validCategory = category && ["LOW", "MEDIUM", "HIGH", "URGENT"].includes(category)
+        // Nếu category không được cung cấp, mặc định là other
+        const validCategory = category && ["products", "warranty", "policies", "services", "other"].includes(category)
             ? category
-            : "MEDIUM";
+            : "other";
 
         // BR-C-04: Status mặc định là OPEN
         const newContact = new ContactModel({
@@ -142,16 +142,8 @@ const getContacts = async (userId, isAdmin, filters = {}) => {
 const getContactById = async (contactId, userId, isAdmin) => {
     try {
         const contact = await ContactModel.findById(contactId)
-            .populate({
-                path: "user_id",
-                select: "user_name email",
-                strictPopulate: false, // Không throw error nếu user không tồn tại
-            })
-            .populate({
-                path: "assigned_admin_id",
-                select: "user_name email",
-                strictPopulate: false, // Không throw error nếu admin không tồn tại
-            });
+            .populate("user_id", "user_name email")
+            .populate("assigned_admin_id", "user_name email");
 
         if (!contact) {
             return {
@@ -181,6 +173,23 @@ const getContactById = async (contactId, userId, isAdmin) => {
         const attachments = await ContactAttachmentModel.find({ contact_id: contactId })
             .sort({ createdAt: 1 });
 
+        // Xác định trạng thái reply
+        let canReply = true;
+        let waitingForAdminReply = false;
+
+        if (!isAdmin) {
+            // User không phải Admin
+            if (contact.status === "CLOSED" || contact.status === "RESOLVED") {
+                canReply = false;
+            }
+            // OPEN và IN_PROGRESS: User có thể reply bình thường
+        } else {
+            // Admin luôn có thể reply (trừ khi CLOSED hoặc RESOLVED)
+            if (contact.status === "CLOSED" || contact.status === "RESOLVED") {
+                canReply = false;
+            }
+        }
+
         return {
             status: "OK",
             message: "Lấy Contact thành công",
@@ -188,6 +197,8 @@ const getContactById = async (contactId, userId, isAdmin) => {
                 ...contact.toObject(),
                 replies,
                 attachments,
+                canReply,
+                waitingForAdminReply,
             },
         };
     } catch (error) {
@@ -295,13 +306,15 @@ const createReply = async (contactId, userId, isAdmin, { message }) => {
             };
         }
 
-        // BR-C-06: Không được reply khi Contact đã CLOSED
-        if (contact.status === "CLOSED") {
+        // BR-C-06: Contact không được reply khi ở trạng thái CLOSED hoặc RESOLVED
+        // Chỉ cho phép reply khi status là OPEN hoặc IN_PROGRESS
+        if (contact.status === "CLOSED" || contact.status === "RESOLVED") {
             return {
                 status: "ERR",
-                message: "Không thể reply Contact đã được đóng",
+                message: "Không thể reply Contact đã được đóng hoặc đã được giải quyết",
             };
         }
+
 
         // BR-R-03: Xác định sender_type
         const senderType = isAdmin ? "ADMIN" : "USER";
@@ -333,8 +346,8 @@ const createReply = async (contactId, userId, isAdmin, { message }) => {
 
         await newReply.save();
 
-        // BR-R-04: Cập nhật updated_at của Contact
-        await ContactModel.findByIdAndUpdate(contactId, { updated_at: new Date() });
+        // BR-R-04: Cập nhật updatedAt của Contact
+        await ContactModel.findByIdAndUpdate(contactId, { updatedAt: new Date() });
 
         // Nếu Contact đang ở trạng thái OPEN và Admin reply, tự động chuyển sang IN_PROGRESS
         if (contact.status === "OPEN" && isAdmin) {
@@ -389,6 +402,167 @@ const getReplies = async (contactId, userId, isAdmin) => {
             status: "OK",
             message: "Lấy danh sách Reply thành công",
             data: replies,
+        };
+    } catch (error) {
+        return {
+            status: "ERR",
+            message: error.message,
+        };
+    }
+};
+
+/**
+ * Cập nhật Reply (chỉ Admin, chỉ reply của chính mình)
+ * PUT /contacts/:contactId/replies/:replyId
+ */
+const updateReply = async (contactId, replyId, userId, isAdmin, { message }) => {
+    try {
+        // Chỉ Admin mới được update reply
+        if (!isAdmin) {
+            return {
+                status: "ERR",
+                message: "Chỉ Admin mới có quyền chỉnh sửa Reply",
+            };
+        }
+
+        // Kiểm tra Contact tồn tại
+        const contact = await ContactModel.findById(contactId);
+        if (!contact) {
+            return {
+                status: "ERR",
+                message: "Contact không tồn tại",
+            };
+        }
+
+        // Kiểm tra Reply tồn tại
+        const reply = await ReplyContactModel.findById(replyId);
+        if (!reply) {
+            return {
+                status: "ERR",
+                message: "Reply không tồn tại",
+            };
+        }
+
+        // Kiểm tra Reply thuộc về Contact này
+        if (reply.contact_id.toString() !== contactId.toString()) {
+            return {
+                status: "ERR",
+                message: "Reply không thuộc về Contact này",
+            };
+        }
+
+        // Chỉ cho phép Admin chỉnh sửa reply của chính mình
+        if (reply.sender_type !== "ADMIN") {
+            return {
+                status: "ERR",
+                message: "Chỉ có thể chỉnh sửa Reply của Admin",
+            };
+        }
+
+        // Kiểm tra Admin có phải là người tạo reply không
+        if (reply.sender_id.toString() !== userId.toString()) {
+            return {
+                status: "ERR",
+                message: "Bạn chỉ có thể chỉnh sửa Reply của chính mình",
+            };
+        }
+
+        // Validate message
+        if (!message || message.trim().length < 1 || message.trim().length > 5000) {
+            return {
+                status: "ERR",
+                message: "Message phải có từ 1 đến 5000 ký tự",
+            };
+        }
+
+        // Cập nhật reply
+        const updatedReply = await ReplyContactModel.findByIdAndUpdate(
+            replyId,
+            { message: message.trim() },
+            { new: true }
+        ).populate("sender_id", "user_name email");
+
+        // Cập nhật updatedAt của Contact
+        await ContactModel.findByIdAndUpdate(contactId, { updatedAt: new Date() });
+
+        return {
+            status: "OK",
+            message: "Cập nhật Reply thành công",
+            data: updatedReply,
+        };
+    } catch (error) {
+        return {
+            status: "ERR",
+            message: error.message,
+        };
+    }
+};
+
+/**
+ * Xóa Reply (chỉ Admin, chỉ reply của chính mình)
+ * DELETE /contacts/:contactId/replies/:replyId
+ */
+const deleteReply = async (contactId, replyId, userId, isAdmin) => {
+    try {
+        // Chỉ Admin mới được xóa reply
+        if (!isAdmin) {
+            return {
+                status: "ERR",
+                message: "Chỉ Admin mới có quyền xóa Reply",
+            };
+        }
+
+        // Kiểm tra Contact tồn tại
+        const contact = await ContactModel.findById(contactId);
+        if (!contact) {
+            return {
+                status: "ERR",
+                message: "Contact không tồn tại",
+            };
+        }
+
+        // Kiểm tra Reply tồn tại
+        const reply = await ReplyContactModel.findById(replyId);
+        if (!reply) {
+            return {
+                status: "ERR",
+                message: "Reply không tồn tại",
+            };
+        }
+
+        // Kiểm tra Reply thuộc về Contact này
+        if (reply.contact_id.toString() !== contactId.toString()) {
+            return {
+                status: "ERR",
+                message: "Reply không thuộc về Contact này",
+            };
+        }
+
+        // Chỉ cho phép Admin xóa reply của chính mình
+        if (reply.sender_type !== "ADMIN") {
+            return {
+                status: "ERR",
+                message: "Chỉ có thể xóa Reply của Admin",
+            };
+        }
+
+        // Kiểm tra Admin có phải là người tạo reply không
+        if (reply.sender_id.toString() !== userId.toString()) {
+            return {
+                status: "ERR",
+                message: "Bạn chỉ có thể xóa Reply của chính mình",
+            };
+        }
+
+        // Xóa reply
+        await ReplyContactModel.findByIdAndDelete(replyId);
+
+        // Cập nhật updatedAt của Contact
+        await ContactModel.findByIdAndUpdate(contactId, { updatedAt: new Date() });
+
+        return {
+            status: "OK",
+            message: "Xóa Reply thành công",
         };
     } catch (error) {
         return {
@@ -610,6 +784,8 @@ module.exports = {
     updateContactStatus,
     createReply,
     getReplies,
+    updateReply,
+    deleteReply,
     uploadAttachment,
     getAttachments,
     deleteAttachment,

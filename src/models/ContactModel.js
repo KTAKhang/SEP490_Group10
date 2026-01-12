@@ -23,10 +23,10 @@ const contactSchema = new mongoose.Schema(
             type: String,
             required: [true, "Category là bắt buộc"],
             enum: {
-                values: ["LOW", "MEDIUM", "HIGH", "URGENT"],
-                message: "Category phải là LOW, MEDIUM, HIGH hoặc URGENT",
+                values: ["products", "warranty", "policies", "services", "other"],
+                message: "Category phải là products, warranty, policies, services hoặc other",
             },
-            default: "MEDIUM",
+            default: "other",
         },
         message: {
             type: String,

@@ -35,6 +35,12 @@ ContactRouter.post("/:id/replies", contactAuthMiddleware, ContactController.crea
 // Lấy danh sách Reply của Contact
 ContactRouter.get("/:id/replies", contactAuthMiddleware, ContactController.getReplies);
 
+// Cập nhật Reply (chỉ Admin, chỉ reply của chính mình)
+ContactRouter.put("/:id/replies/:replyId", contactAdminMiddleware, ContactController.updateReply);
+
+// Xóa Reply (chỉ Admin, chỉ reply của chính mình)
+ContactRouter.delete("/:id/replies/:replyId", contactAdminMiddleware, ContactController.deleteReply);
+
 // ===== ATTACHMENT ROUTES =====
 
 // Upload Attachment cho Contact
