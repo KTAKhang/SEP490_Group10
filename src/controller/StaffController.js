@@ -42,8 +42,12 @@ const createStaffController = async (req, res) => {
             delete data.staff_name;
         }
 
-        const response = await StaffService.createStaff(data);
-        return res.status(200).json(response);
+        // Get file from multer if uploaded
+        const file = req.file;
+
+        const response = await StaffService.createStaff(data, file);
+        const code = response?.status === 'OK' ? 200 : 400;
+        return res.status(code).json(response);
     } catch (error) {
         return res.status(500).json({
             status: "ERR",
@@ -69,10 +73,13 @@ const updateStaffController = async (req, res) => {
             });
         }
 
-        const response = await StaffService.updateStaff(staffId, data);
+        // Get file from multer if uploaded
+        const file = req.file;  
+        const response = await StaffService.updateStaff(staffId, data, file);
         const code = response?.status === 'OK' ? 200 : 400;
         return res.status(code).json(response);
     } catch (error) {
+        console.error("[Controller] Update staff error:", error);
         return res.status(500).json({
             status: "ERR",
             message: error.message
