@@ -236,3 +236,103 @@ const uploadProductImages = (req, res, next) => {
 };
 
 module.exports.uploadProductImages = uploadProductImages;
+
+// Middleware: Upload news thumbnail lên Cloudinary
+const uploadNewsThumbnail = (req, res, next) => {
+    const handler = upload.single("thumbnail");
+    handler(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            if (req.file && req.file.buffer) {
+                // Validate file type
+                const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+                if (!allowedMimes.includes(req.file.mimetype)) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Thumbnail phải là định dạng jpg, png hoặc webp",
+                    });
+                }
+
+                // ✅ Tự động lấy ảnh cũ từ database nếu đang update (có req.params.id)
+                let oldThumbnailPublicId = null;
+                if (req.params && req.params.id) {
+                    try {
+                        const NewsModel = require("../models/NewsModel");
+                        const news = await NewsModel.findById(req.params.id).select("thumbnailPublicId");
+                        if (news && news.thumbnailPublicId) {
+                            oldThumbnailPublicId = news.thumbnailPublicId;
+                        }
+                    } catch (err) {
+                        console.warn("Không thể lấy ảnh cũ từ database:", err.message);
+                    }
+                }
+
+                // Nếu không có từ database, lấy từ body (frontend có thể gửi)
+                if (!oldThumbnailPublicId) {
+                    oldThumbnailPublicId = req.body.oldThumbnailPublicId || req.body.thumbnailPublicId;
+                }
+
+                // Upload với stream + optimization
+                const result = await uploadToCloudinary(req.file.buffer, "news");
+
+                req.body.thumbnail_url = result.secure_url;
+                req.body.thumbnailPublicId = result.public_id;
+
+                // ✅ Tự động xóa ảnh cũ nếu có ảnh mới và khác ảnh cũ
+                if (oldThumbnailPublicId && oldThumbnailPublicId !== result.public_id) {
+                    cloudinary.uploader.destroy(oldThumbnailPublicId).catch((err) => {
+                        console.warn(`Không thể xóa ảnh cũ ${oldThumbnailPublicId} trên Cloudinary:`, err.message);
+                    });
+                }
+            }
+            return next();
+        } catch (error) {
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports.uploadNewsThumbnail = uploadNewsThumbnail;
+
+// Middleware: Upload ảnh cho content (dùng trong HTML editor)
+const uploadNewsContentImage = (req, res, next) => {
+    const handler = upload.single("image");
+    handler(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            if (req.file && req.file.buffer) {
+                // Validate file type
+                const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+                if (!allowedMimes.includes(req.file.mimetype)) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Ảnh phải là định dạng jpg, png hoặc webp",
+                    });
+                }
+
+                // Upload với stream + optimization vào folder "news/content"
+                const result = await uploadToCloudinary(req.file.buffer, "news/content");
+
+                // Trả về URL và publicId để frontend sử dụng
+                req.uploadedImage = {
+                    url: result.secure_url,
+                    publicId: result.public_id,
+                };
+            } else {
+                return res.status(400).json({
+                    status: "ERR",
+                    message: "Không có file ảnh được upload",
+                });
+            }
+            return next();
+        } catch (error) {
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports.uploadNewsContentImage = uploadNewsContentImage;
