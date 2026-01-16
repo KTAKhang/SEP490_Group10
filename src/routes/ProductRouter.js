@@ -8,6 +8,9 @@ const ProductRouter = express.Router();
 // Admin: CRUD Product
 ProductRouter.post("/", inventoryAdminMiddleware, uploadProductImages, ProductController.createProduct);
 
+// Admin và Warehouse staff: Xem thống kê sản phẩm
+ProductRouter.get("/stats", inventoryAdminOrWarehouseMiddleware, ProductController.getProductStats);
+
 // Admin và Warehouse staff: Xem danh sách sản phẩm
 ProductRouter.get("/", inventoryAdminOrWarehouseMiddleware, ProductController.getProducts);
 

@@ -1,48 +1,74 @@
 const mongoose = require("mongoose");
 const InventoryTransactionModel = require("../models/InventoryTransactionModel");
 const ProductModel = require("../models/ProductModel");
+const { getTodayInVietnam, formatDateVN, compareDates, calculateDaysBetween } = require("../utils/dateVN");
 
-// Build receivingStatus expression based on updated fields
+// ✅ Helper: Convert kg sang gram (integer)
+const kgToGram = (kg) => {
+  return Math.round(Number(kg) * 1000);
+};
+
+// ✅ Helper: Format gram sang kg với số chữ số thập phân phù hợp theo step
+const formatKgByStep = (g, stepG) => {
+  const stepKg = stepG / 1000;
+  // Xác định số chữ số thập phân dựa trên step
+  let decimals = 0;
+  if (stepKg < 1) {
+    if (stepKg >= 0.1) decimals = 1; // 0.1kg, 0.2kg...
+    else if (stepKg >= 0.01) decimals = 2; // 0.05kg, 0.25kg...
+    else decimals = 3; // 0.001kg...
+  }
+  return (g / 1000).toFixed(decimals);
+};
+
+// Build receivingStatus expression based on updated fields (dùng gram)
 const receivingStatusExpr = () => ({
   $switch: {
     branches: [
-      // received <= 0 -> NOT_RECEIVED
-      { case: { $lte: ["$receivedQuantity", 0] }, then: "NOT_RECEIVED" },
-      // received < planned -> PARTIAL
-      { case: { $lt: ["$receivedQuantity", "$plannedQuantity"] }, then: "PARTIAL" },
+      // receivedQuantityG <= 0 -> NOT_RECEIVED
+      { case: { $lte: ["$receivedQuantityG", 0] }, then: "NOT_RECEIVED" },
+      // receivedQuantityG < plannedQuantityG -> PARTIAL
+      { case: { $lt: ["$receivedQuantityG", "$plannedQuantityG"] }, then: "PARTIAL" },
     ],
     default: "RECEIVED",
   },
 });
 
 const stockStatusExpr = () => ({
-  $cond: [{ $gt: ["$onHandQuantity", 0] }, "IN_STOCK", "OUT_OF_STOCK"],
+  $cond: [{ $gt: ["$onHandQuantityG", 0] }, "IN_STOCK", "OUT_OF_STOCK"],
 });
 
 /**
  * Nhập kho (RECEIPT) - atomic & chống lệch khi concurrent
  * Rules:
- * - receivedQuantity + x <= plannedQuantity
- * - receivedQuantity += x
- * - onHandQuantity += x
- * - Nếu là lần nhập đầu tiên (receivedQuantity = 0), tự động set warehouseEntryDate = ngày hiện tại
+ * - receivedQuantityG + xG <= plannedQuantityG
+ * - receivedQuantityG += xG
+ * - onHandQuantityG += xG
+ * - Nếu là lần nhập đầu tiên (receivedQuantityG = 0), tự động set warehouseEntryDate = ngày hiện tại
  * - Nhận expiryDate từ payload (date picker) hoặc shelfLifeDays (số ngày)
  * - Validate: expiryDate >= ngày hiện tại + 1 ngày
+ * - UI nhập kg, backend convert sang gram (integer)
  */
 const createReceipt = async (userId, payload = {}) => {
-  const { productId, quantity, expiryDate, shelfLifeDays, note = "", referenceType = "", referenceId = null } = payload;
+  const { productId, quantityKg, expiryDate, shelfLifeDays, note = "", referenceType = "", referenceId = null } = payload;
 
   if (!mongoose.isValidObjectId(productId)) {
     return { status: "ERR", message: "productId không hợp lệ" };
   }
 
-  const qty = Number(quantity);
-  if (!Number.isFinite(qty) || qty <= 0) {
-    return { status: "ERR", message: "quantity phải là số > 0" };
+  // ✅ UI nhập kg, convert sang gram (integer)
+  if (quantityKg === undefined || quantityKg === null || Number.isNaN(Number(quantityKg)) || Number(quantityKg) <= 0) {
+    return { status: "ERR", message: "Số lượng nhập kho (kg) phải > 0" };
+  }
+  
+  const qtyG = kgToGram(quantityKg);
+  // ✅ Check chặt: phải là integer, finite, và > 0
+  if (!Number.isFinite(qtyG) || qtyG <= 0 || !Number.isInteger(qtyG)) {
+    return { status: "ERR", message: "Số lượng nhập kho (kg) không hợp lệ" };
   }
 
-  const now = new Date();
-  now.setHours(0, 0, 0, 0); // Reset về 00:00:00 để so sánh ngày
+  // ✅ Lấy ngày hiện tại theo timezone Asia/Ho_Chi_Minh (date-only)
+  const today = getTodayInVietnam();
 
   // Validate expiryDate hoặc shelfLifeDays
   let finalExpiryDate = null;
@@ -59,14 +85,16 @@ const createReceipt = async (userId, payload = {}) => {
       // Reset về 00:00:00 để so sánh ngày
       finalExpiryDate.setHours(0, 0, 0, 0);
       
-      // Validate: expiryDate >= ngày hiện tại + 1 ngày
-      const minDate = new Date(now);
+      // ✅ Validate: expiryDate >= ngày hiện tại + 1 ngày (theo timezone Vietnam)
+      const minDate = new Date(today);
       minDate.setDate(minDate.getDate() + 1);
       
       if (finalExpiryDate < minDate) {
+        // ✅ Format date theo timezone VN thay vì toISOString() (UTC)
+        const minDateStr = formatDateVN(minDate);
         return { 
           status: "ERR", 
-          message: `Hạn sử dụng phải tối thiểu từ ngày ${minDate.toISOString().split('T')[0]} (ngày mai)` 
+          message: `Hạn sử dụng phải tối thiểu từ ngày ${minDateStr} (ngày mai theo timezone Asia/Ho_Chi_Minh)` 
         };
       }
     } catch (err) {
@@ -76,8 +104,8 @@ const createReceipt = async (userId, payload = {}) => {
   // Nếu không có expiryDate, dùng shelfLifeDays (backward compatible)
   else if (shelfLifeDays !== undefined && shelfLifeDays !== null) {
     shelfLife = Number(shelfLifeDays);
-    if (!Number.isFinite(shelfLife) || shelfLife <= 0) {
-      return { status: "ERR", message: "shelfLifeDays phải là số > 0" };
+    if (!Number.isFinite(shelfLife) || shelfLife <= 0 || !Number.isInteger(shelfLife)) {
+      return { status: "ERR", message: "shelfLifeDays phải là số nguyên > 0" };
     }
   }
 
@@ -97,72 +125,129 @@ const createReceipt = async (userId, payload = {}) => {
     let txDoc = null;
 
     await session.withTransaction(async () => {
-      // Lấy product hiện tại để check receivedQuantity trước đó
+      // Lấy product hiện tại để check receivedQuantityG và validate step
       const currentProduct = await ProductModel.findById(productId).session(session);
       if (!currentProduct) {
         throw new Error("Sản phẩm không tồn tại");
       }
 
-      const wasFirstReceipt = (currentProduct.receivedQuantity ?? 0) === 0;
-      const warehouseEntryDate = new Date(); // Ngày nhập kho
+      // ✅ Validate số lượng nhập theo minOrderQuantityG và stepQuantityG
+      const minOrderG = currentProduct.minOrderQuantityG || 0;
+      const stepG = currentProduct.stepQuantityG || 1;
+      
+      if (qtyG < minOrderG) {
+        const minOrderKg = formatKgByStep(minOrderG, stepG);
+        const qtyKg = formatKgByStep(qtyG, stepG);
+        throw new Error(`Số lượng nhập kho (${qtyKg}kg) nhỏ hơn mức tối thiểu (${minOrderKg}kg)`);
+      }
+      
+      if (stepG > 0 && qtyG % stepG !== 0) {
+        const stepKg = formatKgByStep(stepG, stepG);
+        const qtyKg = formatKgByStep(qtyG, stepG);
+        throw new Error(`Số lượng nhập kho phải đúng bước nhảy (${stepKg}kg). Số lượng hiện tại: ${qtyKg}kg`);
+      }
 
-      // Atomic condition: received + qty <= planned
+      // ✅ Validate: Nếu đã có expiryDate (Date hoặc Str) mà payload gửi expiryDate mới → trả lỗi
+      // Check bằng cả Date + Str để khỏi lọt data cũ
+      const hasExpiry = !!(currentProduct.expiryDate || currentProduct.expiryDateStr);
+      if (hasExpiry && (finalExpiryDate !== null || shelfLife !== null)) {
+        throw new Error("Hạn sử dụng đã được thiết lập và không thể thay đổi. Không thể đặt lại hạn sử dụng.");
+      }
+
+      // ✅ Lưu warehouseEntryDate là date-only (YYYY-MM-DD) theo timezone Asia/Ho_Chi_Minh
+      const warehouseEntryDate = getTodayInVietnam();
+      const warehouseEntryDateStr = formatDateVN(warehouseEntryDate);
+      const todayStr = formatDateVN(today);
+
+      // ✅ Logic: Nếu đã có warehouseEntryDate, chỉ cho phép nhập trong cùng ngày (theo timezone Vietnam)
+      // So sánh bằng string để đơn giản và chắc chắn hơn
+      if (currentProduct.warehouseEntryDateStr) {
+        if (todayStr !== currentProduct.warehouseEntryDateStr) {
+          throw new Error("Đơn hàng nhập kho phải hoàn thành trong cùng ngày (theo timezone Asia/Ho_Chi_Minh). Không thể nhập thêm vào ngày khác.");
+        }
+      } else if (currentProduct.warehouseEntryDate) {
+        // Fallback: nếu chưa có Str nhưng có Date (data cũ)
+        const existingEntryDate = new Date(currentProduct.warehouseEntryDate);
+        existingEntryDate.setHours(0, 0, 0, 0);
+        if (!compareDates(today, existingEntryDate)) {
+          throw new Error("Đơn hàng nhập kho phải hoàn thành trong cùng ngày (theo timezone Asia/Ho_Chi_Minh). Không thể nhập thêm vào ngày khác.");
+        }
+      }
+
+      // ✅ Logic mới: Cho phép nhập nhiều lần trong ngày dù đã set expiryDate
+      // (Chỉ chặn khi qua ngày khác, không chặn khi đã set expiryDate)
+
+      // ✅ Tính toán expiryDate và shelfLifeDays trước (nếu có)
+      let expiryDateToSet = null;
+      let expiryDateStrToSet = null;
+      let shelfLifeDaysToSet = null;
+      const existingEntryDate = currentProduct.warehouseEntryDate 
+        ? new Date(currentProduct.warehouseEntryDate) 
+        : warehouseEntryDate;
+      existingEntryDate.setHours(0, 0, 0, 0);
+
+      if (finalExpiryDate !== null) {
+        const diffDays = calculateDaysBetween(existingEntryDate, finalExpiryDate);
+        if (diffDays <= 0) {
+          throw new Error("Hạn sử dụng phải sau ngày nhập kho");
+        }
+        expiryDateToSet = finalExpiryDate;
+        expiryDateStrToSet = formatDateVN(finalExpiryDate);
+        shelfLifeDaysToSet = diffDays;
+      } else if (shelfLife !== null) {
+        const calculatedExpiryDate = new Date(existingEntryDate);
+        calculatedExpiryDate.setDate(calculatedExpiryDate.getDate() + shelfLife);
+        calculatedExpiryDate.setHours(0, 0, 0, 0);
+        expiryDateToSet = calculatedExpiryDate;
+        expiryDateStrToSet = formatDateVN(calculatedExpiryDate);
+        shelfLifeDaysToSet = shelfLife;
+      }
+
+      // ✅ Atomic update: gộp logic set warehouseEntryDate và expiryDate vào pipeline để tránh race condition (dùng gram)
+      const updatePipeline = [
+        {
+          $set: {
+            receivedQuantityG: { $add: ["$receivedQuantityG", qtyG] },
+            onHandQuantityG: { $add: ["$onHandQuantityG", qtyG] },
+            // ✅ Atomic set warehouseEntryDate chỉ khi chưa có (tránh race condition)
+            warehouseEntryDate: { $ifNull: ["$warehouseEntryDate", warehouseEntryDate] },
+            warehouseEntryDateStr: { $ifNull: ["$warehouseEntryDateStr", warehouseEntryDateStr] },
+          },
+        },
+      ];
+
+      // ✅ Atomic set expiryDate chỉ khi chưa có và có giá trị mới
+      if (expiryDateToSet !== null) {
+        updatePipeline.push({
+          $set: {
+            expiryDate: { $ifNull: ["$expiryDate", expiryDateToSet] },
+            expiryDateStr: { $ifNull: ["$expiryDateStr", expiryDateStrToSet] },
+            shelfLifeDays: { $ifNull: ["$shelfLifeDays", shelfLifeDaysToSet] },
+          },
+        });
+      }
+
+      updatePipeline.push({
+        $set: {
+          receivingStatus: receivingStatusExpr(),
+          stockStatus: stockStatusExpr(),
+        },
+      });
+
+      // Atomic condition: receivedQuantityG + qtyG <= plannedQuantityG
       updatedProduct = await ProductModel.findOneAndUpdate(
         {
           _id: new mongoose.Types.ObjectId(productId),
           $expr: {
-            $lte: [{ $add: ["$receivedQuantity", qty] }, "$plannedQuantity"],
+            $lte: [{ $add: ["$receivedQuantityG", qtyG] }, "$plannedQuantityG"],
           },
         },
-        [
-          {
-            $set: {
-              receivedQuantity: { $add: ["$receivedQuantity", qty] },
-              onHandQuantity: { $add: ["$onHandQuantity", qty] },
-            },
-          },
-          {
-            $set: {
-              receivingStatus: receivingStatusExpr(),
-              stockStatus: stockStatusExpr(),
-            },
-          },
-        ],
-        { new: true, session }
+        updatePipeline,
+        { new: true, session, runValidators: true }
       );
 
       if (!updatedProduct) {
-        throw new Error("Nhập vượt kế hoạch (plannedQuantity)");
-      }
-
-      // Nếu là lần nhập đầu tiên, set warehouseEntryDate và shelfLifeDays/expiryDate nếu có
-      if (wasFirstReceipt) {
-        const updateFields = {
-          warehouseEntryDate: warehouseEntryDate,
-        };
-
-        // Nếu có expiryDate từ date picker
-        if (finalExpiryDate !== null) {
-          // Tính shelfLifeDays từ warehouseEntryDate và expiryDate
-          const diffTime = finalExpiryDate.getTime() - warehouseEntryDate.getTime();
-          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-          
-          updateFields.shelfLifeDays = diffDays;
-          updateFields.expiryDate = finalExpiryDate;
-        }
-        // Nếu có shelfLifeDays (backward compatible)
-        else if (shelfLife !== null) {
-          const calculatedExpiryDate = new Date(warehouseEntryDate);
-          calculatedExpiryDate.setDate(calculatedExpiryDate.getDate() + shelfLife);
-          updateFields.shelfLifeDays = shelfLife;
-          updateFields.expiryDate = calculatedExpiryDate;
-        }
-
-        updatedProduct = await ProductModel.findByIdAndUpdate(
-          productId,
-          { $set: updateFields },
-          { new: true, session }
-        );
+        throw new Error("Nhập vượt kế hoạch (plannedQuantityG)");
       }
 
       const created = await InventoryTransactionModel.create(
@@ -170,7 +255,7 @@ const createReceipt = async (userId, payload = {}) => {
           {
             product: new mongoose.Types.ObjectId(productId),
             type: "RECEIPT",
-            quantity: qty,
+            quantityG: qtyG, // Lưu gram (integer)
             createdBy: new mongoose.Types.ObjectId(userId),
             note: note?.toString?.() ? note.toString() : "",
             referenceType: referenceType?.toString?.() ? referenceType.toString() : "",
@@ -183,7 +268,7 @@ const createReceipt = async (userId, payload = {}) => {
     });
 
     const populatedTx = await InventoryTransactionModel.findById(txDoc._id)
-      .populate("product", "name plannedQuantity receivedQuantity onHandQuantity reservedQuantity receivingStatus stockStatus")
+      .populate("product", "name pricePerKg plannedQuantityG receivedQuantityG onHandQuantityG reservedQuantityG minOrderQuantityG stepQuantityG receivingStatus stockStatus")
       .populate("createdBy", "user_name email")
       .lean();
 

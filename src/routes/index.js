@@ -4,6 +4,8 @@ const ContactRouter = require("./ContactRouter");
 const CategoryRouter = require("./CategoryRouter");
 const ProductRouter = require("./ProductRouter");
 const InventoryRouter = require("./InventoryRouter");
+const PublicProductRouter = require("./PublicProductRouter");
+const PublicCategoryRouter = require("./PublicCategoryRouter");
 
 const routes = (app) => {
     app.use("/auth", AuthRouter);
@@ -14,6 +16,9 @@ const routes = (app) => {
     app.use("/admin/products", ProductRouter);
     // Warehouse staff
     app.use("/inventory", InventoryRouter);
+    // Public routes (không cần authentication)
+    app.use("/products", PublicProductRouter);
+    app.use("/categories", PublicCategoryRouter);
 };
 
 module.exports = routes;
