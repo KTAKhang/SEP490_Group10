@@ -1,5 +1,6 @@
 /**
  * author: KhoaNDCE170420
+ * Staff Router - routes for staff management
  */
 const express = require('express');
 const router = express.Router();

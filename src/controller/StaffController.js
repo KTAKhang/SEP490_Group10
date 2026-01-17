@@ -1,5 +1,6 @@
 /**
  * author: KhoaNDCE170420
+ * Staff Controller - handles requests for staff management
  */
 const StaffService = require('../services/StaffService');
 /**

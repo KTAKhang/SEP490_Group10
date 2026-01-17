@@ -1,10 +1,9 @@
 /**
  * author: KhoaNDCE170420
+ * Staff Service - business logic for staff management
  */
-
 const UserModel = require("../models/UserModel");
 const RoleModel = require("../models/RolesModel");
-const cloudinary = require("../config/cloudinaryConfig");
 
 const ALLOWED_ROLES = ["sales-staff", "finance-staff", "inventory-staff"];
 
@@ -58,7 +57,6 @@ const StaffService = {
      * - Ensures email uniqueness.
      * - Hashes password before saving.
      * - Automatically sets staff status to active.
-     * - Uploads avatar to Cloudinary if provided.
      *
      * @param {Object} data - Staff creation data
      * @param {String} data.user_name - Staff display name
@@ -67,10 +65,9 @@ const StaffService = {
      * @param {String} data.phone - Staff phone number
      * @param {String} data.address - Staff address
      * @param {String} data.role - Staff role name
-     * @param {Object} file - Multer file object (optional)
      * @returns {Promise<Object>} Result object with status and message
      */
-    async createStaff(data, file = null) {
+    async createStaff(data) {
         try {
             const { user_name, email, password, phone, address, role } = data;
             if (!user_name || !email || !password || !phone || !address) {
@@ -91,34 +88,6 @@ const StaffService = {
             if (!staffRole) {
                 return { status: "ERR", message: "Role not found" };
             }
-
-            // Upload avatar to Cloudinary if file is provided
-            let avatarUrl = data.avatar || "";
-            if (file) {
-                // Validate file type
-                const allowedTypes = ["image/jpeg", "image/png", "image/jpg"];
-                if (!allowedTypes.includes(file.mimetype)) {
-                    return { status: "ERR", message: "Only JPG, PNG images are allowed" };
-                }
-                // Validate file size (already done by multer, but double check)
-                if (file.size > 3 * 1024 * 1024) {
-                    return { status: "ERR", message: "File size must be under 3MB" };
-                }
-
-                try {
-                    const uploadResult = await new Promise((resolve, reject) => {
-                        const uploadStream = cloudinary.uploader.upload_stream(
-                            { folder: "avatars" },
-                            (error, result) => (error ? reject(error) : resolve(result))
-                        );
-                        uploadStream.end(file.buffer);
-                    });
-                    avatarUrl = uploadResult.secure_url;
-                } catch (uploadError) {
-                    return { status: "ERR", message: "Failed to upload avatar: " + uploadError.message };
-                }
-            }
-
             const bcrypt = require("bcrypt");
             const hashedPassword = await bcrypt.hash(password, 10);
             const newUser = new UserModel({
@@ -129,7 +98,7 @@ const StaffService = {
                 address,
                 role_id: staffRole._id,
                 status: true,
-                avatar: avatarUrl
+                avatar: data.avatar || ""
             });
             await newUser.save();
             return { status: "OK", message: "Staff account created successfully" };
@@ -145,7 +114,6 @@ const StaffService = {
      * - Validates and hashes password if provided.
      * - Ensures uniqueness for user_name if changed.
      * - Validates role if provided and updates role_id accordingly.
-     * - Uploads new avatar to Cloudinary if file is provided.
      * - Rejects invalid staff ID or non-staff accounts.
      *
      * @param {String} staffId - MongoDB ObjectId of the staff user
@@ -155,11 +123,10 @@ const StaffService = {
      * @param {String} [data.phone] - New staff phone number
      * @param {String} [data.address] - New staff address
      * @param {String} [data.role] - New staff role name
-     * @param {String} [data.avatar] - New staff avatar URL (if not uploading file)
-     * @param {Object} file - Multer file object (optional, for avatar upload)
+     * @param {String} [data.avatar] - New staff avatar URL
      * @returns {Promise<Object>} Result object with status and message
      */
-    async updateStaff(staffId, data, file = null) {
+    async updateStaff(staffId, data) {
         try {
             if (!staffId) {
                 return { status: "ERR", message: "Staff ID is required" };
@@ -177,7 +144,7 @@ const StaffService = {
 
             // Update user_name if provided and check uniqueness
             if (user_name && user_name !== staff.user_name) {
-                const existingUserName = await UserModel.findOne({ user_name, _id: { $ne: staffId } });
+                const existingUserName = await UserModel.findOne({ user_name });
                 if (existingUserName) {
                     return { status: "ERR", message: "Username already taken!" };
                 }
@@ -213,43 +180,8 @@ const StaffService = {
                 staff.role_id = staffRole._id;
             }
 
-            // Update avatar - prioritize file upload over URL
-            if (file) {
-                // Validate file type
-                const allowedTypes = ["image/jpeg", "image/png", "image/jpg"];
-                if (!allowedTypes.includes(file.mimetype)) {
-                    return { status: "ERR", message: "Only JPG, PNG images are allowed" };
-                }
-                // Validate file size
-                if (file.size > 3 * 1024 * 1024) {
-                    return { status: "ERR", message: "File size must be under 3MB" };
-                }
-
-                // Delete old avatar from Cloudinary if exists
-                if (staff.avatar) {
-                    try {
-                        const oldImageId = staff.avatar.split("/").pop().split(".")[0];
-                        await cloudinary.uploader.destroy(`avatars/${oldImageId}`);
-                    } catch (err) {
-                        console.warn("Không thể xóa ảnh cũ:", err.message);
-                    }
-                }
-
-                // Upload new avatar to Cloudinary
-                try {
-                    const uploadResult = await new Promise((resolve, reject) => {
-                        const uploadStream = cloudinary.uploader.upload_stream(
-                            { folder: "avatars" },
-                            (error, result) => (error ? reject(error) : resolve(result))
-                        );
-                        uploadStream.end(file.buffer);
-                    });
-                    staff.avatar = uploadResult.secure_url;
-                } catch (uploadError) {
-                    return { status: "ERR", message: "Failed to upload avatar: " + uploadError.message };
-                }
-            } else if (avatar !== undefined) {
-                // If no file but avatar URL is provided, use the URL
+            // Update avatar if provided
+            if (avatar !== undefined) {
                 staff.avatar = avatar;
             }
 
