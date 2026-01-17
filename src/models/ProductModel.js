@@ -22,80 +22,49 @@ const productSchema = new mongoose.Schema(
       maxlength: [200, "short_desc must be at most 200 characters"],
     },
 
-    // ✅ Giá theo VNĐ/kg (integer để tránh float)
-    pricePerKg: {
+    price: { type: Number, required: true, min: 0 },
+
+    // Admin set lúc tạo
+    plannedQuantity: {
       type: Number,
       required: true,
       min: 0,
       validate: {
         validator: Number.isInteger,
-        message: "pricePerKg phải là số nguyên (VNĐ/kg)",
+        message: "plannedQuantity phải là số nguyên",
       },
     },
 
-    // ✅ Bước mua tối thiểu (gram) - ví dụ: 100g (0.1kg) hoặc 500g (0.5kg)
-    minOrderQuantityG: {
-      type: Number,
-      default: 100, // Mặc định 0.1kg
-      min: 1,
-      validate: {
-        validator: Number.isInteger,
-        message: "minOrderQuantityG phải là số nguyên (gram)",
-      },
-    },
-
-    // ✅ Bước nhảy khi mua (gram) - ví dụ: 100g (chỉ mua được 0.1kg, 0.2kg, 0.3kg...)
-    stepQuantityG: {
-      type: Number,
-      default: 100, // Mặc định 0.1kg
-      min: 1,
-      validate: {
-        validator: Number.isInteger,
-        message: "stepQuantityG phải là số nguyên (gram)",
-      },
-    },
-
-    // ✅ Admin set lúc tạo (gram - integer)
-    plannedQuantityG: {
-      type: Number,
-      required: true,
-      min: 0,
-      validate: {
-        validator: Number.isInteger,
-        message: "plannedQuantityG phải là số nguyên (gram)",
-      },
-    },
-
-    // ✅ Cộng dồn từ các phiếu nhập (gram)
-    receivedQuantityG: {
+    // Cộng dồn từ các phiếu nhập
+    receivedQuantity: {
       type: Number,
       default: 0,
       min: 0,
       validate: {
         validator: Number.isInteger,
-        message: "receivedQuantityG phải là số nguyên (gram)",
+        message: "receivedQuantity phải là số nguyên",
       },
     },
 
-    // ✅ Tồn thực tế (gram)
-    onHandQuantityG: {
+    // Tồn thực tế
+    onHandQuantity: {
       type: Number,
       default: 0,
       min: 0,
       validate: {
         validator: Number.isInteger,
-        message: "onHandQuantityG phải là số nguyên (gram)",
+        message: "onHandQuantity phải là số nguyên",
       },
     },
 
-    // ✅ Giữ hàng cho đơn (gram)
-    reservedQuantityG: {
+    // Giữ hàng cho đơn (nếu bạn có flow đặt hàng)
+    reservedQuantity: {
       type: Number,
       default: 0,
       min: 0,
       validate: {
         validator: Number.isInteger,
-        message: "reservedQuantityG phải là số nguyên (gram)",
+        message: "reservedQuantity phải là số nguyên",
       },
     },
 
@@ -192,15 +161,9 @@ const productSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Virtual: available = onHand - reserved (gram)
-productSchema.virtual("availableQuantityG").get(function () {
-  return Math.max(0, (this.onHandQuantityG || 0) - (this.reservedQuantityG || 0));
-});
-
-// Virtual: availableQuantityKg (hiển thị cho UI)
-productSchema.virtual("availableQuantityKg").get(function () {
-  const availableG = this.availableQuantityG;
-  return availableG / 1000;
+// Virtual: available = onHand - reserved
+productSchema.virtual("availableQuantity").get(function () {
+  return Math.max(0, (this.onHandQuantity || 0) - (this.reservedQuantity || 0));
 });
 
 // Method: Tính lại expiryDate từ warehouseEntryDate + shelfLifeDays
@@ -214,25 +177,25 @@ productSchema.methods.calculateExpiryDate = function () {
   }
 };
 
-// Tự cập nhật trạng thái khi lưu - Chuẩn hóa logic (dùng gram)
+// Tự cập nhật trạng thái khi lưu - Chuẩn hóa logic
 productSchema.pre("save", function (next) {
-  const planned = this.plannedQuantityG ?? 0;
-  const received = this.receivedQuantityG ?? 0;
-  const onHand = this.onHandQuantityG ?? 0;
-  const reserved = this.reservedQuantityG ?? 0;
+  const planned = this.plannedQuantity ?? 0;
+  const received = this.receivedQuantity ?? 0;
+  const onHand = this.onHandQuantity ?? 0;
+  const reserved = this.reservedQuantity ?? 0;
 
-  // ✅ Đảm bảo invariant: 0 ≤ onHandQuantityG ≤ receivedQuantityG ≤ plannedQuantityG
+  // ✅ Đảm bảo invariant: 0 ≤ onHandQuantity ≤ receivedQuantity ≤ plannedQuantity
   if (onHand < 0) {
-    return next(new Error("onHandQuantityG không được âm"));
+    return next(new Error("onHandQuantity không được âm"));
   }
   if (received < 0) {
-    return next(new Error("receivedQuantityG không được âm"));
+    return next(new Error("receivedQuantity không được âm"));
   }
   if (onHand > received) {
-    return next(new Error("onHandQuantityG không được vượt receivedQuantityG"));
+    return next(new Error("onHandQuantity không được vượt receivedQuantity"));
   }
   if (received > planned) {
-    return next(new Error("receivedQuantityG không được vượt plannedQuantityG"));
+    return next(new Error("receivedQuantity không được vượt plannedQuantity"));
   }
 
   // ✅ Chuẩn hóa receivingStatus
@@ -255,14 +218,7 @@ productSchema.pre("save", function (next) {
 
   // ✅ Safety: reserved không được vượt onHand
   if (reserved > onHand) {
-    return next(new Error("reservedQuantityG cannot exceed onHandQuantityG"));
-  }
-
-  // ✅ Validate minOrderQuantityG phải là bội của stepQuantityG (để đảm bảo logic bước nhảy đúng)
-  if (this.minOrderQuantityG && this.stepQuantityG) {
-    if (this.minOrderQuantityG % this.stepQuantityG !== 0) {
-      return next(new Error("Số lượng đặt tối thiểu phải là bội của bước nhảy"));
-    }
+    return next(new Error("reservedQuantity cannot exceed onHandQuantity"));
   }
 
   // ✅ Validate images.length === imagePublicIds.length

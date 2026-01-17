@@ -11,16 +11,8 @@ const inventoryTransactionSchema = new mongoose.Schema(
       index: true,
     },
 
-    // ✅ quantityG (gram) - luôn là số dương integer; hệ thống hiểu tăng/giảm theo type
-    quantityG: {
-      type: Number,
-      required: true,
-      min: 1,
-      validate: {
-        validator: Number.isInteger,
-        message: "quantityG phải là số nguyên (gram)",
-      },
-    },
+    // quantity luôn là số dương; hệ thống hiểu tăng/giảm theo type
+    quantity: { type: Number, required: true, min: 1 },
 
     // ai thao tác (user)
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "users", required: true, index: true },

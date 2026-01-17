@@ -3,68 +3,43 @@ const InventoryTransactionModel = require("../models/InventoryTransactionModel")
 const ProductModel = require("../models/ProductModel");
 const { getTodayInVietnam, formatDateVN, compareDates, calculateDaysBetween } = require("../utils/dateVN");
 
-// ✅ Helper: Convert kg sang gram (integer)
-const kgToGram = (kg) => {
-  return Math.round(Number(kg) * 1000);
-};
-
-// ✅ Helper: Format gram sang kg với số chữ số thập phân phù hợp theo step
-const formatKgByStep = (g, stepG) => {
-  const stepKg = stepG / 1000;
-  // Xác định số chữ số thập phân dựa trên step
-  let decimals = 0;
-  if (stepKg < 1) {
-    if (stepKg >= 0.1) decimals = 1; // 0.1kg, 0.2kg...
-    else if (stepKg >= 0.01) decimals = 2; // 0.05kg, 0.25kg...
-    else decimals = 3; // 0.001kg...
-  }
-  return (g / 1000).toFixed(decimals);
-};
-
-// Build receivingStatus expression based on updated fields (dùng gram)
+// Build receivingStatus expression based on updated fields
 const receivingStatusExpr = () => ({
   $switch: {
     branches: [
-      // receivedQuantityG <= 0 -> NOT_RECEIVED
-      { case: { $lte: ["$receivedQuantityG", 0] }, then: "NOT_RECEIVED" },
-      // receivedQuantityG < plannedQuantityG -> PARTIAL
-      { case: { $lt: ["$receivedQuantityG", "$plannedQuantityG"] }, then: "PARTIAL" },
+      // received <= 0 -> NOT_RECEIVED
+      { case: { $lte: ["$receivedQuantity", 0] }, then: "NOT_RECEIVED" },
+      // received < planned -> PARTIAL
+      { case: { $lt: ["$receivedQuantity", "$plannedQuantity"] }, then: "PARTIAL" },
     ],
     default: "RECEIVED",
   },
 });
 
 const stockStatusExpr = () => ({
-  $cond: [{ $gt: ["$onHandQuantityG", 0] }, "IN_STOCK", "OUT_OF_STOCK"],
+  $cond: [{ $gt: ["$onHandQuantity", 0] }, "IN_STOCK", "OUT_OF_STOCK"],
 });
 
 /**
  * Nhập kho (RECEIPT) - atomic & chống lệch khi concurrent
  * Rules:
- * - receivedQuantityG + xG <= plannedQuantityG
- * - receivedQuantityG += xG
- * - onHandQuantityG += xG
- * - Nếu là lần nhập đầu tiên (receivedQuantityG = 0), tự động set warehouseEntryDate = ngày hiện tại
+ * - receivedQuantity + x <= plannedQuantity
+ * - receivedQuantity += x
+ * - onHandQuantity += x
+ * - Nếu là lần nhập đầu tiên (receivedQuantity = 0), tự động set warehouseEntryDate = ngày hiện tại
  * - Nhận expiryDate từ payload (date picker) hoặc shelfLifeDays (số ngày)
  * - Validate: expiryDate >= ngày hiện tại + 1 ngày
- * - UI nhập kg, backend convert sang gram (integer)
  */
 const createReceipt = async (userId, payload = {}) => {
-  const { productId, quantityKg, expiryDate, shelfLifeDays, note = "", referenceType = "", referenceId = null } = payload;
+  const { productId, quantity, expiryDate, shelfLifeDays, note = "", referenceType = "", referenceId = null } = payload;
 
   if (!mongoose.isValidObjectId(productId)) {
     return { status: "ERR", message: "productId không hợp lệ" };
   }
 
-  // ✅ UI nhập kg, convert sang gram (integer)
-  if (quantityKg === undefined || quantityKg === null || Number.isNaN(Number(quantityKg)) || Number(quantityKg) <= 0) {
-    return { status: "ERR", message: "Số lượng nhập kho (kg) phải > 0" };
-  }
-  
-  const qtyG = kgToGram(quantityKg);
-  // ✅ Check chặt: phải là integer, finite, và > 0
-  if (!Number.isFinite(qtyG) || qtyG <= 0 || !Number.isInteger(qtyG)) {
-    return { status: "ERR", message: "Số lượng nhập kho (kg) không hợp lệ" };
+  const qty = Number(quantity);
+  if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
+    return { status: "ERR", message: "Số lượng nhập kho phải là số nguyên lớn hơn 0" };
   }
 
   // ✅ Lấy ngày hiện tại theo timezone Asia/Ho_Chi_Minh (date-only)
@@ -125,26 +100,10 @@ const createReceipt = async (userId, payload = {}) => {
     let txDoc = null;
 
     await session.withTransaction(async () => {
-      // Lấy product hiện tại để check receivedQuantityG và validate step
+      // Lấy product hiện tại để check receivedQuantity trước đó
       const currentProduct = await ProductModel.findById(productId).session(session);
       if (!currentProduct) {
         throw new Error("Sản phẩm không tồn tại");
-      }
-
-      // ✅ Validate số lượng nhập theo minOrderQuantityG và stepQuantityG
-      const minOrderG = currentProduct.minOrderQuantityG || 0;
-      const stepG = currentProduct.stepQuantityG || 1;
-      
-      if (qtyG < minOrderG) {
-        const minOrderKg = formatKgByStep(minOrderG, stepG);
-        const qtyKg = formatKgByStep(qtyG, stepG);
-        throw new Error(`Số lượng nhập kho (${qtyKg}kg) nhỏ hơn mức tối thiểu (${minOrderKg}kg)`);
-      }
-      
-      if (stepG > 0 && qtyG % stepG !== 0) {
-        const stepKg = formatKgByStep(stepG, stepG);
-        const qtyKg = formatKgByStep(qtyG, stepG);
-        throw new Error(`Số lượng nhập kho phải đúng bước nhảy (${stepKg}kg). Số lượng hiện tại: ${qtyKg}kg`);
       }
 
       // ✅ Validate: Nếu đã có expiryDate (Date hoặc Str) mà payload gửi expiryDate mới → trả lỗi
@@ -203,12 +162,12 @@ const createReceipt = async (userId, payload = {}) => {
         shelfLifeDaysToSet = shelfLife;
       }
 
-      // ✅ Atomic update: gộp logic set warehouseEntryDate và expiryDate vào pipeline để tránh race condition (dùng gram)
+      // ✅ Atomic update: gộp logic set warehouseEntryDate và expiryDate vào pipeline để tránh race condition
       const updatePipeline = [
         {
           $set: {
-            receivedQuantityG: { $add: ["$receivedQuantityG", qtyG] },
-            onHandQuantityG: { $add: ["$onHandQuantityG", qtyG] },
+            receivedQuantity: { $add: ["$receivedQuantity", qty] },
+            onHandQuantity: { $add: ["$onHandQuantity", qty] },
             // ✅ Atomic set warehouseEntryDate chỉ khi chưa có (tránh race condition)
             warehouseEntryDate: { $ifNull: ["$warehouseEntryDate", warehouseEntryDate] },
             warehouseEntryDateStr: { $ifNull: ["$warehouseEntryDateStr", warehouseEntryDateStr] },
@@ -234,12 +193,12 @@ const createReceipt = async (userId, payload = {}) => {
         },
       });
 
-      // Atomic condition: receivedQuantityG + qtyG <= plannedQuantityG
+      // Atomic condition: received + qty <= planned
       updatedProduct = await ProductModel.findOneAndUpdate(
         {
           _id: new mongoose.Types.ObjectId(productId),
           $expr: {
-            $lte: [{ $add: ["$receivedQuantityG", qtyG] }, "$plannedQuantityG"],
+            $lte: [{ $add: ["$receivedQuantity", qty] }, "$plannedQuantity"],
           },
         },
         updatePipeline,
@@ -247,7 +206,7 @@ const createReceipt = async (userId, payload = {}) => {
       );
 
       if (!updatedProduct) {
-        throw new Error("Nhập vượt kế hoạch (plannedQuantityG)");
+        throw new Error("Nhập vượt kế hoạch (plannedQuantity)");
       }
 
       const created = await InventoryTransactionModel.create(
@@ -255,7 +214,7 @@ const createReceipt = async (userId, payload = {}) => {
           {
             product: new mongoose.Types.ObjectId(productId),
             type: "RECEIPT",
-            quantityG: qtyG, // Lưu gram (integer)
+            quantity: qty,
             createdBy: new mongoose.Types.ObjectId(userId),
             note: note?.toString?.() ? note.toString() : "",
             referenceType: referenceType?.toString?.() ? referenceType.toString() : "",
@@ -268,7 +227,7 @@ const createReceipt = async (userId, payload = {}) => {
     });
 
     const populatedTx = await InventoryTransactionModel.findById(txDoc._id)
-      .populate("product", "name pricePerKg plannedQuantityG receivedQuantityG onHandQuantityG reservedQuantityG minOrderQuantityG stepQuantityG receivingStatus stockStatus")
+      .populate("product", "name plannedQuantity receivedQuantity onHandQuantity reservedQuantity receivingStatus stockStatus")
       .populate("createdBy", "user_name email")
       .lean();
 
