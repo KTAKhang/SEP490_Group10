@@ -43,7 +43,7 @@ mongoose
     console.log("✅ Connected to MongoDB");
 
     // 🚀 START CRON JOBS (QUAN TRỌNG)
-    require("./crons/vnpayRefund.cron");
+    // require("./crons/vnpayRefund.cron");
   })
   .catch((error) =>
     console.error("❌ MongoDB connection error:", error)

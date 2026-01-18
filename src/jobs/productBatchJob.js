@@ -29,40 +29,34 @@ const startProductBatchJob = () => {
   // Tạm thời dùng "0 0 * * *" và giả định server timezone = VN
   // Nếu server timezone khác, cần điều chỉnh cron expression
   cron.schedule("0 0 * * *", async () => {
-    console.log(`[${formatDateTimeVN()}] Starting auto-reset expired products job...`);
+    console.log(`[${formatDateTimeVN()}] Starting mark expired products for reset job...`);
     
     try {
-      const result = await ProductBatchService.autoResetExpiredProducts();
+      const result = await ProductBatchService.markExpiredProductsForReset();
       
       if (result.status === "OK") {
-        const resetCount = result.data?.resetCount || 0;
-        const errors = result.data?.errors || [];
+        const markedCount = result.data?.markedCount || 0;
         
-        console.log(`[${formatDateTimeVN()}] Auto-reset completed:`, {
-          resetCount: resetCount,
-          errors: errors.length,
+        console.log(`[${formatDateTimeVN()}] Mark expired products completed:`, {
+          markedCount: markedCount,
         });
         
         // ✅ (Optional) Gửi notification cho admin
         // Có thể gửi email hoặc log vào database
-        if (resetCount > 0 && result.data?.resetProducts) {
-          console.log(`[${formatDateTimeVN()}] Reset products:`, result.data.resetProducts);
-        }
-        
-        if (errors.length > 0) {
-          console.error(`[${formatDateTimeVN()}] Errors during auto-reset:`, errors);
+        if (markedCount > 0 && result.data?.markedProducts) {
+          console.log(`[${formatDateTimeVN()}] Marked products (waiting for admin confirmation):`, result.data.markedProducts);
         }
       } else {
-        console.error(`[${formatDateTimeVN()}] Auto-reset failed:`, result.message);
+        console.error(`[${formatDateTimeVN()}] Mark expired products failed:`, result.message);
       }
     } catch (error) {
-      console.error(`[${formatDateTimeVN()}] Error in auto-reset job:`, error);
+      console.error(`[${formatDateTimeVN()}] Error in mark expired products job:`, error);
     }
   }, {
     timezone: "Asia/Ho_Chi_Minh", // ✅ Set timezone cho cron job
   });
   
-  console.log("✅ Product batch auto-reset job scheduled (runs daily at 00:00 VN time)");
+  console.log("✅ Product batch mark expired job scheduled (runs daily at 00:00 VN time)");
 };
 
 module.exports = {
