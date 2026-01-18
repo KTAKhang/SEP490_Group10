@@ -64,13 +64,13 @@ const discountSchema = new mongoose.Schema(
 
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: "User",
+            ref: "users",
             required: true
         },
 
         approvedBy: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: "User",
+            ref: "users",
             default: null
         },
 
@@ -83,6 +83,13 @@ const discountSchema = new mongoose.Schema(
         rejectedReason: {
             type: String,
             default: ""
+        },
+
+        description: {
+            type: String,
+            trim: true,
+            maxlength: [500, "Description cannot exceed 500 characters"],
+            default: ""
         }
     },
     {
@@ -94,4 +101,5 @@ discountSchema.index({ code: 1 });
 discountSchema.index({ status: 1, isActive: 1 });
 discountSchema.index({ startDate: 1, endDate: 1 });
 
-module.exports = mongoose.model("Discount", discountSchema);
+const DiscountModel = mongoose.model("discounts", discountSchema);
+module.exports = DiscountModel;

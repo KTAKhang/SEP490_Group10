@@ -87,15 +87,12 @@ const authUserMiddleware = (req, res, next) => {
  * - Verifies JWT access token from `Authorization` header (Bearer token)
  * - Checks whether the authenticated user has role `sales-staff`
  * - Attaches decoded user info to `req.user` if authorized
- *
- * Use cases:
  * - Protect routes where only Sales Staff are allowed
  *   (e.g. create / update discount codes in PENDING status)
  *
  * @param {import("express").Request} req
  * @param {import("express").Response} res
  * @param {import("express").NextFunction} next
- *
  * @returns {Response|void}
  * - 401 Unauthorized: Missing or invalid token
  * - 403 Forbidden: Authenticated but not sales staff

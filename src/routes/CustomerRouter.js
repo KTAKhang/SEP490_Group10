@@ -1,5 +1,6 @@
 /**
- * Customer Routes - Định nghĩa các route cho quản lý khách hàng
+ * author: KhoaNDCE170420
+ * Customer Router - routes for customer management
  */
 const express = require("express");
 const router = express.Router();
@@ -11,16 +12,16 @@ router.use(authAdminMiddleware);
 
 /**
  * @route   GET /customers/search
- * @desc    Tìm kiếm khách hàng theo từ khóa
+ * @desc    Search customers by keyword
  * @query   keyword, page, limit, status, sortBy, sortOrder
  * @access  Admin
- * @note    Route này phải đặt TRƯỚC route /:id để tránh conflict
+ * 
  */
 router.get("/search", CustomerController.searchCustomers);
 
 /**
  * @route   GET /customers/filter
- * @desc    Lọc khách hàng theo tiêu chí
+ * @desc    Filter customers by criteria
  * @query   status, isGoogleAccount, page, limit, sortBy, sortOrder
  * @access  Admin
  */
@@ -28,7 +29,7 @@ router.get("/filter", CustomerController.filterCustomers);
 
 /**
  * @route   GET /customers
- * @desc    Lấy danh sách khách hàng với phân trang và sắp xếp
+ * @desc    Get list of customers with pagination and sorting
  * @query   page, limit, status, sortBy, sortOrder
  * @access  Admin
  */
@@ -36,16 +37,16 @@ router.get("/", CustomerController.getCustomers);
 
 /**
  * @route   PATCH /customers/:id/status
- * @desc    Cập nhật trạng thái active/inactive của khách hàng
+ * @desc    Update customer's active/inactive status
  * @params  id - Customer ID
- * @body    { status: true/false hoặc "active"/"inactive" }
+ * @body    { status: true/false or "active"/"inactive" }
  * @access  Admin
  */
 router.patch("/:id/status", CustomerController.updateCustomerStatus);
 
 /**
  * @route   GET /customers/:id
- * @desc    Lấy thông tin chi tiết một khách hàng
+ * @desc    Get detailed information of a customer
  * @params  id - Customer ID
  * @access  Admin
  */

@@ -184,7 +184,7 @@ const DiscountService = {
 
             discount.status = "APPROVED";
             discount.isActive = true;
-            discount.rejectionReason = null;
+            discount.rejectedReason = null;
 
             await discount.save();
 
@@ -226,7 +226,7 @@ const DiscountService = {
 
             discount.status = "REJECTED";
             discount.isActive = false;
-            discount.rejectionReason = rejectionReason.trim();
+            discount.rejectedReason = rejectionReason.trim();
 
             await discount.save();
 

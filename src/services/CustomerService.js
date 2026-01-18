@@ -1,6 +1,8 @@
 /**
  * author: KhoaNDCE170420
  * Customer Service - business logic for customer management
+ * This service handles all operations related to customers accounts management.
+ * admin: view, search, filter, update status
  */
 const UserModel = require("../models/UserModel");
 const RoleModel = require("../models/RolesModel");

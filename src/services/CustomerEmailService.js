@@ -1,5 +1,6 @@
 /**
- * Email Service - Gửi email thông báo
+ * athor: KhoaNDCE170420
+ * Customer Email Service - handle sending emails to customers
  */
 const nodemailer = require("nodemailer");
 

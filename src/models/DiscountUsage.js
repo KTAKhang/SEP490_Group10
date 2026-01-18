@@ -4,13 +4,13 @@ const discountUsageSchema = new mongoose.Schema(
     {
         userId: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: "User",
+            ref: "users",
             required: true
         },
 
         discountId: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: "Discount",
+            ref: "discounts",
             required: true
         },
 
@@ -47,4 +47,5 @@ discountUsageSchema.index(
     { unique: true }
 );
 
-module.exports = mongoose.model("DiscountUsage", discountUsageSchema);
+const DiscountUsageModel = mongoose.model("discount_usages", discountUsageSchema);
+module.exports = DiscountUsageModel;
