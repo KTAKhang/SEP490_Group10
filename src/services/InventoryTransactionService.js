@@ -366,8 +366,8 @@ const createIssue = async (userId, payload = {}) => {
 };
 
 /**
- * Lấy lịch sử nhập hàng (RECEIPT transactions)
- * @param {Object} filters - { page, limit, productId, createdBy, startDate, endDate, search }
+ * Lấy lịch sử nhập hàng (RECEIPT transactions) - có search, sort, filter, pagination
+ * @param {Object} filters - { page, limit, productId, createdBy, startDate, endDate, search, sortBy, sortOrder }
  * @returns {Promise<Object>} { status, message, data, pagination }
  */
 const getReceiptHistory = async (filters = {}) => {
@@ -380,6 +380,8 @@ const getReceiptHistory = async (filters = {}) => {
       startDate,
       endDate,
       search = "",
+      sortBy = "createdAt",
+      sortOrder = "desc",
     } = filters;
 
     const pageNum = Math.max(1, parseInt(page) || 1);
@@ -432,11 +434,17 @@ const getReceiptHistory = async (filters = {}) => {
       query.note = { $regex: search, $options: "i" };
     }
 
+    // Sort options
+    const allowedSortFields = ["createdAt", "updatedAt", "quantity"];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortObj = { [sortField]: sortDirection };
+
     const [data, total] = await Promise.all([
       InventoryTransactionModel.find(query)
         .populate("product", "name price category")
         .populate("createdBy", "user_name email") // ✅ Thông tin nhân viên nhập hàng
-        .sort({ createdAt: -1 }) // Mới nhất trước
+        .sort(sortObj)
         .skip(skip)
         .limit(limitNum)
         .lean(),
@@ -460,8 +468,8 @@ const getReceiptHistory = async (filters = {}) => {
 };
 
 /**
- * Lấy lịch sử tất cả transactions (RECEIPT, ISSUE, etc.)
- * @param {Object} filters - { page, limit, type, productId, createdBy, startDate, endDate }
+ * Lấy lịch sử tất cả transactions (RECEIPT, ISSUE, etc.) - có search, sort, filter, pagination
+ * @param {Object} filters - { page, limit, type, productId, createdBy, startDate, endDate, search, sortBy, sortOrder }
  * @returns {Promise<Object>} { status, message, data, pagination }
  */
 const getTransactionHistory = async (filters = {}) => {
@@ -474,6 +482,9 @@ const getTransactionHistory = async (filters = {}) => {
       createdBy,
       startDate,
       endDate,
+      search = "",
+      sortBy = "createdAt",
+      sortOrder = "desc",
     } = filters;
 
     const pageNum = Math.max(1, parseInt(page) || 1);
@@ -527,11 +538,22 @@ const getTransactionHistory = async (filters = {}) => {
       }
     }
 
+    // Search theo note (nếu có)
+    if (search) {
+      query.note = { $regex: search, $options: "i" };
+    }
+
+    // Sort options
+    const allowedSortFields = ["createdAt", "updatedAt", "quantity", "type"];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortObj = { [sortField]: sortDirection };
+
     const [data, total] = await Promise.all([
       InventoryTransactionModel.find(query)
         .populate("product", "name price category")
         .populate("createdBy", "user_name email") // ✅ Thông tin người thao tác
-        .sort({ createdAt: -1 }) // Mới nhất trước
+        .sort(sortObj)
         .skip(skip)
         .limit(limitNum)
         .lean(),

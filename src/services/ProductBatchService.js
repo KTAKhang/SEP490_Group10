@@ -292,9 +292,9 @@ const markSoldOutProductForReset = async (productId) => {
 };
 
 /**
- * Lấy lịch sử lô hàng của một sản phẩm
+ * Lấy lịch sử lô hàng của một sản phẩm (có search, sort, filter, pagination)
  * @param {String} productId - Product ID
- * @param {Object} filters - { page, limit }
+ * @param {Object} filters - { page, limit, search, completionReason, sortBy, sortOrder }
  * @returns {Promise<Object>} { status, message, data, pagination }
  */
 const getProductBatchHistory = async (productId, filters = {}) => {
@@ -303,16 +303,40 @@ const getProductBatchHistory = async (productId, filters = {}) => {
       return { status: "ERR", message: "productId không hợp lệ" };
     }
 
-    const { page = 1, limit = 20 } = filters;
+    const { page = 1, limit = 20, search = "", completionReason, sortBy = "batchNumber", sortOrder = "desc" } = filters;
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
 
     const query = { product: new mongoose.Types.ObjectId(productId) };
 
+    // Filter theo completionReason
+    if (completionReason && ["SOLD_OUT", "EXPIRED"].includes(completionReason)) {
+      query.completionReason = completionReason;
+    }
+
+    // Search: có thể search theo batchNumber (convert sang string để search)
+    // Hoặc search theo các field khác nếu cần
+    if (search) {
+      // Search theo batchNumber nếu search là số
+      const searchNum = parseInt(search);
+      if (!isNaN(searchNum)) {
+        query.batchNumber = searchNum;
+      } else {
+        // Có thể mở rộng search theo các field khác nếu cần
+        // Hiện tại chỉ search theo batchNumber
+      }
+    }
+
+    // Sort options
+    const allowedSortFields = ["batchNumber", "completedDate", "createdAt", "plannedQuantity", "receivedQuantity", "soldQuantity", "discardedQuantity"];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : "batchNumber";
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortObj = { [sortField]: sortDirection };
+
     const [data, total] = await Promise.all([
       ProductBatchHistoryModel.find(query)
-        .sort({ batchNumber: -1 }) // Lô mới nhất trước
+        .sort(sortObj)
         .skip(skip)
         .limit(limitNum)
         .lean(),
@@ -336,13 +360,13 @@ const getProductBatchHistory = async (productId, filters = {}) => {
 };
 
 /**
- * Lấy danh sách sản phẩm cần reset (chờ admin xác nhận)
- * @param {Object} filters - { page, limit, resetReason }
+ * Lấy danh sách sản phẩm cần reset (chờ admin xác nhận) - có search, sort, filter, pagination
+ * @param {Object} filters - { page, limit, search, resetReason, sortBy, sortOrder }
  * @returns {Promise<Object>} { status, message, data, pagination }
  */
 const getPendingResetProducts = async (filters = {}) => {
   try {
-    const { page = 1, limit = 20, resetReason } = filters;
+    const { page = 1, limit = 20, search = "", resetReason, sortBy = "updatedAt", sortOrder = "desc" } = filters;
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
@@ -351,15 +375,30 @@ const getPendingResetProducts = async (filters = {}) => {
       pendingBatchReset: true,
     };
 
+    // Filter theo resetReason
     if (resetReason && ["SOLD_OUT", "EXPIRED"].includes(resetReason)) {
       query.resetReason = resetReason;
     }
+
+    // Search theo tên sản phẩm hoặc brand
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { brand: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Sort options
+    const allowedSortFields = ["name", "brand", "batchNumber", "updatedAt", "createdAt", "onHandQuantity", "receivedQuantity"];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : "updatedAt";
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortObj = { [sortField]: sortDirection };
 
     const [data, total] = await Promise.all([
       ProductModel.find(query)
         .populate("category", "name status")
         .select("name brand plannedQuantity receivedQuantity onHandQuantity batchNumber warehouseEntryDate warehouseEntryDateStr expiryDate expiryDateStr resetReason createdAt updatedAt")
-        .sort({ updatedAt: -1 }) // Mới nhất trước
+        .sort(sortObj)
         .skip(skip)
         .limit(limitNum)
         .lean(),
