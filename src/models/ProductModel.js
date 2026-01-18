@@ -139,20 +139,7 @@ const productSchema = new mongoose.Schema(
       match: [/^\d{4}-\d{2}-\d{2}$/, "warehouseEntryDateStr phải có format YYYY-MM-DD"],
     },
 
-    // Số ngày hạn sử dụng (nhân viên kho nhập khi nhập hàng)
-    shelfLifeDays: {
-      type: Number,
-      default: null,
-      min: [1, "Số ngày hạn sử dụng phải lớn hơn 0"],
-      validate: {
-        validator: function (v) {
-          return v === null || Number.isInteger(v);
-        },
-        message: "shelfLifeDays phải là số nguyên",
-      },
-    },
-
-    // Ngày hết hạn (tính từ warehouseEntryDate + shelfLifeDays) - Date object
+    // Ngày hết hạn (nhân viên kho nhập khi nhập hàng) - Date object
     expiryDate: {
       type: Date,
       default: null,
@@ -163,6 +150,20 @@ const productSchema = new mongoose.Schema(
       type: String,
       default: null,
       match: [/^\d{4}-\d{2}-\d{2}$/, "expiryDateStr phải có format YYYY-MM-DD"],
+    },
+
+    // ✅ Đánh dấu sản phẩm cần reset (chờ admin xác nhận)
+    pendingBatchReset: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    // ✅ Lý do cần reset: "SOLD_OUT" | "EXPIRED"
+    resetReason: {
+      type: String,
+      enum: ["SOLD_OUT", "EXPIRED"],
+      default: null,
     },
   },
   { timestamps: true }
@@ -176,16 +177,6 @@ productSchema.virtual("availableQuantity").get(function () {
   return Math.max(0, (this.onHandQuantity || 0) - (this.reservedQuantity || 0));
 });
 
-// Method: Tính lại expiryDate từ warehouseEntryDate + shelfLifeDays
-productSchema.methods.calculateExpiryDate = function () {
-  if (this.warehouseEntryDate && this.shelfLifeDays) {
-    const expiry = new Date(this.warehouseEntryDate);
-    expiry.setDate(expiry.getDate() + this.shelfLifeDays);
-    this.expiryDate = expiry;
-  } else {
-    this.expiryDate = null;
-  }
-};
 
 // Tự cập nhật trạng thái khi lưu - Chuẩn hóa logic
 productSchema.pre("save", function (next) {

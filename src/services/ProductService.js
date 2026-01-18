@@ -311,7 +311,7 @@ const updateProductExpiryDate = async (id, payload = {}) => {
       return { status: "ERR", message: "expiryDate không hợp lệ" };
     }
 
-    // ✅ Công thức: shelfLifeDays = (expiryDate - warehouseEntryDate) theo số ngày (không tính giờ)
+    // ✅ Validate: expiryDate phải sau warehouseEntryDate
     const warehouseEntryDate = new Date(product.warehouseEntryDate);
     warehouseEntryDate.setHours(0, 0, 0, 0);
     
@@ -324,10 +324,9 @@ const updateProductExpiryDate = async (id, payload = {}) => {
       };
     }
 
-    // ✅ Cập nhật expiryDate, expiryDateStr và shelfLifeDays
+    // ✅ Cập nhật expiryDate và expiryDateStr
     product.expiryDate = newExpiryDate;
     product.expiryDateStr = formatDateVN(newExpiryDate);
-    product.shelfLifeDays = diffDays;
 
     await product.save();
 

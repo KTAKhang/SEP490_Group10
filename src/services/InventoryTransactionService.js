@@ -2,7 +2,6 @@ const mongoose = require("mongoose");
 const InventoryTransactionModel = require("../models/InventoryTransactionModel");
 const ProductModel = require("../models/ProductModel");
 const { getTodayInVietnam, formatDateVN, compareDates, calculateDaysBetween } = require("../utils/dateVN");
-const { autoResetSoldOutProduct } = require("./ProductBatchService");
 
 // Build receivingStatus expression based on updated fields
 const receivingStatusExpr = () => ({
@@ -28,11 +27,11 @@ const stockStatusExpr = () => ({
  * - receivedQuantity += x
  * - onHandQuantity += x
  * - Nếu là lần nhập đầu tiên (receivedQuantity = 0), tự động set warehouseEntryDate = ngày hiện tại
- * - Nhận expiryDate từ payload (date picker) hoặc shelfLifeDays (số ngày)
+ * - Nhận expiryDate từ payload (date picker)
  * - Validate: expiryDate >= ngày hiện tại + 1 ngày
  */
 const createReceipt = async (userId, payload = {}) => {
-  const { productId, quantity, expiryDate, shelfLifeDays, note = "", referenceType = "", referenceId = null } = payload;
+  const { productId, quantity, expiryDate, note = "", referenceType = "", referenceId = null } = payload;
 
   if (!mongoose.isValidObjectId(productId)) {
     return { status: "ERR", message: "productId không hợp lệ" };
@@ -46,11 +45,9 @@ const createReceipt = async (userId, payload = {}) => {
   // ✅ Lấy ngày hiện tại theo timezone Asia/Ho_Chi_Minh (date-only)
   const today = getTodayInVietnam();
 
-  // Validate expiryDate hoặc shelfLifeDays
+  // Validate expiryDate
   let finalExpiryDate = null;
-  let shelfLife = null;
 
-  // Ưu tiên expiryDate từ date picker
   if (expiryDate !== undefined && expiryDate !== null) {
     try {
       finalExpiryDate = new Date(expiryDate);
@@ -75,13 +72,6 @@ const createReceipt = async (userId, payload = {}) => {
       }
     } catch (err) {
       return { status: "ERR", message: "expiryDate không hợp lệ" };
-    }
-  } 
-  // Nếu không có expiryDate, dùng shelfLifeDays (backward compatible)
-  else if (shelfLifeDays !== undefined && shelfLifeDays !== null) {
-    shelfLife = Number(shelfLifeDays);
-    if (!Number.isFinite(shelfLife) || shelfLife <= 0 || !Number.isInteger(shelfLife)) {
-      return { status: "ERR", message: "shelfLifeDays phải là số nguyên > 0" };
     }
   }
 
@@ -112,15 +102,15 @@ const createReceipt = async (userId, payload = {}) => {
 
       // ✅ Ràng buộc: Ở lần nhập kho đầu tiên, bắt buộc phải setting hạn sử dụng
       if (isFirstReceipt) {
-        if (!finalExpiryDate && shelfLife === null) {
-          throw new Error("Lần nhập kho đầu tiên bắt buộc phải thiết lập hạn sử dụng (expiryDate hoặc shelfLifeDays)");
+        if (!finalExpiryDate) {
+          throw new Error("Lần nhập kho đầu tiên bắt buộc phải thiết lập hạn sử dụng (expiryDate)");
         }
       }
 
       // ✅ Validate: Nếu đã có expiryDate (Date hoặc Str) mà payload gửi expiryDate mới → trả lỗi
       // Check bằng cả Date + Str để khỏi lọt data cũ
       const hasExpiry = !!(currentProduct.expiryDate || currentProduct.expiryDateStr);
-      if (hasExpiry && (finalExpiryDate !== null || shelfLife !== null)) {
+      if (hasExpiry && finalExpiryDate !== null) {
         throw new Error("Hạn sử dụng đã được thiết lập và không thể thay đổi. Không thể đặt lại hạn sử dụng.");
       }
 
@@ -147,10 +137,9 @@ const createReceipt = async (userId, payload = {}) => {
       // ✅ Logic mới: Cho phép nhập nhiều lần trong ngày dù đã set expiryDate
       // (Chỉ chặn khi qua ngày khác, không chặn khi đã set expiryDate)
 
-      // ✅ Tính toán expiryDate và shelfLifeDays trước (nếu có)
+      // ✅ Tính toán expiryDate trước (nếu có)
       let expiryDateToSet = null;
       let expiryDateStrToSet = null;
-      let shelfLifeDaysToSet = null;
       const existingEntryDate = currentProduct.warehouseEntryDate 
         ? new Date(currentProduct.warehouseEntryDate) 
         : warehouseEntryDate;
@@ -163,14 +152,6 @@ const createReceipt = async (userId, payload = {}) => {
         }
         expiryDateToSet = finalExpiryDate;
         expiryDateStrToSet = formatDateVN(finalExpiryDate);
-        shelfLifeDaysToSet = diffDays;
-      } else if (shelfLife !== null) {
-        const calculatedExpiryDate = new Date(existingEntryDate);
-        calculatedExpiryDate.setDate(calculatedExpiryDate.getDate() + shelfLife);
-        calculatedExpiryDate.setHours(0, 0, 0, 0);
-        expiryDateToSet = calculatedExpiryDate;
-        expiryDateStrToSet = formatDateVN(calculatedExpiryDate);
-        shelfLifeDaysToSet = shelfLife;
       }
 
       // ✅ Atomic update: gộp logic set warehouseEntryDate và expiryDate vào pipeline để tránh race condition
@@ -192,7 +173,6 @@ const createReceipt = async (userId, payload = {}) => {
           $set: {
             expiryDate: { $ifNull: ["$expiryDate", expiryDateToSet] },
             expiryDateStr: { $ifNull: ["$expiryDateStr", expiryDateStrToSet] },
-            shelfLifeDays: { $ifNull: ["$shelfLifeDays", shelfLifeDaysToSet] },
           },
         });
       }
@@ -347,18 +327,20 @@ const createIssue = async (userId, payload = {}) => {
       txDoc = created[0];
     });
 
-    // ✅ Sau khi commit transaction, check và auto-reset nếu bán hết
+    // ✅ Sau khi commit transaction, check và đánh dấu cần reset nếu bán hết
     // (Không nên làm trong transaction vì có thể gây deadlock)
-    let resetResult = null;
+    // Chỉ đánh dấu, không tự động reset (cần admin xác nhận)
+    let markResult = null;
     if (updatedProduct.onHandQuantity === 0) {
       try {
-        resetResult = await autoResetSoldOutProduct(productId);
-        if (resetResult.status === "OK") {
-          console.log(`[${new Date().toISOString()}] Auto-reset product ${productId} after sold out`);
+        const { markSoldOutProductForReset } = require("./ProductBatchService");
+        markResult = await markSoldOutProductForReset(productId);
+        if (markResult.status === "OK") {
+          console.log(`[${new Date().toISOString()}] Marked product ${productId} for reset (sold out)`);
         }
       } catch (error) {
         // Log error nhưng không fail transaction ISSUE
-        console.error(`[${new Date().toISOString()}] Error auto-resetting product ${productId}:`, error);
+        console.error(`[${new Date().toISOString()}] Error marking product ${productId} for reset:`, error);
       }
     }
 
@@ -373,7 +355,7 @@ const createIssue = async (userId, payload = {}) => {
       data: {
         transaction: populatedTx,
         product: updatedProduct,
-        resetBatch: resetResult?.data || null, // Thông tin reset nếu có
+        markedForReset: markResult?.data || null, // Thông tin đánh dấu reset nếu có
       },
     };
   } catch (error) {
@@ -592,7 +574,7 @@ const getReceiptById = async (transactionId) => {
     })
       .populate({
         path: "product",
-        select: "name price category brand images description warehouseEntryDate warehouseEntryDateStr expiryDate expiryDateStr shelfLifeDays plannedQuantity receivedQuantity onHandQuantity reservedQuantity receivingStatus stockStatus status",
+        select: "name price category brand images description warehouseEntryDate warehouseEntryDateStr expiryDate expiryDateStr plannedQuantity receivedQuantity onHandQuantity reservedQuantity receivingStatus stockStatus status",
         populate: {
           path: "category",
           select: "name status",
