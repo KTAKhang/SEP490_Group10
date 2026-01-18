@@ -5,6 +5,7 @@ const bodyParser = require("body-parser");
 const routes = require("./routes");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
+const { startProductBatchJob } = require("./jobs/productBatchJob");
 
 dotenv.config();
 
@@ -51,4 +52,7 @@ mongoose
 // ===== Start Server =====
 app.listen(port, "0.0.0.0", () => {
   console.log(`🚀 Auth Service running on http://localhost:${port}`);
+  
+  // ✅ Start scheduled jobs
+  startProductBatchJob();
 });
