@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const InventoryTransactionModel = require("../models/InventoryTransactionModel");
 const ProductModel = require("../models/ProductModel");
 const { getTodayInVietnam, formatDateVN, compareDates, calculateDaysBetween } = require("../utils/dateVN");
+const { autoResetSoldOutProduct } = require("./ProductBatchService");
 
 // Build receivingStatus expression based on updated fields
 const receivingStatusExpr = () => ({
@@ -104,6 +105,16 @@ const createReceipt = async (userId, payload = {}) => {
       const currentProduct = await ProductModel.findById(productId).session(session);
       if (!currentProduct) {
         throw new Error("Sản phẩm không tồn tại");
+      }
+
+      // ✅ Validate: Kiểm tra xem đây có phải lần nhập kho đầu tiên không
+      const isFirstReceipt = !currentProduct.warehouseEntryDate && !currentProduct.warehouseEntryDateStr;
+
+      // ✅ Ràng buộc: Ở lần nhập kho đầu tiên, bắt buộc phải setting hạn sử dụng
+      if (isFirstReceipt) {
+        if (!finalExpiryDate && shelfLife === null) {
+          throw new Error("Lần nhập kho đầu tiên bắt buộc phải thiết lập hạn sử dụng (expiryDate hoặc shelfLifeDays)");
+        }
       }
 
       // ✅ Validate: Nếu đã có expiryDate (Date hoặc Str) mà payload gửi expiryDate mới → trả lỗi
@@ -246,7 +257,379 @@ const createReceipt = async (userId, payload = {}) => {
   }
 };
 
+/**
+ * Xuất kho (ISSUE) - atomic & chống lệch khi concurrent
+ * Rules:
+ * - onHandQuantity - y >= 0 (chặn âm kho)
+ * - onHandQuantity -= y
+ * - Tự động reset product nếu bán hết (onHandQuantity = 0)
+ */
+const createIssue = async (userId, payload = {}) => {
+  const { productId, quantity, note = "", referenceType = "", referenceId = null } = payload;
+
+  if (!mongoose.isValidObjectId(productId)) {
+    return { status: "ERR", message: "productId không hợp lệ" };
+  }
+
+  const qty = Number(quantity);
+  if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
+    return { status: "ERR", message: "Số lượng xuất kho phải là số nguyên lớn hơn 0" };
+  }
+
+  // OPTIONAL: referenceId nếu có thì phải là ObjectId
+  const refIdValue = referenceId
+    ? mongoose.isValidObjectId(referenceId)
+      ? new mongoose.Types.ObjectId(referenceId)
+      : null
+    : null;
+  if (referenceId && !refIdValue) {
+    return { status: "ERR", message: "referenceId không hợp lệ" };
+  }
+
+  const session = await mongoose.startSession();
+  try {
+    let updatedProduct = null;
+    let txDoc = null;
+
+    await session.withTransaction(async () => {
+      // Lấy product hiện tại để check onHandQuantity
+      const currentProduct = await ProductModel.findById(productId).session(session);
+      if (!currentProduct) {
+        throw new Error("Sản phẩm không tồn tại");
+      }
+
+      // ✅ Validate: onHandQuantity - qty >= 0 (chặn âm kho)
+      if ((currentProduct.onHandQuantity || 0) < qty) {
+        throw new Error(`Không đủ hàng trong kho. Tồn kho hiện tại: ${currentProduct.onHandQuantity || 0}`);
+      }
+
+      // ✅ Atomic update: onHandQuantity -= qty
+      const updatePipeline = [
+        {
+          $set: {
+            onHandQuantity: { $subtract: ["$onHandQuantity", qty] },
+            stockStatus: stockStatusExpr(),
+          },
+        },
+      ];
+
+      // Atomic condition: onHandQuantity - qty >= 0
+      updatedProduct = await ProductModel.findOneAndUpdate(
+        {
+          _id: new mongoose.Types.ObjectId(productId),
+          $expr: {
+            $gte: [{ $subtract: ["$onHandQuantity", qty] }, 0],
+          },
+        },
+        updatePipeline,
+        { new: true, session, runValidators: true }
+      );
+
+      if (!updatedProduct) {
+        throw new Error("Không đủ hàng trong kho hoặc đã bị thay đổi bởi transaction khác");
+      }
+
+      // Tạo ISSUE transaction
+      const created = await InventoryTransactionModel.create(
+        [
+          {
+            product: new mongoose.Types.ObjectId(productId),
+            type: "ISSUE",
+            quantity: qty,
+            createdBy: new mongoose.Types.ObjectId(userId),
+            note: note?.toString?.() ? note.toString() : "",
+            referenceType: referenceType?.toString?.() ? referenceType.toString() : "",
+            referenceId: refIdValue,
+          },
+        ],
+        { session }
+      );
+      txDoc = created[0];
+    });
+
+    // ✅ Sau khi commit transaction, check và auto-reset nếu bán hết
+    // (Không nên làm trong transaction vì có thể gây deadlock)
+    let resetResult = null;
+    if (updatedProduct.onHandQuantity === 0) {
+      try {
+        resetResult = await autoResetSoldOutProduct(productId);
+        if (resetResult.status === "OK") {
+          console.log(`[${new Date().toISOString()}] Auto-reset product ${productId} after sold out`);
+        }
+      } catch (error) {
+        // Log error nhưng không fail transaction ISSUE
+        console.error(`[${new Date().toISOString()}] Error auto-resetting product ${productId}:`, error);
+      }
+    }
+
+    const populatedTx = await InventoryTransactionModel.findById(txDoc._id)
+      .populate("product", "name plannedQuantity receivedQuantity onHandQuantity reservedQuantity receivingStatus stockStatus")
+      .populate("createdBy", "user_name email")
+      .lean();
+
+    return {
+      status: "OK",
+      message: "Xuất kho thành công",
+      data: {
+        transaction: populatedTx,
+        product: updatedProduct,
+        resetBatch: resetResult?.data || null, // Thông tin reset nếu có
+      },
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  } finally {
+    session.endSession();
+  }
+};
+
+/**
+ * Lấy lịch sử nhập hàng (RECEIPT transactions)
+ * @param {Object} filters - { page, limit, productId, createdBy, startDate, endDate, search }
+ * @returns {Promise<Object>} { status, message, data, pagination }
+ */
+const getReceiptHistory = async (filters = {}) => {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      productId,
+      createdBy,
+      startDate,
+      endDate,
+      search = "",
+    } = filters;
+
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const query = {
+      type: "RECEIPT", // Chỉ lấy RECEIPT transactions
+    };
+
+    // Filter theo productId
+    if (productId) {
+      if (!mongoose.isValidObjectId(productId)) {
+        return {
+          status: "ERR",
+          message: "productId không hợp lệ",
+        };
+      }
+      query.product = new mongoose.Types.ObjectId(productId);
+    }
+
+    // Filter theo createdBy (nhân viên nhập hàng)
+    if (createdBy) {
+      if (!mongoose.isValidObjectId(createdBy)) {
+        return {
+          status: "ERR",
+          message: "createdBy không hợp lệ",
+        };
+      }
+      query.createdBy = new mongoose.Types.ObjectId(createdBy);
+    }
+
+    // Filter theo khoảng thời gian
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        query.createdAt.$gte = start;
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
+    }
+
+    // Search theo note (nếu có)
+    if (search) {
+      query.note = { $regex: search, $options: "i" };
+    }
+
+    const [data, total] = await Promise.all([
+      InventoryTransactionModel.find(query)
+        .populate("product", "name price category")
+        .populate("createdBy", "user_name email") // ✅ Thông tin nhân viên nhập hàng
+        .sort({ createdAt: -1 }) // Mới nhất trước
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      InventoryTransactionModel.countDocuments(query),
+    ]);
+
+    return {
+      status: "OK",
+      message: "Lấy lịch sử nhập hàng thành công",
+      data,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
+/**
+ * Lấy lịch sử tất cả transactions (RECEIPT, ISSUE, etc.)
+ * @param {Object} filters - { page, limit, type, productId, createdBy, startDate, endDate }
+ * @returns {Promise<Object>} { status, message, data, pagination }
+ */
+const getTransactionHistory = async (filters = {}) => {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      type, // "RECEIPT" | "ISSUE" | "RESERVE" | "RELEASE" | "ADJUST"
+      productId,
+      createdBy,
+      startDate,
+      endDate,
+    } = filters;
+
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const query = {};
+
+    // Filter theo type
+    if (type) {
+      const allowedTypes = ["RECEIPT", "ISSUE", "RESERVE", "RELEASE", "ADJUST"];
+      if (allowedTypes.includes(type)) {
+        query.type = type;
+      }
+    }
+
+    // Filter theo productId
+    if (productId) {
+      if (!mongoose.isValidObjectId(productId)) {
+        return {
+          status: "ERR",
+          message: "productId không hợp lệ",
+        };
+      }
+      query.product = new mongoose.Types.ObjectId(productId);
+    }
+
+    // Filter theo createdBy
+    if (createdBy) {
+      if (!mongoose.isValidObjectId(createdBy)) {
+        return {
+          status: "ERR",
+          message: "createdBy không hợp lệ",
+        };
+      }
+      query.createdBy = new mongoose.Types.ObjectId(createdBy);
+    }
+
+    // Filter theo khoảng thời gian
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        query.createdAt.$gte = start;
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
+    }
+
+    const [data, total] = await Promise.all([
+      InventoryTransactionModel.find(query)
+        .populate("product", "name price category")
+        .populate("createdBy", "user_name email") // ✅ Thông tin người thao tác
+        .sort({ createdAt: -1 }) // Mới nhất trước
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      InventoryTransactionModel.countDocuments(query),
+    ]);
+
+    return {
+      status: "OK",
+      message: "Lấy lịch sử giao dịch thành công",
+      data,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
+/**
+ * Lấy chi tiết một phiếu nhập hàng (RECEIPT transaction) theo ID
+ * @param {String} transactionId - ID của transaction
+ * @returns {Promise<Object>} { status, message, data }
+ */
+const getReceiptById = async (transactionId) => {
+  try {
+    if (!mongoose.isValidObjectId(transactionId)) {
+      return {
+        status: "ERR",
+        message: "ID transaction không hợp lệ",
+      };
+    }
+
+    const transaction = await InventoryTransactionModel.findOne({
+      _id: new mongoose.Types.ObjectId(transactionId),
+      type: "RECEIPT", // Chỉ lấy RECEIPT transactions
+    })
+      .populate({
+        path: "product",
+        select: "name price category brand images description warehouseEntryDate warehouseEntryDateStr expiryDate expiryDateStr shelfLifeDays plannedQuantity receivedQuantity onHandQuantity reservedQuantity receivingStatus stockStatus status",
+        populate: {
+          path: "category",
+          select: "name status",
+        },
+      })
+      .populate({
+        path: "createdBy",
+        select: "user_name email avatar phone address role_id",
+        populate: {
+          path: "role_id",
+          select: "name",
+        },
+      }) // ✅ Thông tin chi tiết nhân viên nhập hàng
+      .lean();
+
+    if (!transaction) {
+      return {
+        status: "ERR",
+        message: "Không tìm thấy phiếu nhập hàng",
+      };
+    }
+
+    return {
+      status: "OK",
+      message: "Lấy chi tiết phiếu nhập hàng thành công",
+      data: transaction,
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
 module.exports = {
   createReceipt,
+  createIssue,
+  getReceiptHistory,
+  getTransactionHistory,
+  getReceiptById,
 };
 

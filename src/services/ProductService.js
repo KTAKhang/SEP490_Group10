@@ -18,12 +18,31 @@ const createProduct = async (payload = {}) => {
     }
     if (!category) return { status: "ERR", message: "Category là bắt buộc" };
 
+    // ✅ Validate brand: bắt buộc phải có (không cho phép null/empty)
+    if (!brand || !brand.toString().trim()) {
+      return { status: "ERR", message: "Brand là bắt buộc" };
+    }
+
     const categoryDoc = await CategoryModel.findById(category);
     if (!categoryDoc) return { status: "ERR", message: "Category không tồn tại" };
     
     // Kiểm tra category không được ẩn
     if (categoryDoc.status === false) {
       return { status: "ERR", message: "Không thể chọn category đã bị ẩn" };
+    }
+
+    // ✅ Check unique constraint: không cho phép trùng (name + brand)
+    const normalizedName = name.toString().trim();
+    const normalizedBrand = brand.toString().trim();
+    const existingProduct = await ProductModel.findOne({
+      name: normalizedName,
+      brand: normalizedBrand,
+    });
+    if (existingProduct) {
+      return {
+        status: "ERR",
+        message: `Sản phẩm "${normalizedName}" với brand "${normalizedBrand}" đã tồn tại. Vui lòng sử dụng sản phẩm hiện có hoặc chọn brand khác.`,
+      };
     }
 
     // ✅ Validate ảnh: max 10 và length khớp (giống updateProductAdmin)
@@ -48,7 +67,7 @@ const createProduct = async (payload = {}) => {
       category: new mongoose.Types.ObjectId(category),
       images: newImages,
       imagePublicIds: newImagePublicIds,
-      brand: (brand ?? "").toString(),
+      brand: normalizedBrand,
       detail_desc: (detail_desc ?? "").toString(),
       status: status ?? true,
     });

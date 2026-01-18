@@ -108,7 +108,14 @@ const productSchema = new mongoose.Schema(
       },
     },
 
-    brand: { type: String, default: "", trim: true },
+    brand: { type: String, required: true, trim: true }, // ✅ Bắt buộc phải có brand
+
+    // Số lô (tăng dần mỗi lần reset để nhập lô mới)
+    batchNumber: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
 
     detail_desc: {
       type: String,
@@ -160,6 +167,9 @@ const productSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// ✅ Unique constraint: không cho phép trùng (name + brand)
+productSchema.index({ name: 1, brand: 1 }, { unique: true });
 
 // Virtual: available = onHand - reserved
 productSchema.virtual("availableQuantity").get(function () {

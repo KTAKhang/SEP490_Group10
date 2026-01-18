@@ -6,6 +6,7 @@ const ProductRouter = require("./ProductRouter");
 const InventoryRouter = require("./InventoryRouter");
 const PublicProductRouter = require("./PublicProductRouter");
 const PublicCategoryRouter = require("./PublicCategoryRouter");
+const FavoriteRouter = require("./FavoriteRouter");
 
 const routes = (app) => {
     app.use("/auth", AuthRouter);
@@ -19,6 +20,8 @@ const routes = (app) => {
     // Public routes (không cần authentication)
     app.use("/products", PublicProductRouter);
     app.use("/categories", PublicCategoryRouter);
+    // Customer routes (chỉ Customer)
+    app.use("/favorites", FavoriteRouter);
 };
 
 module.exports = routes;

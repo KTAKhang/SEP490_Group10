@@ -1,5 +1,6 @@
 const express = require("express");
 const ProductController = require("../controller/ProductController");
+const ProductBatchController = require("../controller/ProductBatchController");
 const { inventoryAdminMiddleware, inventoryAdminOrWarehouseMiddleware } = require("../middleware/inventoryMiddleware");
 const { uploadProductImages } = require("../middleware/uploadMiddleware");
 
@@ -24,5 +25,11 @@ ProductRouter.patch("/:id/expiry-date", inventoryAdminOrWarehouseMiddleware, Pro
 ProductRouter.put("/:id", inventoryAdminMiddleware, uploadProductImages, ProductController.updateProductAdmin);
 ProductRouter.delete("/:id", inventoryAdminMiddleware, ProductController.deleteProduct);
 
+// Admin: Batch management
+ProductRouter.patch("/:id/reset-batch", inventoryAdminMiddleware, ProductBatchController.resetProductBatch);
+ProductRouter.get("/:id/batch-history", inventoryAdminOrWarehouseMiddleware, ProductBatchController.getProductBatchHistory);
+ProductRouter.post("/batch/auto-reset-expired", inventoryAdminMiddleware, ProductBatchController.manualAutoResetExpired);
+
 module.exports = ProductRouter;
 
+//
