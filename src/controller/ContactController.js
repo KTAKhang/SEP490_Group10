@@ -163,6 +163,57 @@ const getReplies = async (req, res) => {
 };
 
 /**
+ * Cập nhật Reply (chỉ Admin, chỉ reply của chính mình)
+ * PUT /contacts/:id/replies/:replyId
+ */
+const updateReply = async (req, res) => {
+    try {
+        const { id, replyId } = req.params;
+        const userId = req.user._id;
+        const isAdmin = req.user.isAdmin;
+        const { message } = req.body;
+
+        const response = await ContactService.updateReply(id, replyId, userId, isAdmin, { message });
+
+        if (response.status === "ERR") {
+            return res.status(400).json(response);
+        }
+
+        return res.status(200).json(response);
+    } catch (error) {
+        return res.status(500).json({
+            status: "ERR",
+            message: error.message,
+        });
+    }
+};
+
+/**
+ * Xóa Reply (chỉ Admin, chỉ reply của chính mình)
+ * DELETE /contacts/:id/replies/:replyId
+ */
+const deleteReply = async (req, res) => {
+    try {
+        const { id, replyId } = req.params;
+        const userId = req.user._id;
+        const isAdmin = req.user.isAdmin;
+
+        const response = await ContactService.deleteReply(id, replyId, userId, isAdmin);
+
+        if (response.status === "ERR") {
+            return res.status(400).json(response);
+        }
+
+        return res.status(200).json(response);
+    } catch (error) {
+        return res.status(500).json({
+            status: "ERR",
+            message: error.message,
+        });
+    }
+};
+
+/**
  * Upload Attachment cho Contact
  * POST /contacts/:id/attachments
  */
@@ -246,6 +297,8 @@ module.exports = {
     updateContactStatus,
     createReply,
     getReplies,
+    updateReply,
+    deleteReply,
     uploadAttachment,
     getAttachments,
     deleteAttachment,
