@@ -1,7 +1,6 @@
 const express = require("express");
 const SupplierRouter = express.Router();
 const SupplierController = require("../controller/SupplierController");
-const { qcStaffMiddleware } = require("../middleware/qcStaffMiddleware");
 const { authAdminMiddleware } = require("../middleware/authMiddleware");
 
 // Import các router đã tách
@@ -35,16 +34,16 @@ SupplierRouter.use("/performance", SupplierPerformanceRouter);
 // ============================================
 // 5. General supplier routes với sub-routes (TRƯỚC /:id)
 // ============================================
-SupplierRouter.put("/:id/cooperation-status", qcStaffMiddleware, SupplierController.updateCooperationStatus);
+SupplierRouter.put("/:id/cooperation-status", authAdminMiddleware, SupplierController.updateCooperationStatus);
 // ✅ Activity Log đã được tách ra router riêng cho Admin (xem SupplierActivityLogRouter)
 
 // ============================================
 // 6. General supplier routes (SAU tất cả routes cụ thể)
 // ============================================
-SupplierRouter.post("/", qcStaffMiddleware, SupplierController.createSupplier);
-SupplierRouter.get("/", qcStaffMiddleware, SupplierController.getSuppliers);
-SupplierRouter.put("/:id", qcStaffMiddleware, SupplierController.updateSupplier);
-SupplierRouter.delete("/:id", qcStaffMiddleware, SupplierController.deleteSupplier);
-SupplierRouter.get("/:id", qcStaffMiddleware, SupplierController.getSupplierById); // ← Dynamic route CUỐI CÙNG
+SupplierRouter.post("/", authAdminMiddleware, SupplierController.createSupplier);
+SupplierRouter.get("/", authAdminMiddleware, SupplierController.getSuppliers);
+SupplierRouter.put("/:id", authAdminMiddleware, SupplierController.updateSupplier);
+SupplierRouter.delete("/:id", authAdminMiddleware, SupplierController.deleteSupplier);
+SupplierRouter.get("/:id", authAdminMiddleware, SupplierController.getSupplierById); // ← Dynamic route CUỐI CÙNG
 
 module.exports = SupplierRouter;

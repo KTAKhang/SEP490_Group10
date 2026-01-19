@@ -16,15 +16,13 @@ const harvestBatchSchema = new mongoose.Schema(
       index: true,
     },
 
-    // ✅ BR-SUP-11: Harvest Batch Code (tự động sinh, unique)
-    // Note: required: false vì validation chạy trước pre-save hook
-    // Pre-save hook sẽ đảm bảo luôn có giá trị
+    // ✅ BR-SUP-11: Harvest Batch Code (tự động sinh, unique, required)
     batchCode: {
       type: String,
       trim: true,
       uppercase: true,
       unique: true,
-      required: false, // ✅ Đổi từ true sang false, vì pre-save hook sẽ tự generate
+      required: true, // ✅ Đảm bảo luôn có giá trị
       maxlength: [30, "Mã lô thu hoạch không được vượt quá 30 ký tự"],
     },
 
@@ -156,11 +154,6 @@ harvestBatchSchema.pre("save", function (next) {
     const timestamp = Date.now().toString(36).toUpperCase();
     const random = Math.random().toString(36).substring(2, 6).toUpperCase();
     this.batchCode = `HB-${timestamp}-${random}`;
-  }
-
-  // ✅ Validation: Đảm bảo batchCode luôn có giá trị sau khi generate
-  if (!this.batchCode || !this.batchCode.trim()) {
-    return next(new Error("Không thể tạo batchCode tự động. Vui lòng thử lại."));
   }
 
   // ✅ BR-SUP-11: Không cho chỉnh sửa batchCode sau khi tạo
