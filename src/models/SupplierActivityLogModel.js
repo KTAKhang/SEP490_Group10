@@ -1,7 +1,37 @@
 const mongoose = require("mongoose");
 
+/**
+ * Supplier Activity Log
+ * Ghi lại toàn bộ hoạt động liên quan tới Supplier
+ * Dùng cho audit, timeline, báo cáo
+ */
+
+const ACTIONS = [
+  "CREATED",
+  "UPDATED",
+  "HARVEST_BATCH_CREATED",
+  "HARVEST_BATCH_UPDATED",
+  "HARVEST_BATCH_DELETED",
+  "QUALITY_VERIFIED",
+  "PURCHASE_COST_UPDATED",
+  "PERFORMANCE_EVALUATED",
+  "COOPERATION_STATUS_CHANGED",
+  "STATUS_CHANGED",
+];
+
+const RELATED_ENTITIES = [
+  "SUPPLIER",
+  "PRODUCT",
+  "HARVEST_BATCH",
+  "QUALITY_VERIFICATION",
+  "PERFORMANCE",
+];
+
 const supplierActivityLogSchema = new mongoose.Schema(
   {
+    // ========================
+    // Supplier liên quan
+    // ========================
     supplier: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "suppliers",
@@ -9,22 +39,19 @@ const supplierActivityLogSchema = new mongoose.Schema(
       index: true,
     },
 
+    // ========================
+    // Hành động
+    // ========================
     action: {
       type: String,
-      enum: [
-        "CREATED",
-        "UPDATED",
-        "HARVEST_BATCH_CREATED",
-        "QUALITY_VERIFIED",
-        "PURCHASE_COST_UPDATED",
-        "PERFORMANCE_EVALUATED",
-        "COOPERATION_STATUS_CHANGED",
-        "STATUS_CHANGED",
-      ],
+      enum: ACTIONS,
       required: [true, "Hành động là bắt buộc"],
       index: true,
     },
 
+    // ========================
+    // Mô tả
+    // ========================
     description: {
       type: String,
       trim: true,
@@ -32,10 +59,12 @@ const supplierActivityLogSchema = new mongoose.Schema(
       default: "",
     },
 
-    // Dữ liệu liên quan (có thể là productId, batchId, etc.)
+    // ========================
+    // Thực thể liên quan
+    // ========================
     relatedEntity: {
       type: String,
-      enum: ["PRODUCT", "HARVEST_BATCH", "QUALITY_VERIFICATION", "PERFORMANCE", "SUPPLIER"],
+      enum: RELATED_ENTITIES,
       default: "SUPPLIER",
     },
 
@@ -44,27 +73,42 @@ const supplierActivityLogSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Dữ liệu thay đổi (old value -> new value)
+    // ========================
+    // Dữ liệu thay đổi
+    // ========================
     changes: {
       type: Map,
       of: mongoose.Schema.Types.Mixed,
       default: new Map(),
     },
 
+    // ========================
     // Người thực hiện
+    // ========================
     performedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "users",
-      required: true,
+      required: [true, "Người thực hiện là bắt buộc"],
+      index: true,
     },
   },
   { timestamps: true }
 );
 
-// Index
+// ========================
+// INDEX TỐI ƯU QUERY
+// ========================
 supplierActivityLogSchema.index({ supplier: 1, createdAt: -1 });
 supplierActivityLogSchema.index({ action: 1, createdAt: -1 });
 supplierActivityLogSchema.index({ performedBy: 1, createdAt: -1 });
+supplierActivityLogSchema.index({ relatedEntity: 1, relatedEntityId: 1 });
 
-const SupplierActivityLogModel = mongoose.model("supplier_activity_logs", supplierActivityLogSchema);
+// ========================
+// EXPORT
+// ========================
+const SupplierActivityLogModel = mongoose.model(
+  "supplier_activity_logs",
+  supplierActivityLogSchema
+);
+
 module.exports = SupplierActivityLogModel;

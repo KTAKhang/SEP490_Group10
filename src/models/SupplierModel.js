@@ -1,7 +1,16 @@
 const mongoose = require("mongoose");
 
+/**
+ * Supplier Schema
+ * - Hỗ trợ nhiều sản phẩm cho 1 supplier
+ * - Phù hợp hệ thống nông sản / truy xuất nguồn gốc
+ */
+
 const supplierSchema = new mongoose.Schema(
   {
+    // ========================
+    // Thông tin cơ bản
+    // ========================
     name: {
       type: String,
       required: [true, "Tên nhà cung cấp là bắt buộc"],
@@ -10,7 +19,7 @@ const supplierSchema = new mongoose.Schema(
       maxlength: [100, "Tên nhà cung cấp không được vượt quá 100 ký tự"],
       index: true,
     },
-    
+
     type: {
       type: String,
       enum: ["FARM", "COOPERATIVE", "BUSINESS"],
@@ -18,35 +27,36 @@ const supplierSchema = new mongoose.Schema(
       index: true,
     },
 
-    // ✅ Mã nhà cung cấp (tự động sinh hoặc nhập thủ công)
+    // Mã nhà cung cấp (có thể nhập hoặc sinh tự động)
     code: {
       type: String,
       trim: true,
       uppercase: true,
       maxlength: [20, "Mã nhà cung cấp không được vượt quá 20 ký tự"],
-      // ✅ sparse và unique được định nghĩa trong index ở dưới
     },
 
+    // ========================
     // Thông tin liên hệ
+    // ========================
     contactPerson: {
       type: String,
       trim: true,
       maxlength: [50, "Tên người liên hệ không được vượt quá 50 ký tự"],
     },
-    
+
     phone: {
       type: String,
       trim: true,
       match: [/^[0-9+\-\s()]+$/, "Số điện thoại không hợp lệ"],
     },
-    
+
     email: {
       type: String,
       trim: true,
       lowercase: true,
       match: [/\S+@\S+\.\S+/, "Định dạng email không hợp lệ"],
     },
-    
+
     address: {
       type: String,
       trim: true,
@@ -61,18 +71,29 @@ const supplierSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Giá mua từ nhà cung cấp (có thể khác nhau theo sản phẩm)
-    // Lưu trữ dưới dạng object: { productId: price }
-    purchaseCosts: {
-      type: Map,
-      of: {
-        type: Number,
-        min: 0,
+    //  DANH SÁCH SẢN PHẨM CUNG CẤP (QUAN TRỌNG)
+    suppliedProducts: [
+      {
+        product: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "products",
+          required: true,
+        },
+        purchasePrice: {
+          type: Number,
+          min: 0,
+          required: true,
+        },
+        isActive: {
+          type: Boolean,
+          default: true,
+        },
       },
-      default: new Map(),
-    },
+    ],
 
-    // Đánh giá hiệu suất (tính toán từ các metrics)
+    // ========================
+    // Thống kê & đánh giá
+    // ========================
     performanceScore: {
       type: Number,
       min: 0,
@@ -80,7 +101,6 @@ const supplierSchema = new mongoose.Schema(
       default: 0,
     },
 
-    // Thống kê
     totalBatches: {
       type: Number,
       default: 0,
@@ -93,7 +113,7 @@ const supplierSchema = new mongoose.Schema(
       min: 0,
     },
 
-    // Ghi chú
+    // Ghi chú & trạng thái
     notes: {
       type: String,
       trim: true,
@@ -101,21 +121,19 @@ const supplierSchema = new mongoose.Schema(
       default: "",
     },
 
-    // Trạng thái (active/inactive)
     status: {
       type: Boolean,
       default: true,
       index: true,
     },
 
-    // Người tạo (qc_staff)
+    // Audit
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "users",
       required: true,
     },
 
-    // Người cập nhật cuối cùng
     updatedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "users",
@@ -124,21 +142,38 @@ const supplierSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// ✅ Unique constraints theo BR-SUP-03: Tên + số điện thoại, hoặc Mã nhà cung cấp
-supplierSchema.index({ name: 1, phone: 1 }, { unique: true, sparse: true }); // sparse: chỉ unique khi phone có giá trị
-supplierSchema.index({ code: 1 }, { unique: true, sparse: true }); // sparse: chỉ unique khi code có giá trị
 
-// Index cho tìm kiếm
+// INDEX & CONSTRAINTS
+
+// Không cho trùng tên + số điện thoại (nếu có phone)
+supplierSchema.index(
+  { name: 1, phone: 1 },
+  { unique: true, sparse: true }
+);
+
+// Không cho trùng mã nhà cung cấp (nếu có code)
+supplierSchema.index(
+  { code: 1 },
+  { unique: true, sparse: true }
+);
+
+// Text search
 supplierSchema.index({ name: "text" });
-supplierSchema.index({ cooperationStatus: 1, status: 1 });
 
-// ✅ Pre-save validation: BR-SUP-02 - Phải có phone hoặc email (ít nhất 1)
+
+// VALIDATION
+
+
+// Phải có ít nhất phone hoặc email
 supplierSchema.pre("save", function (next) {
   if (!this.phone && !this.email) {
     return next(new Error("Phải có ít nhất số điện thoại hoặc email"));
   }
   next();
 });
+
+
+// EXPORT
 
 const SupplierModel = mongoose.model("suppliers", supplierSchema);
 module.exports = SupplierModel;
