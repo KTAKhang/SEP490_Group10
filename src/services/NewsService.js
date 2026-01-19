@@ -5,20 +5,59 @@ const UserModel = require("../models/UserModel");
 const cloudinary = require("../config/cloudinaryConfig");
 const { sanitizeHTMLWithImageValidation, validateHTMLImages, validateHTMLSecurity } = require("../utils/htmlSanitizer");
 
-// Helper: Strip HTML tags
+/**
+ * Helper: Strip HTML tags từ chuỗi HTML
+ * 
+ * Thuật toán:
+ * 1. Kiểm tra nếu html rỗng/null → trả về chuỗi rỗng
+ * 2. Sử dụng regex /<[^>]*>/g để tìm và xóa tất cả HTML tags
+ *    - <[^>]*> : Match bất kỳ tag nào từ < đến >
+ *    - g flag : Global, xóa tất cả tags trong chuỗi
+ * 3. Trim() để loại bỏ khoảng trắng đầu/cuối
+ * 
+ * @param {string} html - Chuỗi HTML cần strip tags
+ * @returns {string} - Chuỗi text thuần (không có HTML tags)
+ */
 const stripHTML = (html) => {
   if (!html) return "";
   return html.replace(/<[^>]*>/g, "").trim();
 };
 
-// Helper: Validate thumbnail URL format
+/**
+ * Helper: Validate thumbnail URL format
+ * 
+ * Thuật toán:
+ * 1. Kiểm tra nếu url rỗng/null → trả về false
+ * 2. Chuyển url về lowercase để so sánh không phân biệt hoa thường
+ * 3. Sử dụng regex để kiểm tra extension:
+ *    - \.(jpg|jpeg|png|webp) : Phải có extension là jpg, jpeg, png hoặc webp
+ *    - (\?|$) : Sau extension phải là query string (?) hoặc kết thúc chuỗi ($)
+ *    - i flag : Case insensitive
+ * 
+ * @param {string} url - URL cần validate
+ * @returns {boolean} - true nếu URL hợp lệ (có extension ảnh)
+ */
 const isValidImageUrl = (url) => {
   if (!url) return false;
   const lowerUrl = url.toLowerCase();
   return lowerUrl.match(/\.(jpg|jpeg|png|webp)(\?|$)/i);
 };
 
-// BR-NEWS-01: Validate publishing requirements
+/**
+ * BR-NEWS-01: Validate publishing requirements
+ * 
+ * Thuật toán kiểm tra điều kiện để xuất bản bài viết:
+ * 1. Kiểm tra title: Phải có và không rỗng sau khi trim
+ * 2. Kiểm tra content: Phải có và không rỗng sau khi trim
+ * 3. Kiểm tra thumbnail_url: Phải có và không rỗng sau khi trim
+ * 4. Kiểm tra format thumbnail: Phải là jpg, png hoặc webp (dùng isValidImageUrl)
+ * 
+ * Nếu bất kỳ điều kiện nào không thỏa → trả về { valid: false, message: "..." }
+ * Nếu tất cả đều hợp lệ → trả về { valid: true }
+ * 
+ * @param {object} news - Object chứa title, content, thumbnail_url
+ * @returns {object} - { valid: boolean, message?: string }
+ */
 const validatePublishingRequirements = (news) => {
   if (!news.title || !news.title.trim()) {
     return { valid: false, message: "Tiêu đề là bắt buộc để xuất bản" };
@@ -35,7 +74,21 @@ const validatePublishingRequirements = (news) => {
   return { valid: true };
 };
 
-// BR-NEWS-03: Manage featured limit (max 5)
+/**
+ * BR-NEWS-03: Manage featured limit (max 5)
+ * 
+ * Thuật toán quản lý giới hạn bài viết nổi bật (tối đa 5 bài):
+ * 1. Đếm số lượng bài viết đang được đánh dấu featured và đã PUBLISHED
+ * 2. Nếu số lượng >= 5:
+ *    a. Tìm bài viết featured cũ nhất (theo published_at tăng dần)
+ *    b. Bỏ đánh dấu featured của bài cũ nhất (set is_featured = false)
+ * 3. Nếu < 5: Không làm gì, cho phép thêm featured mới
+ * 
+ * Mục đích: Đảm bảo luôn chỉ có tối đa 5 bài featured cùng lúc,
+ * khi thêm bài thứ 6 sẽ tự động bỏ featured bài cũ nhất.
+ * 
+ * @returns {Promise<void>}
+ */
 const manageFeaturedLimit = async () => {
   const featuredCount = await NewsModel.countDocuments({ 
     is_featured: true, 
@@ -57,7 +110,26 @@ const manageFeaturedLimit = async () => {
   }
 };
 
-// BR-NEWS-08: Validate content limits
+/**
+ * BR-NEWS-08: Validate content limits
+ * 
+ * Thuật toán kiểm tra giới hạn độ dài nội dung:
+ * 1. Kiểm tra title (nếu có):
+ *    - Tối thiểu: 10 ký tự
+ *    - Tối đa: 200 ký tự
+ * 2. Kiểm tra excerpt (nếu có và không rỗng):
+ *    - Tối thiểu: 50 ký tự
+ *    - Tối đa: 500 ký tự
+ * 3. Kiểm tra content (nếu có):
+ *    - Tối thiểu: 100 ký tự
+ * 4. Kiểm tra thumbnail_url (nếu có và không rỗng):
+ *    - Phải có extension hợp lệ (jpg, png, webp)
+ * 
+ * Lưu ý: Chỉ validate các field có trong payload (undefined = không validate)
+ * 
+ * @param {object} payload - Object chứa title, excerpt, content, thumbnail_url
+ * @returns {object} - { valid: boolean, message?: string }
+ */
 const validateContentLimits = (payload) => {
   if (payload.title !== undefined) {
     const title = payload.title.toString().trim();
@@ -95,7 +167,60 @@ const validateContentLimits = (payload) => {
   return { valid: true };
 };
 
-// Create News
+/**
+ * Create News - Tạo bài viết mới
+ * 
+ * Thuật toán tạo bài viết với các bước xử lý:
+ * 
+ * BƯỚC 1: Validate các trường bắt buộc
+ * - title: Phải có và không rỗng
+ * - content: Phải có và không rỗng
+ * - thumbnail_url: Phải có và không rỗng
+ * - author_id: Phải có
+ * 
+ * BƯỚC 2: Validate bảo mật HTML content (TRƯỚC KHI sanitize)
+ * - Kiểm tra script tags, iframe, event handlers, javascript URLs
+ * - Nếu phát hiện → trả về lỗi và KHÔNG cho tạo
+ * 
+ * BƯỚC 3: Validate ảnh trong HTML content (TRƯỚC KHI sanitize)
+ * - Kiểm tra tất cả <img> tags trong content
+ * - Chỉ cho phép ảnh từ domains tin cậy (Cloudinary, Wikipedia, etc.)
+ * - Nếu có ảnh đáng ngờ → trả về lỗi và KHÔNG cho tạo
+ * 
+ * BƯỚC 4: Sanitize HTML content
+ * - Loại bỏ malicious code, giữ lại format hợp lệ
+ * - Xóa các tags/attributes không được phép
+ * 
+ * BƯỚC 5: Validate content limits (SAU KHI sanitize)
+ * - Kiểm tra độ dài title, excerpt, content, thumbnail format
+ * - Kiểm tra lại độ dài content sau sanitize (có thể bị rút ngắn)
+ * 
+ * BƯỚC 6: Validate author tồn tại
+ * - Kiểm tra author_id có trong database không
+ * 
+ * BƯỚC 7: Xử lý status
+ * - Default: DRAFT
+ * - Nếu PUBLISHED → validate publishing requirements (BR-NEWS-01)
+ * 
+ * BƯỚC 8: Auto-generate excerpt (BR-NEWS-09)
+ * - Nếu không có excerpt → tự động lấy 200 ký tự đầu của content (strip HTML)
+ * - Thêm "..." nếu bị cắt
+ * 
+ * BƯỚC 9: Xử lý is_featured (BR-NEWS-03)
+ * - Chỉ set true nếu explicitly set và status là PUBLISHED
+ * - Convert string "true"/"false" thành boolean
+ * 
+ * BƯỚC 10: Tạo và lưu NewsModel
+ * - Sử dụng content đã được sanitize
+ * - Set published_at nếu status là PUBLISHED
+ * 
+ * BƯỚC 11: Quản lý featured limit (BR-NEWS-03)
+ * - Nếu set featured và đã PUBLISHED → gọi manageFeaturedLimit()
+ * - Đảm bảo chỉ có tối đa 5 bài featured
+ * 
+ * @param {object} payload - { title, content, excerpt?, thumbnail_url, thumbnailPublicId?, author_id, status?, is_featured? }
+ * @returns {Promise<object>} - { status: "OK"|"ERR", message: string, data?: NewsModel }
+ */
 const createNews = async (payload = {}) => {
   try {
     const { title, content, excerpt, thumbnail_url, thumbnailPublicId, author_id, status, is_featured } = payload;
@@ -220,7 +345,37 @@ const createNews = async (payload = {}) => {
   }
 };
 
-// Get News List
+/**
+ * Get News List - Lấy danh sách bài viết với phân trang và filter
+ * 
+ * Thuật toán lấy danh sách bài viết:
+ * 
+ * BƯỚC 1: Parse và validate pagination parameters
+ * - page: Mặc định 1, tối thiểu 1
+ * - limit: Mặc định 20, tối thiểu 1, tối đa 100
+ * - skip: Tính số bản ghi bỏ qua = (page - 1) * limit
+ * 
+ * BƯỚC 2: Xây dựng MongoDB query
+ * - public mode: Chỉ hiển thị PUBLISHED (BR-NEWS-01)
+ * - status filter: Nếu không phải public mode, filter theo status
+ * - search: Tìm kiếm trong title và excerpt (case-insensitive regex)
+ * - is_featured: Filter theo featured status
+ * - author_id: Filter theo tác giả
+ * 
+ * BƯỚC 3: Xác định sorting (BR-NEWS-11)
+ * - PUBLISHED: Sắp xếp theo published_at DESC (mới nhất trước)
+ * - DRAFT: Sắp xếp theo updated_at DESC (cập nhật gần nhất trước)
+ * 
+ * BƯỚC 4: Thực hiện query song song
+ * - find(): Lấy danh sách bài viết với populate author, sort, skip, limit
+ * - countDocuments(): Đếm tổng số bài viết thỏa điều kiện
+ * 
+ * BƯỚC 5: Tính toán pagination metadata
+ * - totalPages: Tổng số trang = ceil(total / limit)
+ * 
+ * @param {object} filters - { page?, limit?, search?, status?, is_featured?, author_id?, public? }
+ * @returns {Promise<object>} - { status: "OK"|"ERR", message: string, data: NewsModel[], pagination: {...} }
+ */
 const getNews = async (filters = {}) => {
   try {
     const {
@@ -294,7 +449,40 @@ const getNews = async (filters = {}) => {
   }
 };
 
-// Get News By ID
+/**
+ * Get News By ID - Lấy chi tiết bài viết theo ID và đếm lượt xem
+ * 
+ * Thuật toán lấy bài viết và tracking view:
+ * 
+ * BƯỚC 1: Lấy bài viết từ database
+ * - Tìm bài viết theo ID và populate thông tin author
+ * - Nếu không tìm thấy → trả về lỗi
+ * 
+ * BƯỚC 2: Xử lý tracking view (BR-NEWS-04)
+ * Điều kiện để đếm view:
+ * - Có IP address
+ * - User không phải là tác giả (userId !== authorId)
+ * - User không phải là admin
+ * 
+ * BƯỚC 3: Kiểm tra duplicate view trong 24h
+ * - Tính thời điểm 24 giờ trước: Date.now() - 24 * 60 * 60 * 1000
+ * - Tìm xem IP này đã xem bài viết này trong 24h chưa
+ * - Nếu chưa xem:
+ *   a. Tạo record trong NewsViewsModel (news_id, ip_address, user_id, viewed_at)
+ *   b. Tăng view_count của bài viết lên 1
+ *   c. Lưu bài viết
+ * - Nếu đã xem → không đếm lại (tránh spam view)
+ * 
+ * Lưu ý:
+ * - Author xem bài của mình → không đếm view
+ * - Admin xem → không đếm view
+ * - Mỗi IP chỉ được tính 1 view trong 24h
+ * 
+ * @param {string} id - ID của bài viết
+ * @param {string|null} userId - ID của user đang xem (null nếu chưa đăng nhập)
+ * @param {string|null} ipAddress - IP address của user
+ * @returns {Promise<object>} - { status: "OK"|"ERR", message: string, data?: NewsModel }
+ */
 const getNewsById = async (id, userId = null, ipAddress = null) => {
   try {
     const news = await NewsModel.findById(id).populate("author_id", "user_name email avatar");
@@ -351,7 +539,60 @@ const getNewsById = async (id, userId = null, ipAddress = null) => {
   }
 };
 
-// Update News
+/**
+ * Update News - Cập nhật bài viết
+ * 
+ * Thuật toán cập nhật bài viết:
+ * 
+ * BƯỚC 1: Kiểm tra bài viết tồn tại
+ * - Tìm bài viết theo ID
+ * - Nếu không tìm thấy → trả về lỗi
+ * 
+ * BƯỚC 2: Kiểm tra quyền chỉnh sửa (BR-NEWS-02)
+ * - Admin: Có thể sửa tất cả bài viết
+ * - Author: Chỉ có thể sửa bài viết của chính mình
+ * - Nếu không có quyền → trả về lỗi
+ * 
+ * BƯỚC 3: Validate bảo mật HTML content (nếu có update)
+ * - Kiểm tra script tags, iframe, event handlers
+ * - Nếu phát hiện → trả về lỗi và KHÔNG cho update
+ * 
+ * BƯỚC 4: Validate ảnh trong HTML content (nếu có update)
+ * - Kiểm tra tất cả <img> tags
+ * - Chỉ cho phép ảnh từ domains tin cậy
+ * - Nếu có ảnh đáng ngờ → trả về lỗi và KHÔNG cho update
+ * 
+ * BƯỚC 5: Sanitize HTML content (nếu có update)
+ * - Loại bỏ malicious code
+ * - Kiểm tra lại độ dài sau sanitize (có thể bị rút ngắn)
+ * 
+ * BƯỚC 6: Validate content limits
+ * - Kiểm tra độ dài title, excerpt, content, thumbnail format
+ * 
+ * BƯỚC 7: Cập nhật các fields được phép
+ * - Chỉ cập nhật các field trong allowedFields
+ * - Sử dụng content đã được sanitize
+ * 
+ * BƯỚC 8: Xử lý status PUBLISHED (BR-NEWS-01)
+ * - Nếu chuyển sang PUBLISHED → validate publishing requirements
+ * - Set published_at nếu chưa có
+ * 
+ * BƯỚC 9: Xử lý is_featured (BR-NEWS-03)
+ * - Chỉ PUBLISHED mới được featured
+ * - Nếu set featured và đã PUBLISHED → quản lý featured limit
+ * 
+ * BƯỚC 10: Auto-regenerate excerpt (BR-NEWS-09)
+ * - Nếu content thay đổi và không có excerpt mới
+ * - Tự động lấy 200 ký tự đầu của content (strip HTML)
+ * 
+ * BƯỚC 11: Lưu và trả về kết quả
+ * 
+ * @param {string} id - ID của bài viết
+ * @param {object} payload - Các field cần update: { title?, content?, excerpt?, thumbnail_url?, thumbnailPublicId?, status?, is_featured? }
+ * @param {string} userId - ID của user đang update
+ * @param {boolean} isAdmin - User có phải admin không
+ * @returns {Promise<object>} - { status: "OK"|"ERR", message: string, data?: NewsModel }
+ */
 const updateNews = async (id, payload = {}, userId = null, isAdmin = false) => {
   try {
     const news = await NewsModel.findById(id);
@@ -460,7 +701,41 @@ const updateNews = async (id, payload = {}, userId = null, isAdmin = false) => {
   }
 };
 
-// Delete News
+/**
+ * Delete News - Xóa bài viết
+ * 
+ * Thuật toán xóa bài viết:
+ * 
+ * BƯỚC 1: Kiểm tra bài viết tồn tại
+ * - Tìm bài viết theo ID
+ * - Nếu không tìm thấy → trả về lỗi
+ * 
+ * BƯỚC 2: Kiểm tra quyền xóa (BR-NEWS-02)
+ * - Admin: Có thể xóa tất cả bài viết
+ * - Author: Chỉ có thể xóa bài viết của chính mình
+ * - Nếu không có quyền → trả về lỗi
+ * 
+ * BƯỚC 3: Kiểm tra status (BR-NEWS-02)
+ * - Không được xóa bài viết đã PUBLISHED trực tiếp
+ * - Phải chuyển về DRAFT trước khi xóa
+ * - Nếu là PUBLISHED → trả về lỗi
+ * 
+ * BƯỚC 4: Xóa thumbnail từ Cloudinary
+ * - Nếu có thumbnailPublicId → xóa ảnh trên Cloudinary
+ * - Bỏ qua lỗi nếu không xóa được (ảnh có thể đã bị xóa trước đó)
+ * 
+ * BƯỚC 5: Xóa tất cả view records liên quan
+ * - Xóa tất cả records trong NewsViewsModel có news_id = id
+ * - Đảm bảo không còn dữ liệu orphan
+ * 
+ * BƯỚC 6: Xóa bài viết khỏi database
+ * - Sử dụng findByIdAndDelete để xóa
+ * 
+ * @param {string} id - ID của bài viết
+ * @param {string} userId - ID của user đang xóa
+ * @param {boolean} isAdmin - User có phải admin không
+ * @returns {Promise<object>} - { status: "OK"|"ERR", message: string }
+ */
 const deleteNews = async (id, userId = null, isAdmin = false) => {
   try {
     const news = await NewsModel.findById(id);
@@ -497,7 +772,28 @@ const deleteNews = async (id, userId = null, isAdmin = false) => {
   }
 };
 
-// Get Featured News
+/**
+ * Get Featured News - Lấy danh sách bài viết nổi bật
+ * 
+ * Thuật toán lấy bài viết nổi bật:
+ * 
+ * BƯỚC 1: Query bài viết featured
+ * - Chỉ lấy bài viết có status = "PUBLISHED"
+ * - Chỉ lấy bài viết có is_featured = true
+ * 
+ * BƯỚC 2: Populate thông tin author
+ * - Lấy user_name, email, avatar của tác giả
+ * 
+ * BƯỚC 3: Sắp xếp và giới hạn
+ * - Sắp xếp theo published_at DESC (mới nhất trước)
+ * - Giới hạn tối đa 5 bài (theo BR-NEWS-03: max 5 featured)
+ * 
+ * Lưu ý:
+ * - Luôn trả về tối đa 5 bài viết featured mới nhất
+ * - Chỉ hiển thị bài viết đã PUBLISHED
+ * 
+ * @returns {Promise<object>} - { status: "OK"|"ERR", message: string, data: NewsModel[] }
+ */
 const getFeaturedNews = async () => {
   try {
     const featured = await NewsModel.find({
