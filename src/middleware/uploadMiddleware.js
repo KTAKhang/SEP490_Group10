@@ -236,3 +236,316 @@ const uploadProductImages = (req, res, next) => {
 };
 
 module.exports.uploadProductImages = uploadProductImages;
+
+// Middleware: Upload news thumbnail lên Cloudinary
+const uploadNewsThumbnail = (req, res, next) => {
+    const handler = upload.single("thumbnail");
+    handler(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            if (req.file && req.file.buffer) {
+                // Validate file type
+                const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+                if (!allowedMimes.includes(req.file.mimetype)) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Thumbnail phải là định dạng jpg, png hoặc webp",
+                    });
+                }
+
+                // ✅ Tự động lấy ảnh cũ từ database nếu đang update (có req.params.id)
+                let oldThumbnailPublicId = null;
+                if (req.params && req.params.id) {
+                    try {
+                        const NewsModel = require("../models/NewsModel");
+                        const news = await NewsModel.findById(req.params.id).select("thumbnailPublicId");
+                        if (news && news.thumbnailPublicId) {
+                            oldThumbnailPublicId = news.thumbnailPublicId;
+                        }
+                    } catch (err) {
+                        console.warn("Không thể lấy ảnh cũ từ database:", err.message);
+                    }
+                }
+
+                // Nếu không có từ database, lấy từ body (frontend có thể gửi)
+                if (!oldThumbnailPublicId) {
+                    oldThumbnailPublicId = req.body.oldThumbnailPublicId || req.body.thumbnailPublicId;
+                }
+
+                // Upload với stream + optimization
+                const result = await uploadToCloudinary(req.file.buffer, "news");
+
+                req.body.thumbnail_url = result.secure_url;
+                req.body.thumbnailPublicId = result.public_id;
+
+                // ✅ Tự động xóa ảnh cũ nếu có ảnh mới và khác ảnh cũ
+                if (oldThumbnailPublicId && oldThumbnailPublicId !== result.public_id) {
+                    cloudinary.uploader.destroy(oldThumbnailPublicId).catch((err) => {
+                        console.warn(`Không thể xóa ảnh cũ ${oldThumbnailPublicId} trên Cloudinary:`, err.message);
+                    });
+                }
+            }
+            return next();
+        } catch (error) {
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports.uploadNewsThumbnail = uploadNewsThumbnail;
+
+// Middleware: Upload ảnh cho content (dùng trong HTML editor)
+const uploadNewsContentImage = (req, res, next) => {
+    const handler = upload.single("image");
+    handler(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            if (req.file && req.file.buffer) {
+                // Validate file type
+                const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+                if (!allowedMimes.includes(req.file.mimetype)) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Ảnh phải là định dạng jpg, png hoặc webp",
+                    });
+                }
+
+                // Upload với stream + optimization vào folder "news/content"
+                const result = await uploadToCloudinary(req.file.buffer, "news/content");
+
+                // Trả về URL và publicId để frontend sử dụng
+                req.uploadedImage = {
+                    url: result.secure_url,
+                    publicId: result.public_id,
+                };
+            } else {
+                return res.status(400).json({
+                    status: "ERR",
+                    message: "Không có file ảnh được upload",
+                });
+            }
+            return next();
+        } catch (error) {
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports.uploadNewsContentImage = uploadNewsContentImage;
+
+// Middleware: Upload nhiều ảnh shop lên Cloudinary
+const uploadShopImages = (req, res, next) => {
+    const handler = upload.array("images", 20); // Allow up to 20 images
+    handler(req, res, async (err) => {
+        if (err) {
+            console.error(`❌ Multer error:`, err);
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            // ✅ Tự động lấy danh sách ảnh cũ từ database
+            let oldImagesFromDB = [];
+            let oldImagePublicIdsFromDB = [];
+            
+            try {
+                const ShopModel = require("../models/ShopModel");
+                const shop = await ShopModel.findOne().select("images imagePublicIds");
+                if (shop) {
+                    oldImagesFromDB = Array.isArray(shop.images) ? shop.images : [];
+                    oldImagePublicIdsFromDB = Array.isArray(shop.imagePublicIds) ? shop.imagePublicIds : [];
+                }
+            } catch (err) {
+                console.warn("Không thể lấy ảnh cũ từ database:", err.message);
+            }
+            
+            // Lấy danh sách ảnh cũ từ body (nếu frontend gửi - ưu tiên hơn DB)
+            let existingImages = [];
+            let existingImagePublicIds = [];
+            
+            // Parse existingImages và existingImagePublicIds từ body
+            if (req.body.existingImages) {
+                try {
+                    existingImages = typeof req.body.existingImages === 'string' 
+                        ? JSON.parse(req.body.existingImages) 
+                        : req.body.existingImages;
+                } catch (e) {
+                    existingImages = Array.isArray(req.body.existingImages) ? req.body.existingImages : [];
+                }
+            }
+            
+            if (req.body.existingImagePublicIds) {
+                try {
+                    existingImagePublicIds = typeof req.body.existingImagePublicIds === 'string'
+                        ? JSON.parse(req.body.existingImagePublicIds)
+                        : req.body.existingImagePublicIds;
+                } catch (e) {
+                    existingImagePublicIds = Array.isArray(req.body.existingImagePublicIds) ? req.body.existingImagePublicIds : [];
+                }
+            }
+            
+            // Nếu frontend không gửi, dùng ảnh cũ từ database
+            if (existingImages.length === 0 && oldImagesFromDB.length > 0) {
+                existingImages = oldImagesFromDB;
+            }
+            if (existingImagePublicIds.length === 0 && oldImagePublicIdsFromDB.length > 0) {
+                existingImagePublicIds = oldImagePublicIdsFromDB;
+            }
+            
+            // ✅ Validate file types (BR-22: jpg, png, webp only)
+            if (Array.isArray(req.files) && req.files.length > 0) {
+                const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+                for (const file of req.files) {
+                    if (!allowedMimes.includes(file.mimetype)) {
+                        return res.status(400).json({
+                            status: "ERR",
+                            message: "Chỉ cho phép upload file ảnh hợp lệ (jpg, png, webp)",
+                        });
+                    }
+                    // BR-23: Check file size (5MB limit from multer config)
+                    if (file.size > 5 * 1024 * 1024) {
+                        return res.status(400).json({
+                            status: "ERR",
+                            message: `Kích thước file ${file.originalname} vượt quá 5MB`,
+                        });
+                    }
+                }
+            }
+            
+            // ✅ Xử lý file upload thực tế - Upload song song với stream + optimization
+            if (Array.isArray(req.files) && req.files.length > 0) {
+                // Upload tất cả ảnh song song với stream (nhanh hơn base64)
+                const uploads = req.files.map((file) => 
+                    uploadToCloudinary(file.buffer, "shop")
+                );
+                
+                const results = await Promise.all(uploads);
+                const newImages = results.map((r) => r.secure_url);
+                const newImagePublicIds = results.map((r) => r.public_id);
+                
+                // Merge ảnh cũ (giữ lại) và ảnh mới
+                const finalImages = [...existingImages, ...newImages];
+                const finalImagePublicIds = [...existingImagePublicIds, ...newImagePublicIds];
+                
+                // ✅ Tự động xóa ảnh cũ không còn trong danh sách mới
+                const allOldImagePublicIds = oldImagePublicIdsFromDB.length > 0 
+                    ? oldImagePublicIdsFromDB 
+                    : existingImagePublicIds;
+                
+                if (allOldImagePublicIds.length > 0) {
+                    const imagesToDelete = allOldImagePublicIds.filter(
+                        oldId => !finalImagePublicIds.includes(oldId)
+                    );
+                    
+                    // Xóa ảnh cũ trên Cloudinary (chạy song song, không block)
+                    if (imagesToDelete.length > 0) {
+                        console.log(`🗑️ Xóa ${imagesToDelete.length} ảnh cũ không còn trong danh sách mới`);
+                        Promise.all(
+                            imagesToDelete.map(publicId => 
+                                cloudinary.uploader.destroy(publicId).catch(err => {
+                                    console.warn(`Không thể xóa ảnh ${publicId} trên Cloudinary:`, err.message);
+                                })
+                            )
+                        ).catch(err => {
+                            console.warn("Lỗi khi xóa ảnh cũ:", err.message);
+                        });
+                    }
+                }
+                
+                req.body.images = finalImages;
+                req.body.imagePublicIds = finalImagePublicIds;
+            } else {
+                // Không có file mới upload
+                // Nếu frontend gửi trực tiếp images và imagePublicIds trong body (không qua file upload)
+                if (req.body.images !== undefined || req.body.imagePublicIds !== undefined) {
+                    // Parse nếu là JSON string (từ form-data)
+                    let imagesArray = req.body.images;
+                    let imagePublicIdsArray = req.body.imagePublicIds;
+                    
+                    if (typeof imagesArray === 'string') {
+                        try {
+                            imagesArray = JSON.parse(imagesArray);
+                        } catch (e) {
+                            imagesArray = [];
+                        }
+                    }
+                    
+                    if (typeof imagePublicIdsArray === 'string') {
+                        try {
+                            imagePublicIdsArray = JSON.parse(imagePublicIdsArray);
+                        } catch (e) {
+                            imagePublicIdsArray = [];
+                        }
+                    }
+                    
+                    // Frontend đang gửi trực tiếp arrays (có thể là để xóa tất cả ảnh)
+                    req.body.images = Array.isArray(imagesArray) ? imagesArray : [];
+                    req.body.imagePublicIds = Array.isArray(imagePublicIdsArray) ? imagePublicIdsArray : [];
+                } else {
+                    // Giữ nguyên ảnh cũ (nếu có)
+                    req.body.images = existingImages;
+                    req.body.imagePublicIds = existingImagePublicIds;
+                }
+            }
+            
+            return next();
+        } catch (error) {
+            console.error(`❌ Upload middleware error:`, error);
+            console.error(`❌ Error stack:`, error.stack);
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports.uploadShopImages = uploadShopImages;
+
+// Middleware: Upload single shop image (for editor or gallery)
+const uploadShopImage = (req, res, next) => {
+    const handler = upload.single("image");
+    handler(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            if (req.file && req.file.buffer) {
+                // Validate file type
+                const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+                if (!allowedMimes.includes(req.file.mimetype)) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Ảnh phải là định dạng jpg, png hoặc webp",
+                    });
+                }
+
+                // BR-23: Check file size (5MB limit)
+                if (req.file.size > 5 * 1024 * 1024) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Kích thước file vượt quá 5MB",
+                    });
+                }
+
+                // Upload với stream + optimization vào folder "shop"
+                const result = await uploadToCloudinary(req.file.buffer, "shop");
+
+                // Trả về URL và publicId để frontend sử dụng
+                req.uploadedImage = {
+                    url: result.secure_url,
+                    publicId: result.public_id,
+                };
+            } else {
+                return res.status(400).json({
+                    status: "ERR",
+                    message: "Không có file ảnh được upload",
+                });
+            }
+            return next();
+        } catch (error) {
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports.uploadShopImage = uploadShopImage;

@@ -52,7 +52,9 @@ mongoose
 // ===== Start Server =====
 app.listen(port, "0.0.0.0", () => {
   console.log(`🚀 Auth Service running on http://localhost:${port}`);
+
   
   // ✅ Start scheduled jobs
   startProductBatchJob();
 });
+
