@@ -6,12 +6,9 @@ const OrderService = require("../services/OrderService");
 const createOrder = async (req, res) => {
   try {
     const user_id = req.user._id;
-    const { selected_product_ids, receiverInfo,payment_method } = req.body;
+    const { selected_product_ids, receiverInfo, payment_method } = req.body;
 
-    if (
-      !Array.isArray(selected_product_ids) ||
-      selected_product_ids.length === 0
-    ) {
+    if (!Array.isArray(selected_product_ids) || selected_product_ids.length === 0) {
       return res.status(400).json({
         success: false,
         message: "Vui lòng chọn ít nhất một sản phẩm",
@@ -29,28 +26,43 @@ const createOrder = async (req, res) => {
         message: "Thiếu thông tin người nhận",
       });
     }
-if (
-      !payment_method
-    ) {
+
+    if (!/^0\d{9}$/.test(receiverInfo.receiver_phone)) {
       return res.status(400).json({
         success: false,
-        message: "Thiếu phương thức thanh toán",
+        message: "Số điện thoại không hợp lệ",
       });
     }
-    const result =
-      await OrderService.confirmCheckoutAndCreateOrder(
-        user_id,
-        selected_product_ids,
-        receiverInfo,
-        payment_method
-      );
+
+    if (!["COD", "VNPAY"].includes(payment_method)) {
+      return res.status(400).json({
+        success: false,
+        message: "Phương thức thanh toán không hợp lệ",
+      });
+    }
+
+    const normalizedReceiver = {
+      receiver_name: receiverInfo.receiver_name.trim(),
+      receiver_phone: receiverInfo.receiver_phone.trim(),
+      receiver_address: receiverInfo.receiver_address.trim(),
+      note: receiverInfo.note?.trim(),
+    };
+
+   const result =
+  await OrderService.confirmCheckoutAndCreateOrder({
+    user_id,
+    selected_product_ids,
+    receiverInfo: normalizedReceiver,
+    payment_method,
+    ip: req.ip,
+  });
+
 
     if (!result.success) {
       return res.status(400).json(result);
     }
 
     return res.status(201).json(result);
-
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -58,6 +70,7 @@ if (
     });
   }
 };
+
 
 /* =====================================================
    UPDATE ORDER STATUS (ADMIN / STAFF)

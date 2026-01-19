@@ -35,27 +35,36 @@ const updateItemInCart = async (req, res) => {
 };
 
 const removeItemFromCart = async (req, res) => {
-    try {
-        const user_id = req.user._id;
-        const { product_id } = req.params;
+  try {
+    const user_id = req.user._id;
 
-        const response = await CartService.removeItemFromCart(user_id, product_id);
+    const product_ids =
+      req.params.product_id || req.body.product_ids;
 
-        if (response.status === "ERR") {
-            return res.status(400).json(response);
-        }
-
-        return res.status(200).json(response);
-    } catch (error) {
-        return res.status(500).json({ status: "ERR", message: error.message });
+    if (!product_ids) {
+      return res.status(400).json({
+        status: "ERR",
+        message: "Thiếu product_id",
+      });
     }
+
+    const response = await CartService.removeItemFromCart(
+      user_id,
+      product_ids
+    );
+
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message,
+    });
+  }
 };
 
 const getCartItems = async (req, res) => {
     try {
         const user_id = req.user._id;
-        console.log("user_id",user_id);
-
         const response = await CartService.getCartItems(user_id);
 
         return res.status(200).json({

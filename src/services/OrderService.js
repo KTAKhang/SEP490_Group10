@@ -4,6 +4,7 @@ const OrderStatusModel = require("../models/OrderStatusModel");
 const CartModel = require("../models/CartsModel");
 const CartDetailModel = require("../models/CartDetailsModel");
 const PaymentModel = require("../models/PaymentModel");
+const { createVnpayPaymentUrl } = require("../controller/PaymentController");
 const ProductModel = require("../models/ProductModel");
 const StockLockModel = require("../models/StockLockModel");
 const PaymentService = require("../services/PaymentService");
@@ -36,18 +37,19 @@ async function pushStatusHistory({
 /* =====================================================
    CREATE ORDER (PENDING)
 ===================================================== */
-const confirmCheckoutAndCreateOrder = async (
+const confirmCheckoutAndCreateOrder = async ({
   user_id,
   selected_product_ids,
   receiverInfo,
-  payment_method, // 👈 THÊM
-) => {
+  payment_method,
+  ip,
+})=> {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
     /* =======================
-       1️⃣ LOAD CART
+       1️⃣ LOAD CART + LOCK
     ======================= */
     const cart = await CartModel.findOne({ user_id }).session(session);
     if (!cart) throw new Error("Không tìm thấy giỏ hàng");
@@ -59,9 +61,6 @@ const confirmCheckoutAndCreateOrder = async (
 
     if (!cartItems.length) throw new Error("Giỏ hàng trống");
 
-    /* =======================
-       2️⃣ LOAD STOCK LOCK
-    ======================= */
     const locks = await StockLockModel.find({
       user_id,
       product_id: { $in: selected_product_ids },
@@ -70,7 +69,7 @@ const confirmCheckoutAndCreateOrder = async (
     const lockMap = new Map(locks.map((l) => [l.product_id.toString(), l]));
 
     /* =======================
-       3️⃣ SNAPSHOT + TRỪ KHO
+       2️⃣ SNAPSHOT + TÍNH TIỀN
     ======================= */
     let totalPrice = 0;
     const orderDetails = [];
@@ -86,18 +85,6 @@ const confirmCheckoutAndCreateOrder = async (
 
       if (!product || !product.status)
         throw new Error("Sản phẩm không khả dụng");
-
-      const updated = await ProductModel.updateOne(
-        {
-          _id: product._id,
-          onHandQuantity: { $gte: item.quantity },
-        },
-        { $inc: { onHandQuantity: -item.quantity } },
-        { session },
-      );
-
-      if (!updated.modifiedCount)
-        throw new Error(`Không đủ hàng cho ${product.name}`);
 
       totalPrice += item.quantity * item.price;
 
@@ -116,85 +103,78 @@ const confirmCheckoutAndCreateOrder = async (
     }
 
     /* =======================
-       4️⃣ CREATE ORDER (PENDING)
+       3️⃣ PAYMENT DECISION
     ======================= */
-    const pendingStatus = await OrderStatusModel.findOne({
-      name: "PENDING",
-    }).session(session);
+     // 1️⃣ tạo order
+      const pendingStatus = await OrderStatusModel.findOne({
+        name: "PENDING",
+      }).session(session);
 
-    if (!pendingStatus) throw new Error("Thiếu status PENDING");
+      const order = await OrderModel.create(
+        [
+          {
+            user_id,
+            total_price: totalPrice,
+            receiver_name: receiverInfo.receiver_name,
+            receiver_phone: receiverInfo.receiver_phone,
+            receiver_address: receiverInfo.receiver_address,
+            note: receiverInfo.note,
+            order_status_id: pendingStatus._id,
+            payment_method: payment_method,
+            status: true,
+          },
+        ],
+        { session },
+      );
 
-    const [order] = await OrderModel.create(
-      [
-        {
-          user_id,
-          total_price: totalPrice,
-          receiver_name: receiverInfo.receiver_name,
-          receiver_phone: receiverInfo.receiver_phone,
-          receiver_address: receiverInfo.receiver_address,
-          note: receiverInfo.note,
-          payment_method, // 👈 LƯU
-          order_status_id: pendingStatus._id,
-        },
-      ],
-      { session },
-    );
+      
+      // 2️⃣ tạo order details
+      for (const detail of orderDetails) {
+        await OrderDetailModel.create(
+          [
+            {
+              ...detail,
+              order_id: order[0]._id,
+            },
+          ],
+          { session },
+        );
+      }
 
-    await pushStatusHistory({
-      order,
-      fromStatus: null,
-      toStatus: pendingStatus._id,
-      userId: user_id,
-      role: "customer",
-      note: "Khách hàng tạo đơn (PENDING)",
-      session,
-    });
-
-    /* =======================
-       5️⃣ CREATE ORDER DETAILS
-    ======================= */
-    orderDetails.forEach((d) => (d.order_id = order._id));
-    await OrderDetailModel.insertMany(orderDetails, { session });
-
-    /* =======================
-       6️⃣ CREATE PAYMENT
-    ======================= */
+    // COD → xử lý ngay
     if (payment_method === "COD") {
+      // 3️⃣ tạo payment COD (UNPAID)
       await PaymentService.createCODPayment({
-        order_id: order._id,
+        order_id: order[0]._id,
         amount: totalPrice,
         session,
       });
+      await session.commitTransaction();
+      return { success: true, order_id: order[0]._id };
     }
 
+    // VNPAY → chỉ tạo payment intent
     if (payment_method === "VNPAY") {
+      
       await PaymentService.createOnlinePendingPayment({
-        order_id: order._id,
+        order_id: order[0]._id,
         amount: totalPrice,
         session,
       });
+     const paymentUrl = await createVnpayPaymentUrl({
+        order_id: order[0]._id,
+        user_id: user_id,
+        ip
+      })
+
+      await session.commitTransaction();
+      return {
+        success: true,
+        payment_url: paymentUrl,
+      };
     }
 
-    /* =======================
-       7️⃣ CLEANUP
-    ======================= */
-    await CartDetailModel.deleteMany(
-      { cart_id: cart._id, product_id: { $in: selected_product_ids } },
-      { session },
-    );
-
-    await StockLockModel.deleteMany(
-      { user_id, product_id: { $in: selected_product_ids } },
-      { session },
-    );
-
-    await session.commitTransaction();
-
-    return {
-      success: true,
-      order_id: order._id,
-      payment_method,
-    };
+    throw new Error("Phương thức thanh toán không hợp lệ");
   } catch (err) {
     await session.abortTransaction();
     return { success: false, message: err.message };
@@ -202,6 +182,7 @@ const confirmCheckoutAndCreateOrder = async (
     session.endSession();
   }
 };
+
 /* =====================================================
    UPDATE ORDER STATUS (ADMIN / SYSTEM)
 ===================================================== */

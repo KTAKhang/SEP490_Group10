@@ -1,46 +1,88 @@
 const CartModel = require("../models/CartsModel");
 const CartDetailModel = require("../models/CartDetailsModel");
 const ProductModel = require("../models/ProductModel");
+const { default: mongoose } = require("mongoose");
 
 const addItemToCart = async (user_id, product_id, quantity) => {
-  const product = await ProductModel.findById(product_id);
-  if (!product || !product.status) {
-    throw new Error("Sản phẩm không tồn tại hoặc đã ngừng bán");
-  }
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  if (product.onHandQuantity < quantity) {
-    throw new Error(`Không đủ hàng cho sản phẩm ${product.name}`);
-  }
+  try {
+    // ===== 1️⃣ VALIDATE INPUT =====
+    if (!quantity || quantity < 1) {
+      throw new Error("Số lượng phải >= 1");
+    }
 
-  let cart = await CartModel.findOne({ user_id });
-  if (!cart) {
-    cart = await CartModel.create({ user_id, sum: 0 });
-  }
+    // ===== 2️⃣ CHECK PRODUCT =====
+    const product = await ProductModel.findById(product_id).session(session);
+    if (!product || !product.status) {
+      throw new Error("Sản phẩm không tồn tại hoặc đã ngừng bán");
+    }
 
-  let cartDetail = await CartDetailModel.findOne({
-    cart_id: cart._id,
-    product_id,
-  });
+    // ===== 3️⃣ LOAD / CREATE CART =====
+    let cart = await CartModel.findOne({ user_id }).session(session);
+    if (!cart) {
+      cart = await CartModel.create(
+        [{ user_id, sum: 0 }],
+        { session }
+      );
+      cart = cart[0];
+    }
 
-  if (cartDetail) {
-    cartDetail.quantity += quantity;
-    await cartDetail.save();
-  } else {
-    await CartDetailModel.create({
+    // ===== 4️⃣ LOAD CART DETAIL =====
+    let cartDetail = await CartDetailModel.findOne({
       cart_id: cart._id,
       product_id,
-      quantity,
-      price: product.price,
-    });
+    }).session(session);
+
+    const currentQty = cartDetail ? cartDetail.quantity : 0;
+    const newQty = currentQty + quantity;
+
+    // ===== 5️⃣ CHECK STOCK =====
+    if (product.onHandQuantity < newQty) {
+      throw new Error(
+        `Không đủ hàng cho sản phẩm ${product.name}. Còn ${product.onHandQuantity}`
+      );
+    }
+
+    // ===== 6️⃣ UPSERT CART DETAIL =====
+    if (cartDetail) {
+      cartDetail.quantity = newQty;
+      await cartDetail.save({ session });
+    } else {
+      await CartDetailModel.create(
+        [
+          {
+            cart_id: cart._id,
+            product_id,
+            quantity,
+            price: product.price,
+          },
+        ],
+        { session }
+      );
+    }
+
+    // ===== 7️⃣ RECALCULATE CART SUM =====
+    const items = await CartDetailModel.find({ cart_id: cart._id }).session(
+      session
+    );
+
+    cart.sum = items.reduce((total, item) => total + item.quantity, 0);
+    await cart.save({ session });
+
+    await session.commitTransaction();
+
+    return {
+      status: "OK",
+      message: "Thêm sản phẩm vào giỏ hàng thành công",
+    };
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
   }
-
-  const items = await CartDetailModel.find({ cart_id: cart._id });
-  cart.sum = items.length;
-  await cart.save();
-
-  return {
-    message: "Thêm sản phẩm vào giỏ hàng thành công",
-  };
 };
 
 const updateItemInCart = async (user_id, product_id, newQuantity) => {
@@ -88,34 +130,75 @@ const updateItemInCart = async (user_id, product_id, newQuantity) => {
   };
 };
 
-const removeItemFromCart = async (user_id, product_id) => {
-  const cart = await CartModel.findOne({ user_id });
-  if (!cart) throw new Error("Không tìm thấy giỏ hàng");
+const removeItemFromCart = async (user_id, product_ids) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  const deleted = await CartDetailModel.findOneAndDelete({
-    cart_id: cart._id,
-    product_id,
-  });
+  try {
+    const cart = await CartModel
+      .findOne({ user_id })
+      .session(session);
 
-  if (!deleted) {
-    throw new Error("Sản phẩm không có trong giỏ hàng");
+    if (!cart) throw new Error("Không tìm thấy giỏ hàng");
+
+    // Luôn ép về mảng
+    const ids = Array.isArray(product_ids)
+      ? product_ids
+      : [product_ids];
+
+    /* ==========================
+       1️⃣ Lấy các item cần xóa
+    ========================== */
+    const itemsToDelete = await CartDetailModel
+      .find({
+        cart_id: cart._id,
+        product_id: { $in: ids },
+      })
+      .session(session);
+
+    if (itemsToDelete.length === 0) {
+      throw new Error("Không có sản phẩm hợp lệ để xóa");
+    }
+
+    /* ==========================
+       2️⃣ Tính tổng quantity cần trừ
+    ========================== */
+    const minusQuantity = itemsToDelete.reduce(
+      (total, item) => total + item.quantity,
+      0
+    );
+
+    /* ==========================
+       3️⃣ Xóa nhiều item 1 lần
+    ========================== */
+    await CartDetailModel.deleteMany(
+      {
+        cart_id: cart._id,
+        product_id: { $in: ids },
+      },
+      { session }
+    );
+
+    /* ==========================
+       4️⃣ Update cart.sum (quantity)
+    ========================== */
+    cart.sum = Math.max(cart.sum - minusQuantity, 0);
+    await cart.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return {
+      status: "OK",
+      message: "Đã xóa sản phẩm khỏi giỏ hàng",
+      removed_items: itemsToDelete.length,
+      sum: cart.sum, // tổng quantity còn lại
+    };
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
   }
-
-  // Tính lại tổng tiền
-  const allItems = await CartDetailModel.find({ cart_id: cart._id });
-  const newSum = allItems.reduce(
-    (total, item) => total + item.quantity * item.price,
-    0
-  );
-
-  cart.sum = newSum;
-  await cart.save();
-
-  return {
-    message: "Đã xóa sản phẩm khỏi giỏ hàng",
-    sum: newSum,
-    total_items: allItems.length,
-  };
 };
 
 const getCartItems = async (user_id) => {
@@ -130,23 +213,22 @@ const getCartItems = async (user_id) => {
 
   const items = await CartDetailModel.find({ cart_id: cart._id }).populate(
     "product_id",
-    "name image price quantity status"
+    "name images price onHandQuantity status"
   );
 
   const formattedItems = items.map((item) => ({
     product_id: item.product_id._id,
     name: item.product_id.name,
-    image: item.product_id.image,
+    image: item.product_id.images?.[0],
     price: item.price,
     quantity: item.quantity,
-    in_stock: item.product_id.quantity,
+    in_stock: item.product_id.onHandQuantity,
     status: item.product_id.status,
-    is_available: item.product_id.status && item.product_id.quantity > 0,
     warning: !item.product_id.status
       ? "Sản phẩm đã ngừng bán"
-      : item.product_id.quantity <= 0
+      : item.product_id.onHandQuantity <= 0
       ? "Sản phẩm tạm hết hàng"
-      : null,
+      : "Còn hàng",
     subtotal: item.quantity * item.price,
   }));
 
