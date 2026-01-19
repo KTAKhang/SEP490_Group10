@@ -1,6 +1,8 @@
 const AuthRouter = require("./AuthRouter");
 const ProfileRouter = require("./ProfileRouter");
 const ContactRouter = require("./ContactRouter");
+
+  
 const CategoryRouter = require("./CategoryRouter");
 const ProductRouter = require("./ProductRouter");
 const InventoryRouter = require("./InventoryRouter");
@@ -15,6 +17,10 @@ const CheckoutRouter = require("./CheckoutRouter");
 const OrderStatusRouter = require("./OrderStatusRouter");
 const OrderRouter = require("./OrderRouter");
 const PaymentRouter = require("./PaymentRouter");
+  
+const StaffRouter = require("./StaffRouter");
+const CustomerRouter = require("./CustomerRouter");
+const DiscountRouter = require("./DiscountRouter");
 
 const routes = (app) => {
     app.use("/auth", AuthRouter);
@@ -35,6 +41,12 @@ const routes = (app) => {
     app.use("/categories", PublicCategoryRouter);
     // Customer routes (chỉ Customer)
     app.use("/favorites", FavoriteRouter);
+    // Staff management routes
+    app.use("/staff", StaffRouter);
+    //Customer management routes
+    app.use("/customers", CustomerRouter);
+    // Discount management routes
+    app.use("/discounts", DiscountRouter);
 };
 
 module.exports = routes;
