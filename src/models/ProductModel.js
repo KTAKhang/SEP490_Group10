@@ -1,5 +1,16 @@
 const mongoose = require("mongoose");
 
+// ✅ Helper: Format Date thành string YYYY-MM-DD theo timezone Asia/Ho_Chi_Minh (DRY)
+const makeVNDateStr = (date) => {
+  if (!date) return null;
+  const d = new Date(date);
+  const vnDate = new Date(d.toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" }));
+  const year = vnDate.getFullYear();
+  const month = String(vnDate.getMonth() + 1).padStart(2, "0");
+  const day = String(vnDate.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const productSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -14,16 +25,48 @@ const productSchema = new mongoose.Schema(
     price: { type: Number, required: true, min: 0 },
 
     // Admin set lúc tạo
-    plannedQuantity: { type: Number, required: true, min: 0 },
+    plannedQuantity: {
+      type: Number,
+      required: true,
+      min: 0,
+      validate: {
+        validator: Number.isInteger,
+        message: "plannedQuantity phải là số nguyên",
+      },
+    },
 
     // Cộng dồn từ các phiếu nhập
-    receivedQuantity: { type: Number, default: 0, min: 0 },
+    receivedQuantity: {
+      type: Number,
+      default: 0,
+      min: 0,
+      validate: {
+        validator: Number.isInteger,
+        message: "receivedQuantity phải là số nguyên",
+      },
+    },
 
     // Tồn thực tế
-    onHandQuantity: { type: Number, default: 0, min: 0 },
+    onHandQuantity: {
+      type: Number,
+      default: 0,
+      min: 0,
+      validate: {
+        validator: Number.isInteger,
+        message: "onHandQuantity phải là số nguyên",
+      },
+    },
 
     // Giữ hàng cho đơn (nếu bạn có flow đặt hàng)
-    reservedQuantity: { type: Number, default: 0, min: 0 },
+    reservedQuantity: {
+      type: Number,
+      default: 0,
+      min: 0,
+      validate: {
+        validator: Number.isInteger,
+        message: "reservedQuantity phải là số nguyên",
+      },
+    },
 
     receivingStatus: {
       type: String,
@@ -46,10 +89,33 @@ const productSchema = new mongoose.Schema(
       index: true,
     },
 
-    images: [{ type: String, trim: true }],
-    imagePublicIds: [{ type: String, trim: true }],
+    images: {
+      type: [{ type: String, trim: true }],
+      validate: {
+        validator: function (v) {
+          return v.length <= 10;
+        },
+        message: "Số lượng ảnh không được vượt quá 10",
+      },
+    },
+    imagePublicIds: {
+      type: [{ type: String, trim: true }],
+      validate: {
+        validator: function (v) {
+          return v.length <= 10;
+        },
+        message: "Số lượng imagePublicIds không được vượt quá 10",
+      },
+    },
 
-    brand: { type: String, default: "", trim: true },
+    brand: { type: String, required: true, trim: true }, // ✅ Bắt buộc phải có brand
+
+    // Số lô (tăng dần mỗi lần reset để nhập lô mới)
+    batchNumber: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
 
     detail_desc: {
       type: String,
@@ -60,58 +126,123 @@ const productSchema = new mongoose.Schema(
 
     status: { type: Boolean, default: true }, // bật/tắt hiển thị
 
-    // Ngày nhập kho (tự động ghi nhận khi nhập kho lần đầu)
+    // Ngày nhập kho (tự động ghi nhận khi nhập kho lần đầu) - Date object
     warehouseEntryDate: {
       type: Date,
       default: null,
     },
 
-    // Số ngày hạn sử dụng (nhân viên kho nhập khi nhập hàng)
-    shelfLifeDays: {
-      type: Number,
+    // ✅ Date-only string (YYYY-MM-DD) theo timezone Asia/Ho_Chi_Minh để tránh timezone issues
+    warehouseEntryDateStr: {
+      type: String,
       default: null,
-      min: [1, "Số ngày hạn sử dụng phải lớn hơn 0"],
+      match: [/^\d{4}-\d{2}-\d{2}$/, "warehouseEntryDateStr phải có format YYYY-MM-DD"],
     },
 
-    // Ngày hết hạn (tính từ warehouseEntryDate + shelfLifeDays)
+    // Ngày hết hạn (nhân viên kho nhập khi nhập hàng) - Date object
     expiryDate: {
       type: Date,
+      default: null,
+    },
+
+    // ✅ Date-only string (YYYY-MM-DD) theo timezone Asia/Ho_Chi_Minh để tránh timezone issues
+    expiryDateStr: {
+      type: String,
+      default: null,
+      match: [/^\d{4}-\d{2}-\d{2}$/, "expiryDateStr phải có format YYYY-MM-DD"],
+    },
+
+    // ✅ Đánh dấu sản phẩm cần reset (chờ admin xác nhận)
+    pendingBatchReset: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    // ✅ Lý do cần reset: "SOLD_OUT" | "EXPIRED"
+    resetReason: {
+      type: String,
+      enum: ["SOLD_OUT", "EXPIRED"],
       default: null,
     },
   },
   { timestamps: true }
 );
 
+// ✅ Unique constraint: không cho phép trùng (name + brand)
+productSchema.index({ name: 1, brand: 1 }, { unique: true });
+
 // Virtual: available = onHand - reserved
 productSchema.virtual("availableQuantity").get(function () {
   return Math.max(0, (this.onHandQuantity || 0) - (this.reservedQuantity || 0));
 });
 
-// Method: Tính lại expiryDate từ warehouseEntryDate + shelfLifeDays
-productSchema.methods.calculateExpiryDate = function () {
-  if (this.warehouseEntryDate && this.shelfLifeDays) {
-    const expiry = new Date(this.warehouseEntryDate);
-    expiry.setDate(expiry.getDate() + this.shelfLifeDays);
-    this.expiryDate = expiry;
-  } else {
-    this.expiryDate = null;
-  }
-};
 
-// Tự cập nhật trạng thái khi lưu
+// Tự cập nhật trạng thái khi lưu - Chuẩn hóa logic
 productSchema.pre("save", function (next) {
   const planned = this.plannedQuantity ?? 0;
   const received = this.receivedQuantity ?? 0;
+  const onHand = this.onHandQuantity ?? 0;
+  const reserved = this.reservedQuantity ?? 0;
 
-  if (received <= 0) this.receivingStatus = "NOT_RECEIVED";
-  else if (received < planned) this.receivingStatus = "PARTIAL";
-  else this.receivingStatus = "RECEIVED";
+  // ✅ Đảm bảo invariant: 0 ≤ onHandQuantity ≤ receivedQuantity ≤ plannedQuantity
+  if (onHand < 0) {
+    return next(new Error("onHandQuantity không được âm"));
+  }
+  if (received < 0) {
+    return next(new Error("receivedQuantity không được âm"));
+  }
+  if (onHand > received) {
+    return next(new Error("onHandQuantity không được vượt receivedQuantity"));
+  }
+  if (received > planned) {
+    return next(new Error("receivedQuantity không được vượt plannedQuantity"));
+  }
 
-  this.stockStatus = (this.onHandQuantity ?? 0) > 0 ? "IN_STOCK" : "OUT_OF_STOCK";
+  // ✅ Chuẩn hóa receivingStatus
+  if (received === 0) {
+    this.receivingStatus = "NOT_RECEIVED";
+  } else if (received < planned) {
+    this.receivingStatus = "PARTIAL";
+  } else {
+    // received === planned
+    this.receivingStatus = "RECEIVED";
+  }
 
-  // Safety: reserved không được vượt onHand
-  if ((this.reservedQuantity ?? 0) > (this.onHandQuantity ?? 0)) {
+  // ✅ Chuẩn hóa stockStatus
+  if (onHand > 0) {
+    this.stockStatus = "IN_STOCK";
+  } else {
+    // onHand === 0
+    this.stockStatus = "OUT_OF_STOCK";
+  }
+
+  // ✅ Safety: reserved không được vượt onHand
+  if (reserved > onHand) {
     return next(new Error("reservedQuantity cannot exceed onHandQuantity"));
+  }
+
+  // ✅ Validate images.length === imagePublicIds.length
+  const imagesLength = Array.isArray(this.images) ? this.images.length : 0;
+  const imagePublicIdsLength = Array.isArray(this.imagePublicIds) ? this.imagePublicIds.length : 0;
+  if (imagesLength !== imagePublicIdsLength) {
+    return next(new Error("Số lượng images và imagePublicIds phải bằng nhau"));
+  }
+
+  // ✅ Tự động sync date string fields từ Date objects khi Date thay đổi
+  // Xử lý cả case Date bị set về null
+  if (this.isModified("warehouseEntryDate")) {
+    this.warehouseEntryDateStr = this.warehouseEntryDate ? makeVNDateStr(this.warehouseEntryDate) : null;
+  } else if (this.warehouseEntryDate && !this.warehouseEntryDateStr) {
+    // Fallback: sync nếu Date có nhưng Str chưa có (cho data cũ)
+    this.warehouseEntryDateStr = makeVNDateStr(this.warehouseEntryDate);
+  }
+
+  if (this.isModified("expiryDate")) {
+    this.expiryDateStr = this.expiryDate ? makeVNDateStr(this.expiryDate) : null;
+  } else if (this.expiryDate && !this.expiryDateStr) {
+    // Fallback: sync nếu Date có nhưng Str chưa có (cho data cũ)
+    this.expiryDateStr = makeVNDateStr(this.expiryDate);
   }
 
   next();

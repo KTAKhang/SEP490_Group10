@@ -8,6 +8,9 @@ const CategoryRouter = express.Router();
 // Admin: CRUD Category
 CategoryRouter.post("/", inventoryAdminMiddleware, uploadCategoryImage, CategoryController.createCategory);
 
+// Admin và Warehouse staff: Xem thống kê danh mục
+CategoryRouter.get("/stats", inventoryAdminOrWarehouseMiddleware, CategoryController.getCategoryStats);
+
 // Admin và Warehouse staff: Xem danh sách categories
 CategoryRouter.get("/", inventoryAdminOrWarehouseMiddleware, CategoryController.getCategories);
 

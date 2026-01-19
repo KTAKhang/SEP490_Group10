@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const ProductModel = require("../models/ProductModel");
 const CategoryModel = require("../models/CategoryModel");
 const cloudinary = require("../config/cloudinaryConfig");
+const { getTodayInVietnam, formatDateVN, calculateDaysBetween } = require("../utils/dateVN");
 
 const createProduct = async (payload = {}) => {
   try {
@@ -17,6 +18,11 @@ const createProduct = async (payload = {}) => {
     }
     if (!category) return { status: "ERR", message: "Category là bắt buộc" };
 
+    // ✅ Validate brand: bắt buộc phải có (không cho phép null/empty)
+    if (!brand || !brand.toString().trim()) {
+      return { status: "ERR", message: "Brand là bắt buộc" };
+    }
+
     const categoryDoc = await CategoryModel.findById(category);
     if (!categoryDoc) return { status: "ERR", message: "Category không tồn tại" };
     
@@ -25,15 +31,43 @@ const createProduct = async (payload = {}) => {
       return { status: "ERR", message: "Không thể chọn category đã bị ẩn" };
     }
 
+    // ✅ Check unique constraint: không cho phép trùng (name + brand)
+    const normalizedName = name.toString().trim();
+    const normalizedBrand = brand.toString().trim();
+    const existingProduct = await ProductModel.findOne({
+      name: normalizedName,
+      brand: normalizedBrand,
+    });
+    if (existingProduct) {
+      return {
+        status: "ERR",
+        message: `Sản phẩm "${normalizedName}" với brand "${normalizedBrand}" đã tồn tại. Vui lòng sử dụng sản phẩm hiện có hoặc chọn brand khác.`,
+      };
+    }
+
+    // ✅ Validate ảnh: max 10 và length khớp (giống updateProductAdmin)
+    const newImages = Array.isArray(images) ? images : [];
+    const newImagePublicIds = Array.isArray(imagePublicIds) ? imagePublicIds : [];
+    
+    if (newImages.length > 10) {
+      return { status: "ERR", message: "Số lượng ảnh không được vượt quá 10" };
+    }
+    if (newImagePublicIds.length > 10) {
+      return { status: "ERR", message: "Số lượng imagePublicIds không được vượt quá 10" };
+    }
+    if (newImages.length !== newImagePublicIds.length) {
+      return { status: "ERR", message: "Số lượng images và imagePublicIds phải bằng nhau" };
+    }
+
     const product = new ProductModel({
       name: name.toString().trim(),
       short_desc: (short_desc ?? "").toString(),
       price: Number(price),
       plannedQuantity: Number(plannedQuantity),
       category: new mongoose.Types.ObjectId(category),
-      images: Array.isArray(images) ? images : [],
-      imagePublicIds: Array.isArray(imagePublicIds) ? imagePublicIds : [],
-      brand: (brand ?? "").toString(),
+      images: newImages,
+      imagePublicIds: newImagePublicIds,
+      brand: normalizedBrand,
       detail_desc: (detail_desc ?? "").toString(),
       status: status ?? true,
     });
@@ -58,6 +92,8 @@ const getProducts = async (filters = {}) => {
       status,
       receivingStatus,
       stockStatus,
+      sortBy = "createdAt",
+      sortOrder = "desc",
     } = filters;
 
     const pageNum = Math.max(1, parseInt(page) || 1);
@@ -71,8 +107,14 @@ const getProducts = async (filters = {}) => {
     if (receivingStatus) query.receivingStatus = receivingStatus;
     if (stockStatus) query.stockStatus = stockStatus;
 
+    // Sort options
+    const allowedSortFields = ["name", "price", "createdAt", "updatedAt", "status", "onHandQuantity", "receivedQuantity"];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortObj = { [sortField]: sortDirection };
+
     const [data, total] = await Promise.all([
-      ProductModel.find(query).populate("category", "name").sort({ createdAt: -1 }).skip(skip).limit(limitNum),
+      ProductModel.find(query).populate("category", "name").sort(sortObj).skip(skip).limit(limitNum),
       ProductModel.countDocuments(query),
     ]);
 
@@ -160,26 +202,30 @@ const updateProductAdmin = async (id, payload = {}) => {
       product.category = new mongoose.Types.ObjectId(payload.category);
     }
 
-    // Xử lý ảnh: xóa ảnh cũ không còn trong danh sách mới
+    // Xử lý ảnh: validate trước, set vào product, save, rồi mới xóa Cloudinary
+    let imagesToDelete = [];
     if (payload.images !== undefined || payload.imagePublicIds !== undefined) {
-      const oldImagePublicIds = Array.isArray(product.imagePublicIds) ? product.imagePublicIds : [];
+      const newImages = Array.isArray(payload.images) ? payload.images : [];
       const newImagePublicIds = Array.isArray(payload.imagePublicIds) ? payload.imagePublicIds : [];
       
-      // Tìm ảnh cũ cần xóa (không còn trong danh sách mới)
-      const imagesToDelete = oldImagePublicIds.filter(id => !newImagePublicIds.includes(id));
-      
-      // Xóa ảnh cũ trên Cloudinary
-      if (imagesToDelete.length > 0) {
-        try {
-          await Promise.all(imagesToDelete.map(id => cloudinary.uploader.destroy(id).catch(err => {
-            console.warn(`Không thể xóa ảnh ${id} trên Cloudinary:`, err.message);
-          })));
-        } catch (err) {
-          console.warn("Lỗi khi xóa ảnh cũ:", err.message);
-        }
+      // ✅ Validate max 10 ảnh và length khớp trước khi set vào product
+      if (newImages.length > 10) {
+        return { status: "ERR", message: "Số lượng ảnh không được vượt quá 10" };
+      }
+      if (newImagePublicIds.length > 10) {
+        return { status: "ERR", message: "Số lượng imagePublicIds không được vượt quá 10" };
+      }
+      if (newImages.length !== newImagePublicIds.length) {
+        return { status: "ERR", message: "Số lượng images và imagePublicIds phải bằng nhau" };
       }
       
-      product.images = Array.isArray(payload.images) ? payload.images : [];
+      const oldImagePublicIds = Array.isArray(product.imagePublicIds) ? product.imagePublicIds : [];
+      
+      // Tìm ảnh cũ cần xóa (không còn trong danh sách mới) - lưu lại để xóa sau
+      imagesToDelete = oldImagePublicIds.filter(id => !newImagePublicIds.includes(id));
+      
+      // ✅ Set ảnh mới vào product (chưa xóa Cloudinary)
+      product.images = newImages;
       product.imagePublicIds = newImagePublicIds;
     }
     
@@ -187,7 +233,19 @@ const updateProductAdmin = async (id, payload = {}) => {
     if (payload.detail_desc !== undefined) product.detail_desc = (payload.detail_desc ?? "").toString();
     if (payload.status !== undefined) product.status = payload.status;
 
+    // ✅ Save product trước
     await product.save();
+
+    // ✅ Xóa ảnh cũ trên Cloudinary sau khi save thành công (không mất ảnh trong mọi trường hợp)
+    if (imagesToDelete.length > 0) {
+      try {
+        await Promise.all(imagesToDelete.map(id => cloudinary.uploader.destroy(id).catch(err => {
+          console.warn(`Không thể xóa ảnh ${id} trên Cloudinary:`, err.message);
+        })));
+      } catch (err) {
+        console.warn("Lỗi khi xóa ảnh cũ:", err.message);
+      }
+    }
 
     const populated = await ProductModel.findById(product._id).populate("category", "name");
     return { status: "OK", message: "Cập nhật sản phẩm thành công", data: populated };
@@ -196,16 +254,26 @@ const updateProductAdmin = async (id, payload = {}) => {
   }
 };
 
+
 const updateProductExpiryDate = async (id, payload = {}) => {
   try {
     const product = await ProductModel.findById(id);
     if (!product) return { status: "ERR", message: "Sản phẩm không tồn tại" };
 
-    // Kiểm tra sản phẩm đã có warehouseEntryDate chưa
+    // ✅ Kiểm tra sản phẩm đã có warehouseEntryDate chưa
     if (!product.warehouseEntryDate) {
       return { 
         status: "ERR", 
         message: "Sản phẩm chưa được nhập kho, không thể cập nhật hạn sử dụng" 
+      };
+    }
+
+    // ✅ Logic: Khóa việc cập nhật hạn sử dụng sau khi đã set lần đầu (check cả Date và Str)
+    const hasExpiry = !!(product.expiryDate || product.expiryDateStr);
+    if (hasExpiry) {
+      return { 
+        status: "ERR", 
+        message: "Hạn sử dụng đã được thiết lập và không thể thay đổi. Hạn sử dụng chỉ có thể được đặt một lần sau khi đã có ngày nhập kho (warehouseEntryDate)." 
       };
     }
 
@@ -226,28 +294,28 @@ const updateProductExpiryDate = async (id, payload = {}) => {
       // Reset về 00:00:00 để so sánh ngày
       newExpiryDate.setHours(0, 0, 0, 0);
       
-      // Validate: expiryDate >= ngày hiện tại + 1 ngày
-      const now = new Date();
-      now.setHours(0, 0, 0, 0);
-      const minDate = new Date(now);
+      // ✅ Validate: expiryDate >= ngày hiện tại + 1 ngày (theo timezone Asia/Ho_Chi_Minh)
+      const today = getTodayInVietnam();
+      const minDate = new Date(today);
       minDate.setDate(minDate.getDate() + 1);
       
       if (newExpiryDate < minDate) {
+        // ✅ Format date theo timezone VN thay vì toISOString() (UTC)
+        const minDateStr = formatDateVN(minDate);
         return { 
           status: "ERR", 
-          message: `Hạn sử dụng phải tối thiểu từ ngày ${minDate.toISOString().split('T')[0]} (ngày mai)` 
+          message: `Hạn sử dụng phải tối thiểu từ ngày ${minDateStr} (ngày mai theo timezone Asia/Ho_Chi_Minh)` 
         };
       }
     } catch (err) {
       return { status: "ERR", message: "expiryDate không hợp lệ" };
     }
 
-    // Tính shelfLifeDays từ warehouseEntryDate và expiryDate
+    // ✅ Validate: expiryDate phải sau warehouseEntryDate
     const warehouseEntryDate = new Date(product.warehouseEntryDate);
     warehouseEntryDate.setHours(0, 0, 0, 0);
     
-    const diffTime = newExpiryDate.getTime() - warehouseEntryDate.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const diffDays = calculateDaysBetween(warehouseEntryDate, newExpiryDate);
     
     if (diffDays <= 0) {
       return { 
@@ -256,9 +324,9 @@ const updateProductExpiryDate = async (id, payload = {}) => {
       };
     }
 
-    // Cập nhật expiryDate và shelfLifeDays
+    // ✅ Cập nhật expiryDate và expiryDateStr
     product.expiryDate = newExpiryDate;
-    product.shelfLifeDays = diffDays;
+    product.expiryDateStr = formatDateVN(newExpiryDate);
 
     await product.save();
 
@@ -298,6 +366,63 @@ const deleteProduct = async (id) => {
   }
 };
 
+const getProductStats = async () => {
+  try {
+    // ✅ Cải thiện logic "sắp hết" với ngưỡng thông minh
+    // Rule: lowStockThreshold = max(10, plannedQuantity * 0.1)
+    // "Sắp hết" nếu onHandQuantity <= lowStockThreshold
+    const baseThreshold = 10; // Ngưỡng cơ bản
+    const percentageThreshold = 0.1; // 10%
+
+    const [
+      total,
+      inStock,
+      outOfStock,
+      lowStock,
+    ] = await Promise.all([
+      // Tổng sản phẩm
+      ProductModel.countDocuments({}),
+      // Còn hàng (IN_STOCK)
+      ProductModel.countDocuments({ stockStatus: "IN_STOCK" }),
+      // Hết hàng (OUT_OF_STOCK)
+      ProductModel.countDocuments({ stockStatus: "OUT_OF_STOCK" }),
+      // ✅ Sắp hết: IN_STOCK và onHandQuantity <= max(10, plannedQuantity * 0.1)
+      ProductModel.countDocuments({
+        stockStatus: "IN_STOCK",
+        $expr: {
+          $and: [
+            { $gt: ["$onHandQuantity", 0] }, // Đảm bảo không tính sản phẩm hết hàng
+            {
+              $lte: [
+                "$onHandQuantity",
+                {
+                  $max: [
+                    baseThreshold, // Ngưỡng cơ bản: 10
+                    { $multiply: ["$plannedQuantity", percentageThreshold] }, // 10% plannedQuantity
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    ]);
+
+    return {
+      status: "OK",
+      message: "Lấy thống kê sản phẩm thành công",
+      data: {
+        total,
+        inStock,
+        outOfStock,
+        lowStock,
+      },
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
 module.exports = {
   createProduct,
   getProducts,
@@ -305,5 +430,6 @@ module.exports = {
   updateProductAdmin,
   updateProductExpiryDate,
   deleteProduct,
+  getProductStats,
 };
 

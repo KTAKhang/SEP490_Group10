@@ -60,6 +60,16 @@ const deleteProduct = async (req, res) => {
   }
 };
 
+const getProductStats = async (req, res) => {
+  try {
+    const response = await ProductService.getProductStats();
+    if (response.status === "ERR") return res.status(400).json(response);
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({ status: "ERR", message: error.message });
+  }
+};
+
 module.exports = {
   createProduct,
   getProducts,
@@ -67,5 +77,6 @@ module.exports = {
   updateProductAdmin,
   updateProductExpiryDate,
   deleteProduct,
+  getProductStats,
 };
 

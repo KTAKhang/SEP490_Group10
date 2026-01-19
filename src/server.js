@@ -5,6 +5,7 @@ const bodyParser = require("body-parser");
 const routes = require("./routes");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
+const { startProductBatchJob } = require("./jobs/productBatchJob");
 
 dotenv.config();
 
@@ -38,7 +39,12 @@ routes(app);
 // ===== DB connect =====
 mongoose
   .connect(process.env.MONGO_URL)
-  .then(() => console.log("✅ Connected to MongoDB"))
+  .then(() => {
+    console.log("✅ Connected to MongoDB");
+
+    // 🚀 START CRON JOBS (QUAN TRỌNG)
+    // require("./crons/vnpayRefund.cron");
+  })
   .catch((error) =>
     console.error("❌ MongoDB connection error:", error)
   );
@@ -46,4 +52,9 @@ mongoose
 // ===== Start Server =====
 app.listen(port, "0.0.0.0", () => {
   console.log(`🚀 Auth Service running on http://localhost:${port}`);
+
+  
+  // ✅ Start scheduled jobs
+  startProductBatchJob();
 });
+
