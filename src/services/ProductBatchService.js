@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const ProductModel = require("../models/ProductModel");
 const ProductBatchHistoryModel = require("../models/ProductBatchHistoryModel");
 const InventoryTransactionModel = require("../models/InventoryTransactionModel");
+const HarvestBatchModel = require("../models/HarvestBatchModel");
 const { getTodayInVietnam, formatDateVN, compareDates } = require("../utils/dateVN");
 
 /**
@@ -126,9 +127,35 @@ const resetProductForNewBatch = async (productId, completionReason = "SOLD_OUT")
       discardedQuantity = Math.max(0, batchSnapshot.receivedQuantity - soldQuantity);
     }
 
+    // ✅ Tìm harvestBatch liên quan (nếu có)
+    // Tìm harvestBatch đã được nhập kho (receivedQuantity > 0) và có status APPROVED
+    // Ưu tiên harvestBatch có harvestDate gần với warehouseEntryDate nhất
+    let harvestBatchId = null;
+    if (product.supplier && batchSnapshot.warehouseEntryDateStr) {
+      try {
+        const harvestBatch = await HarvestBatchModel.findOne({
+          product: new mongoose.Types.ObjectId(productId),
+          supplier: product.supplier,
+          status: "APPROVED",
+          receivedQuantity: { $gt: 0 }, // Đã được nhập kho
+        })
+          .sort({ harvestDate: -1 }) // Ưu tiên harvestBatch mới nhất
+          .lean()
+          .session(session);
+
+        if (harvestBatch) {
+          harvestBatchId = harvestBatch._id;
+        }
+      } catch (error) {
+        console.error("Error finding harvestBatch:", error);
+        // Không throw error, chỉ log (không bắt buộc phải có harvestBatch)
+      }
+    }
+
     // ✅ Tạo batch history với dữ liệu snapshot (TRƯỚC KHI reset)
     const batchHistory = new ProductBatchHistoryModel({
       product: new mongoose.Types.ObjectId(productId),
+      harvestBatch: harvestBatchId, // ✅ Liên kết với harvestBatch nếu có
       batchNumber: batchSnapshot.batchNumber,
       plannedQuantity: batchSnapshot.plannedQuantity,
       receivedQuantity: batchSnapshot.receivedQuantity,
@@ -336,6 +363,7 @@ const getProductBatchHistory = async (productId, filters = {}) => {
 
     const [data, total] = await Promise.all([
       ProductBatchHistoryModel.find(query)
+        .populate("harvestBatch", "batchCode batchNumber harvestDate quantity receivedQuantity status") // ✅ Populate harvestBatch
         .sort(sortObj)
         .skip(skip)
         .limit(limitNum)

@@ -9,6 +9,14 @@ const productBatchHistorySchema = new mongoose.Schema(
       index: true,
     },
 
+    // ✅ Liên kết với Harvest Batch (nếu có)
+    harvestBatch: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "harvest_batches",
+      default: null,
+      // ✅ Index được định nghĩa ở dưới bằng schema.index()
+    },
+
     // Số lô (tăng dần theo mỗi lần reset)
     batchNumber: {
       type: Number,
@@ -103,5 +111,6 @@ const productBatchHistorySchema = new mongoose.Schema(
 productBatchHistorySchema.index({ product: 1, batchNumber: -1 });
 productBatchHistorySchema.index({ product: 1, completedDate: -1 });
 productBatchHistorySchema.index({ completionReason: 1 });
+productBatchHistorySchema.index({ harvestBatch: 1 }); // ✅ Index cho harvestBatch
 
 module.exports = mongoose.model("product_batch_histories", productBatchHistorySchema);
