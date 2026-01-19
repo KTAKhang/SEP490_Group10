@@ -6,7 +6,7 @@ const QualityVerificationModel = require("../models/QualityVerificationModel");
 const SupplierActivityLogModel = require("../models/SupplierActivityLogModel");
 
 /**
- * Tạo lô thu hoạch (QC Staff)
+ * Tạo lô thu hoạch (Admin)
  */
 const createHarvestBatch = async (userId, payload = {}) => {
   try {
@@ -123,7 +123,7 @@ const createHarvestBatch = async (userId, payload = {}) => {
 };
 
 /**
- * Cập nhật lô thu hoạch (QC Staff)
+ * Cập nhật lô thu hoạch (Admin)
  */
 const updateHarvestBatch = async (harvestBatchId, userId, payload = {}) => {
   try {
@@ -249,7 +249,7 @@ const updateHarvestBatch = async (harvestBatchId, userId, payload = {}) => {
 };
 
 /**
- * Xóa lô thu hoạch (QC Staff)
+ * Xóa lô thu hoạch (Admin)
  */
 const deleteHarvestBatch = async (harvestBatchId, userId) => {
   try {
@@ -309,7 +309,7 @@ const deleteHarvestBatch = async (harvestBatchId, userId) => {
 };
 
 /**
- * Lấy danh sách lô thu hoạch (QC Staff)
+ * Lấy danh sách lô thu hoạch (Admin)
  */
 const getHarvestBatches = async (filters = {}) => {
   try {
@@ -320,6 +320,19 @@ const getHarvestBatches = async (filters = {}) => {
       supplierId,
       productId,
       status,
+      qualityGrade,
+      minQuantity,
+      maxQuantity,
+      minReceivedQuantity,
+      maxReceivedQuantity,
+      harvestDateFrom,
+      harvestDateTo,
+      createdFrom,
+      createdTo,
+      updatedFrom,
+      updatedTo,
+      hasInventoryTransactions,
+      createdBy,
       sortBy = "createdAt",
       sortOrder = "desc",
     } = filters;
@@ -331,10 +344,15 @@ const getHarvestBatches = async (filters = {}) => {
     const query = {};
 
     // Search
-    if (search) {
+    const searchValue = search?.toString().trim();
+    if (searchValue) {
+      const escaped = searchValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(escaped, "i");
       query.$or = [
-        { batchNumber: { $regex: search, $options: "i" } },
-        { batchCode: { $regex: search, $options: "i" } },
+        { batchNumber: regex },
+        { batchCode: regex },
+        { location: regex },
+        { notes: regex },
       ];
     }
 
@@ -351,10 +369,122 @@ const getHarvestBatches = async (filters = {}) => {
       query.status = status;
     }
 
+    if (qualityGrade && ["A", "B", "C", "D"].includes(qualityGrade)) {
+      query.qualityGrade = qualityGrade;
+    }
+
+    if (minQuantity !== undefined || maxQuantity !== undefined) {
+      query.quantity = {};
+      if (minQuantity !== undefined && !Number.isNaN(Number(minQuantity))) {
+        query.quantity.$gte = Number(minQuantity);
+      }
+      if (maxQuantity !== undefined && !Number.isNaN(Number(maxQuantity))) {
+        query.quantity.$lte = Number(maxQuantity);
+      }
+      if (Object.keys(query.quantity).length === 0) {
+        delete query.quantity;
+      }
+    }
+
+    if (minReceivedQuantity !== undefined || maxReceivedQuantity !== undefined) {
+      query.receivedQuantity = {};
+      if (minReceivedQuantity !== undefined && !Number.isNaN(Number(minReceivedQuantity))) {
+        query.receivedQuantity.$gte = Number(minReceivedQuantity);
+      }
+      if (maxReceivedQuantity !== undefined && !Number.isNaN(Number(maxReceivedQuantity))) {
+        query.receivedQuantity.$lte = Number(maxReceivedQuantity);
+      }
+      if (Object.keys(query.receivedQuantity).length === 0) {
+        delete query.receivedQuantity;
+      }
+    }
+
+    if (harvestDateFrom || harvestDateTo) {
+      const range = {};
+      if (harvestDateFrom) {
+        const fromDate = new Date(harvestDateFrom);
+        if (!Number.isNaN(fromDate.getTime())) {
+          fromDate.setHours(0, 0, 0, 0);
+          range.$gte = fromDate;
+        }
+      }
+      if (harvestDateTo) {
+        const toDate = new Date(harvestDateTo);
+        if (!Number.isNaN(toDate.getTime())) {
+          toDate.setHours(23, 59, 59, 999);
+          range.$lte = toDate;
+        }
+      }
+      if (Object.keys(range).length > 0) {
+        query.harvestDate = range;
+      }
+    }
+
+    if (createdFrom || createdTo) {
+      const range = {};
+      if (createdFrom) {
+        const fromDate = new Date(createdFrom);
+        if (!Number.isNaN(fromDate.getTime())) {
+          fromDate.setHours(0, 0, 0, 0);
+          range.$gte = fromDate;
+        }
+      }
+      if (createdTo) {
+        const toDate = new Date(createdTo);
+        if (!Number.isNaN(toDate.getTime())) {
+          toDate.setHours(23, 59, 59, 999);
+          range.$lte = toDate;
+        }
+      }
+      if (Object.keys(range).length > 0) {
+        query.createdAt = range;
+      }
+    }
+
+    if (updatedFrom || updatedTo) {
+      const range = {};
+      if (updatedFrom) {
+        const fromDate = new Date(updatedFrom);
+        if (!Number.isNaN(fromDate.getTime())) {
+          fromDate.setHours(0, 0, 0, 0);
+          range.$gte = fromDate;
+        }
+      }
+      if (updatedTo) {
+        const toDate = new Date(updatedTo);
+        if (!Number.isNaN(toDate.getTime())) {
+          toDate.setHours(23, 59, 59, 999);
+          range.$lte = toDate;
+        }
+      }
+      if (Object.keys(range).length > 0) {
+        query.updatedAt = range;
+      }
+    }
+
+    if (hasInventoryTransactions !== undefined) {
+      const hasTx = hasInventoryTransactions === "true" || hasInventoryTransactions === true;
+      query.inventoryTransactionIds = hasTx ? { $exists: true, $ne: [] } : { $in: [null, []] };
+    }
+
+    if (createdBy && mongoose.isValidObjectId(createdBy)) {
+      query.createdBy = new mongoose.Types.ObjectId(createdBy);
+    }
+
     // Sort
-    const allowedSortFields = ["batchNumber", "harvestDate", "quantity", "status", "createdAt", "updatedAt"];
+    const allowedSortFields = [
+      "batchNumber",
+      "batchCode",
+      "harvestDate",
+      "quantity",
+      "receivedQuantity",
+      "status",
+      "qualityGrade",
+      "createdAt",
+      "updatedAt",
+    ];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
-    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortDirection = sortOrder === "asc" || sortOrder === "1" || sortOrder === 1 ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
 
     const [data, total] = await Promise.all([

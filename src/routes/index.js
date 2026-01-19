@@ -8,6 +8,7 @@ const ProductRouter = require("./ProductRouter");
 const InventoryRouter = require("./InventoryRouter");
 
 const SupplierRouter = require("./SupplierRouter");
+const HarvestBatchRouter = require("./HarvestBatchRouter");
 
 const NewsRouter = require("./NewsRouter");
 const ShopRouter = require("./ShopRouter");
@@ -50,11 +51,12 @@ const routes = (app) => {
     // Admin routes
     app.use("/admin/categories", CategoryRouter);
     app.use("/admin/products", ProductRouter);
+    app.use("/admin/harvest-batch", HarvestBatchRouter);
 
     app.use("/admin/suppliers/activity-log", require("./SupplierActivityLogRouter")); // ✅ Admin only - Xem Activity Log của QC Staff
     
-    // QC Staff routes - Supplier Management
-    app.use("/qc-staff/suppliers", SupplierRouter); // ✅ Includes: /harvest-batch, /quality, /performance
+    // Admin routes - Supplier Management
+    app.use("/admin/suppliers", SupplierRouter); // ✅ Includes: /harvest-batch, /quality, /performance
     // Note: /for-brand trong SupplierRouter dùng authAdminMiddleware (Admin only)
     
 

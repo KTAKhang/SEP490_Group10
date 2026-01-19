@@ -12,7 +12,7 @@ const QualityVerificationService = require("./QualityVerificationService");
 const SupplierPerformanceService = require("./SupplierPerformanceService");
 
 /**
- * Tạo nhà cung cấp mới (QC Staff)
+ * Tạo nhà cung cấp mới (Admin)
  */
 const createSupplier = async (userId, payload = {}) => {
   try {
@@ -133,7 +133,7 @@ const createSupplier = async (userId, payload = {}) => {
 };
 
 /**
- * Cập nhật thông tin nhà cung cấp (QC Staff)
+ * Cập nhật thông tin nhà cung cấp (Admin)
  */
 const updateSupplier = async (supplierId, userId, payload = {}) => {
   try {
@@ -292,6 +292,19 @@ const getSuppliers = async (filters = {}) => {
       type,
       cooperationStatus,
       status,
+      minPerformanceScore,
+      maxPerformanceScore,
+      minTotalBatches,
+      maxTotalBatches,
+      minTotalProductsSupplied,
+      maxTotalProductsSupplied,
+      createdFrom,
+      createdTo,
+      updatedFrom,
+      updatedTo,
+      hasEmail,
+      hasPhone,
+      productId,
       sortBy = "createdAt",
       sortOrder = "desc",
     } = filters;
@@ -302,9 +315,19 @@ const getSuppliers = async (filters = {}) => {
 
     const query = {};
 
-    // Search theo tên
-    if (search) {
-      query.name = { $regex: search, $options: "i" };
+    // Search theo nhiều trường
+    const searchValue = search?.toString().trim();
+    if (searchValue) {
+      const escaped = searchValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(escaped, "i");
+      query.$or = [
+        { name: regex },
+        { code: regex },
+        { phone: regex },
+        { email: regex },
+        { contactPerson: regex },
+        { address: regex },
+      ];
     }
 
     // Filter
@@ -320,10 +343,120 @@ const getSuppliers = async (filters = {}) => {
       query.status = status === "true" || status === true;
     }
 
+    // Filter theo hiệu suất
+    if (minPerformanceScore !== undefined || maxPerformanceScore !== undefined) {
+      query.performanceScore = {};
+      if (minPerformanceScore !== undefined && !Number.isNaN(Number(minPerformanceScore))) {
+        query.performanceScore.$gte = Number(minPerformanceScore);
+      }
+      if (maxPerformanceScore !== undefined && !Number.isNaN(Number(maxPerformanceScore))) {
+        query.performanceScore.$lte = Number(maxPerformanceScore);
+      }
+      if (Object.keys(query.performanceScore).length === 0) {
+        delete query.performanceScore;
+      }
+    }
+
+    // Filter theo tổng lô và tổng sản phẩm
+    if (minTotalBatches !== undefined || maxTotalBatches !== undefined) {
+      query.totalBatches = {};
+      if (minTotalBatches !== undefined && !Number.isNaN(Number(minTotalBatches))) {
+        query.totalBatches.$gte = Number(minTotalBatches);
+      }
+      if (maxTotalBatches !== undefined && !Number.isNaN(Number(maxTotalBatches))) {
+        query.totalBatches.$lte = Number(maxTotalBatches);
+      }
+      if (Object.keys(query.totalBatches).length === 0) {
+        delete query.totalBatches;
+      }
+    }
+
+    if (minTotalProductsSupplied !== undefined || maxTotalProductsSupplied !== undefined) {
+      query.totalProductsSupplied = {};
+      if (minTotalProductsSupplied !== undefined && !Number.isNaN(Number(minTotalProductsSupplied))) {
+        query.totalProductsSupplied.$gte = Number(minTotalProductsSupplied);
+      }
+      if (maxTotalProductsSupplied !== undefined && !Number.isNaN(Number(maxTotalProductsSupplied))) {
+        query.totalProductsSupplied.$lte = Number(maxTotalProductsSupplied);
+      }
+      if (Object.keys(query.totalProductsSupplied).length === 0) {
+        delete query.totalProductsSupplied;
+      }
+    }
+
+    // Filter theo thời gian tạo/cập nhật
+    if (createdFrom || createdTo) {
+      const createdRange = {};
+      if (createdFrom) {
+        const fromDate = new Date(createdFrom);
+        if (!Number.isNaN(fromDate.getTime())) {
+          fromDate.setHours(0, 0, 0, 0);
+          createdRange.$gte = fromDate;
+        }
+      }
+      if (createdTo) {
+        const toDate = new Date(createdTo);
+        if (!Number.isNaN(toDate.getTime())) {
+          toDate.setHours(23, 59, 59, 999);
+          createdRange.$lte = toDate;
+        }
+      }
+      if (Object.keys(createdRange).length > 0) {
+        query.createdAt = createdRange;
+      }
+    }
+
+    if (updatedFrom || updatedTo) {
+      const updatedRange = {};
+      if (updatedFrom) {
+        const fromDate = new Date(updatedFrom);
+        if (!Number.isNaN(fromDate.getTime())) {
+          fromDate.setHours(0, 0, 0, 0);
+          updatedRange.$gte = fromDate;
+        }
+      }
+      if (updatedTo) {
+        const toDate = new Date(updatedTo);
+        if (!Number.isNaN(toDate.getTime())) {
+          toDate.setHours(23, 59, 59, 999);
+          updatedRange.$lte = toDate;
+        }
+      }
+      if (Object.keys(updatedRange).length > 0) {
+        query.updatedAt = updatedRange;
+      }
+    }
+
+    // Filter theo email/phone tồn tại
+    if (hasEmail !== undefined) {
+      const hasEmailBool = hasEmail === "true" || hasEmail === true;
+      query.email = hasEmailBool ? { $exists: true, $ne: "" } : { $in: [null, ""] };
+    }
+    if (hasPhone !== undefined) {
+      const hasPhoneBool = hasPhone === "true" || hasPhone === true;
+      query.phone = hasPhoneBool ? { $exists: true, $ne: "" } : { $in: [null, ""] };
+    }
+
+    // Filter theo sản phẩm cung cấp
+    if (productId && mongoose.isValidObjectId(productId)) {
+      query["suppliedProducts.product"] = new mongoose.Types.ObjectId(productId);
+    }
+
     // Sort
-    const allowedSortFields = ["name", "type", "cooperationStatus", "performanceScore", "createdAt", "updatedAt"];
+    const allowedSortFields = [
+      "name",
+      "type",
+      "code",
+      "cooperationStatus",
+      "performanceScore",
+      "totalBatches",
+      "totalProductsSupplied",
+      "status",
+      "createdAt",
+      "updatedAt",
+    ];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
-    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortDirection = sortOrder === "asc" || sortOrder === "1" || sortOrder === 1 ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
 
     const [data, total] = await Promise.all([
@@ -354,7 +487,7 @@ const getSuppliers = async (filters = {}) => {
 };
 
 /**
- * Xóa nhà cung cấp (QC Staff) - chỉ cho phép xóa nếu không có dữ liệu liên quan
+ * Xóa nhà cung cấp (Admin) - chỉ cho phép xóa nếu không có dữ liệu liên quan
  */
 const deleteSupplier = async (supplierId, userId) => {
   try {
@@ -476,7 +609,7 @@ const getSuppliersForBrand = async () => {
 };
 
 /**
- * Cập nhật giá mua từ nhà cung cấp (QC Staff)
+ * Cập nhật giá mua từ nhà cung cấp (Admin)
  */
 const updatePurchaseCost = async (supplierId, userId, payload = {}) => {
   try {
@@ -544,7 +677,7 @@ const updatePurchaseCost = async (supplierId, userId, payload = {}) => {
 };
 
 /**
- * Cập nhật trạng thái hợp tác (QC Staff)
+ * Cập nhật trạng thái hợp tác (Admin)
  */
 const updateCooperationStatus = async (supplierId, userId, payload = {}) => {
   try {
