@@ -22,7 +22,7 @@ const harvestBatchSchema = new mongoose.Schema(
       trim: true,
       uppercase: true,
       unique: true,
-      required: true, // ✅ Đảm bảo luôn có giá trị
+      required: false, // ✅ Đảm bảo luôn có giá trị
       maxlength: [30, "Mã lô thu hoạch không được vượt quá 30 ký tự"],
     },
 
