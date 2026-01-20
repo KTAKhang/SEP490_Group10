@@ -84,11 +84,30 @@ const inventoryAdminOrWarehouseMiddleware = async (req, res, next) => {
   });
 };
 
+// Middleware cho phép Admin, Warehouse staff và QC Staff (dùng cho xem sản phẩm - QC Staff cần để update purchase cost)
+const inventoryAdminOrWarehouseOrQcStaffMiddleware = async (req, res, next) => {
+  await inventoryAuthMiddleware(req, res, async () => {
+    const roleName = req.user?.role || "customer";
+    const isAdmin = roleName === "admin";
+    const isWarehouse = WAREHOUSE_ROLE_NAMES.includes(roleName);
+    const isQcStaff = roleName === "qc_staff";
+    
+    if (!isAdmin && !isWarehouse && !isQcStaff) {
+      return res.status(403).json({
+        status: "ERR",
+        message: "Chỉ Admin, nhân viên kho hoặc nhân viên QC mới có quyền truy cập",
+      });
+    }
+    next();
+  });
+};
+
 module.exports = {
   inventoryAuthMiddleware,
   inventoryAdminMiddleware,
   inventoryWarehouseMiddleware,
   inventoryAdminOrWarehouseMiddleware,
+  inventoryAdminOrWarehouseOrQcStaffMiddleware,
   WAREHOUSE_ROLE_NAMES,
 };
 

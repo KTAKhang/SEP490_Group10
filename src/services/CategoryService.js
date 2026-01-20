@@ -1,4 +1,5 @@
 const CategoryModel = require("../models/CategoryModel");
+const ProductModel = require("../models/ProductModel");
 const cloudinary = require("../config/cloudinaryConfig");
 
 const createCategory = async ({ name, description, image, imagePublicId, status }) => {
@@ -31,7 +32,7 @@ const createCategory = async ({ name, description, image, imagePublicId, status 
   }
 };
 
-const getCategories = async ({ page = 1, limit = 20, search = "", status } = {}) => {
+const getCategories = async ({ page = 1, limit = 20, search = "", status, sortBy = "createdAt", sortOrder = "desc" } = {}) => {
   try {
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
@@ -41,8 +42,14 @@ const getCategories = async ({ page = 1, limit = 20, search = "", status } = {})
     if (search) query.name = { $regex: search, $options: "i" };
     if (status !== undefined) query.status = status === "true" || status === true;
 
+    // Sort options
+    const allowedSortFields = ["name", "createdAt", "updatedAt", "status"];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortObj = { [sortField]: sortDirection };
+
     const [data, total] = await Promise.all([
-      CategoryModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limitNum),
+      CategoryModel.find(query).sort(sortObj).skip(skip).limit(limitNum),
       CategoryModel.countDocuments(query),
     ]);
 
@@ -133,6 +140,15 @@ const deleteCategory = async (id) => {
     const category = await CategoryModel.findById(id);
     if (!category) return { status: "ERR", message: "Danh mục không tồn tại" };
 
+    // Kiểm tra xem có sản phẩm nào đang sử dụng category này không
+    const productCount = await ProductModel.countDocuments({ category: id });
+    if (productCount > 0) {
+      return { 
+        status: "ERR", 
+        message: `Không thể xóa danh mục này vì có ${productCount} sản phẩm đang sử dụng. Vui lòng xóa hoặc chuyển các sản phẩm sang danh mục khác trước.` 
+      };
+    }
+
     // Xóa ảnh trên Cloudinary nếu có
     if (category.imagePublicId) {
       try {
@@ -149,11 +165,34 @@ const deleteCategory = async (id) => {
   }
 };
 
+const getCategoryStats = async () => {
+  try {
+    const [total, active, hidden] = await Promise.all([
+      CategoryModel.countDocuments({}),
+      CategoryModel.countDocuments({ status: true }),
+      CategoryModel.countDocuments({ status: false }),
+    ]);
+
+    return {
+      status: "OK",
+      message: "Lấy thống kê danh mục thành công",
+      data: {
+        total,
+        active,
+        hidden,
+      },
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
 module.exports = {
   createCategory,
   getCategories,
   getCategoryById,
   updateCategory,
   deleteCategory,
+  getCategoryStats,
 };
 
