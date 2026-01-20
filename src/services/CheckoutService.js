@@ -33,7 +33,7 @@ const checkoutHold = async (
     const cartItems = await CartDetailModel
       .find({
         cart_id: cart._id,
-        product_id: { $in: selected_product_ids }
+        product_id: { $in: selected_product_ids },
       })
       .session(session);
 
@@ -65,14 +65,11 @@ const checkoutHold = async (
           user_id,
           product_id: product._id,
           checkout_session_id,
-          expiresAt: { $gt: new Date() }
+          expiresAt: { $gt: new Date() },
         })
         .session(session);
 
-      if (existingLock) {
-        // 👉 User reload / mở lại web → giữ nguyên lock
-        continue;
-      }
+      if (existingLock) continue;
 
       /* =======================
          3️⃣ CHECK COOLDOWN
@@ -81,7 +78,7 @@ const checkoutHold = async (
         .findOne({
           user_id,
           product_id: product._id,
-          cooldownUntil: { $gt: new Date() }
+          cooldownUntil: { $gt: new Date() },
         })
         .session(session);
 
@@ -100,7 +97,7 @@ const checkoutHold = async (
         .countDocuments({
           user_id,
           product_id: product._id,
-          createdAt: { $gte: startOfDay }
+          createdAt: { $gte: startOfDay },
         })
         .session(session);
 
@@ -117,15 +114,15 @@ const checkoutHold = async (
           {
             $match: {
               product_id: product._id,
-              expiresAt: { $gt: new Date() }
-            }
+              expiresAt: { $gt: new Date() },
+            },
           },
           {
             $group: {
               _id: null,
-              total: { $sum: "$quantity" }
-            }
-          }
+              total: { $sum: "$quantity" },
+            },
+          },
         ])
         .session(session);
 
@@ -136,7 +133,7 @@ const checkoutHold = async (
 
       if (lockedQty + item.quantity > maxLock)
         throw new Error(
-          `Sản phẩm ${product.name} đang được nhiều người thanh toán, vui lòng giảm số lượng`
+          `Sản phẩm ${product.name} đang được nhiều người thanh toán`
         );
 
       /* =======================
@@ -146,7 +143,7 @@ const checkoutHold = async (
         {
           user_id,
           product_id: product._id,
-          checkout_session_id: { $ne: checkout_session_id }
+          checkout_session_id: { $ne: checkout_session_id },
         },
         { session }
       );
@@ -166,22 +163,54 @@ const checkoutHold = async (
             ),
             cooldownUntil: new Date(
               Date.now() + COOLDOWN_MINUTES * 60 * 1000
-            )
-          }
+            ),
+          },
         ],
         { session }
       );
     }
 
     /* =======================
-       COMMIT
+       COMMIT TRANSACTION
     ======================= */
     await session.commitTransaction();
     session.endSession();
 
+    /* =======================
+       🔥 RETURN CHỈ ITEM ĐƯỢC SELECT
+    ======================= */
+    const checkoutItems = await CartDetailModel
+      .find({
+        cart_id: cart._id,
+        product_id: { $in: selected_product_ids },
+      })
+      .populate(
+        "product_id",
+        "name images price onHandQuantity status"
+      );
+
+    const formattedItems = checkoutItems.map((item) => ({
+      product_id: item.product_id._id,
+      name: item.product_id.name,
+      image: item.product_id.images?.[0],
+      price: item.price,
+      quantity: item.quantity,
+      in_stock: item.product_id.onHandQuantity,
+      status: item.product_id.status,
+      warning: !item.product_id.status
+        ? "Sản phẩm đã ngừng bán"
+        : item.product_id.onHandQuantity <= 0
+        ? "Sản phẩm tạm hết hàng"
+        : "Còn hàng",
+      subtotal: item.quantity * item.price,
+    }));
+
     return {
       status: "OK",
-      message: "Đã giữ hàng, vui lòng thanh toán trong 15 phút"
+      message: "Đã giữ hàng, vui lòng thanh toán trong 15 phút",
+      checkout_session_id,
+      item_count: formattedItems.length,
+      items: formattedItems,
     };
 
   } catch (error) {
@@ -190,10 +219,14 @@ const checkoutHold = async (
 
     return {
       status: "ERR",
-      message: error.message || "Checkout hold thất bại"
+      message: error.message || "Checkout hold thất bại",
+      checkout_session_id,
+      item_count: 0,
+      items: [],
     };
   }
 };
+
 
 const cancelCheckout = async (user_id, checkout_session_id) => {
   if (!checkout_session_id) {

@@ -5,6 +5,7 @@ const PaymentModel = require("../models/PaymentModel");
 const OrderStatusModel = require("../models/OrderStatusModel");
 const { createVnpayUrl,refund } = require("../utils/createVnpayUrl");
 const { vnpConfig } = require("../config/vnpayConfig");
+const { default: mongoose } = require("mongoose");
 
 /* =============================
    CREATE VNPAY URL
@@ -41,83 +42,178 @@ const createVnpayPaymentUrl = async (req, res) => {
    VNPAY RETURN URL
 ============================= */
 const vnpayReturn = async (req, res) => {
-  // 1️⃣ LẤY RAW QUERY STRING (QUAN TRỌNG)
-  const rawQuery = req.originalUrl.split("?")[1];
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  // 2️⃣ PARSE NHƯNG KHÔNG DECODE "+"
-  const vnpParams = qs.parse(rawQuery, {
-    ignoreQueryPrefix: true,
-    decoder(str) {
-      return str;
-    },
-  });
+  try {
+    /* =======================
+       1️⃣ GET RAW QUERY
+    ======================= */
+    const rawQuery = req.originalUrl.split("?")[1];
+    if (!rawQuery) {
+      return res.status(400).send("Missing query params");
+    }
 
-  const secureHash = vnpParams.vnp_SecureHash;
-  delete vnpParams.vnp_SecureHash;
-  delete vnpParams.vnp_SecureHashType;
-
-  // 3️⃣ SORT PARAMS
-  const sortedParams = {};
-  Object.keys(vnpParams)
-    .sort()
-    .forEach((key) => {
-      sortedParams[key] = vnpParams[key];
+    /* =======================
+       2️⃣ PARSE QUERY (NO DECODE +)
+    ======================= */
+    const vnpParams = qs.parse(rawQuery, {
+      ignoreQueryPrefix: true,
+      decoder(str) {
+        return str;
+      },
     });
 
-  // 4️⃣ STRINGIFY GIỮ NGUYÊN "+"
-  const signData = qs.stringify(sortedParams, { encode: false });
+    const secureHash = vnpParams.vnp_SecureHash;
+    delete vnpParams.vnp_SecureHash;
+    delete vnpParams.vnp_SecureHashType;
 
-  const checkHash = crypto
-    .createHmac("sha512", vnpConfig.hashSecret)
-    .update(signData, "utf-8")
-    .digest("hex");
+    /* =======================
+       3️⃣ SORT PARAMS
+    ======================= */
+    const sortedParams = {};
+    Object.keys(vnpParams)
+      .sort()
+      .forEach((key) => {
+        sortedParams[key] = vnpParams[key];
+      });
 
-  if (checkHash !== secureHash) {
-    console.log("❌ INVALID SIGNATURE");
-    console.log("SIGN DATA:", signData);
-    console.log("CHECK HASH:", checkHash);
-    console.log("VNP HASH:", secureHash);
-    return res.status(400).send("Invalid signature");
-  }
+    /* =======================
+       4️⃣ VERIFY SIGNATURE
+    ======================= */
+    const signData = qs.stringify(sortedParams, { encode: false });
 
-  console.log("✅ SIGNATURE VALID");
+    const checkHash = crypto
+      .createHmac("sha512", vnpConfig.hashSecret)
+      .update(signData, "utf-8")
+      .digest("hex");
 
-  /* =======================
-     HANDLE PAYMENT
-  ======================= */
-  const orderId = sortedParams.vnp_TxnRef;
-  const responseCode = sortedParams.vnp_ResponseCode;
+    if (checkHash !== secureHash) {
+      return res.status(400).send("Invalid VNPay signature");
+    }
 
-  const payment = await PaymentModel.findOne({
-    order_id: orderId,
-    method: "VNPAY",
-    type: "PAYMENT",
-  });
+    /* =======================
+       5️⃣ EXTRACT DATA
+    ======================= */
+    const orderIdStr = sortedParams.vnp_TxnRef;
+    const responseCode = sortedParams.vnp_ResponseCode;
+    const transactionNo = sortedParams.vnp_TransactionNo;
 
-  if (!payment) return res.status(404).send("Payment not found");
+    if (!orderIdStr || !transactionNo) {
+      throw new Error("Missing orderId or transactionNo");
+    }
 
-  if (responseCode === "00") {
-    payment.status = "SUCCESS";
-    payment.provider_txn_id = sortedParams.vnp_TransactionNo;
-    payment.provider_response = sortedParams;
-    await payment.save();
+    const orderId = new mongoose.Types.ObjectId(orderIdStr);
 
-    const paidStatus = await OrderStatusModel.findOne({ name: "PAID" });
-    await OrderModel.updateOne(
-      { _id: orderId },
-      { order_status_id: paidStatus._id }
-    );
+    /* =======================
+       6️⃣ LOAD PAYMENT
+    ======================= */
+    const payment = await PaymentModel.findOne({
+      order_id: orderId,
+      method: "VNPAY",
+      type: "PAYMENT",
+    }).session(session);
 
-    return res.redirect(
-      `http://localhost:5173/payment-result?status=success&orderId=${orderId}`
-    );
-  } else {
+    if (!payment) {
+      throw new Error("Payment not found");
+    }
+
+    /* =======================
+       🔒 ANTI-REPLAY #1
+       PAYMENT SUCCESS
+    ======================= */
+    if (payment.status === "SUCCESS") {
+      await session.commitTransaction();
+      return res.redirect(
+        `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`
+      );
+    }
+
+    /* =======================
+       🔒 ANTI-REPLAY #2
+       DUPLICATE TXN (OTHER PAYMENT)
+    ======================= */
+    const existedTxn = await PaymentModel.findOne({
+      provider_txn_id: transactionNo,
+      _id: { $ne: payment._id },
+    }).session(session);
+
+    if (existedTxn) {
+      await session.abortTransaction();
+      return res.status(409).send("Duplicate transaction");
+    }
+
+    /* =======================
+       7️⃣ LOAD ORDER
+    ======================= */
+    const order = await OrderModel.findById(orderId).session(session);
+    if (!order) {
+      throw new Error("Order not found");
+    }
+
+    const paidStatus = await OrderStatusModel.findOne({
+      name: "PAID",
+    }).session(session);
+
+    if (!paidStatus) {
+      throw new Error("PAID status not found");
+    }
+
+    /* =======================
+       🔒 ANTI-REPLAY #3
+       ORDER PAID
+    ======================= */
+    if (order.order_status_id.equals(paidStatus._id)) {
+      await session.commitTransaction();
+      return res.redirect(
+        `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`
+      );
+    }
+
+    /* =======================
+       8️⃣ HANDLE RESULT
+    ======================= */
+    if (responseCode === "00") {
+      /* ===== PAYMENT SUCCESS ===== */
+      payment.status = "SUCCESS";
+      payment.provider_txn_id = transactionNo;
+      payment.provider_response = sortedParams;
+      await payment.save({ session });
+
+      order.status_history.push({
+        from_status: order.order_status_id,
+        to_status: paidStatus._id,
+        changed_by: order.user_id,
+        changed_by_role: "customer",
+        note: "Thanh toán VNPAY thành công",
+      });
+
+      order.order_status_id = paidStatus._id;
+      await order.save({ session });
+
+      await session.commitTransaction();
+
+      return res.redirect(
+        `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`
+      );
+    }
+
+    /* ===== PAYMENT FAILED ===== */
     payment.status = "FAILED";
-    await payment.save();
+    payment.provider_response = sortedParams;
+    await payment.save({ session });
+
+    await session.commitTransaction();
 
     return res.redirect(
-      `http://localhost:5173/payment-result?status=failed`
+      `http://localhost:5173/customer/payment-result?status=failed&orderId=${orderId}`
     );
+  } catch (err) {
+    console.error("🔥 VNPAY RETURN ERROR:", err.message);
+    await session.abortTransaction();
+    return res.status(500).send("Payment processing error");
+  } finally {
+    session.endSession();
   }
 };
 
