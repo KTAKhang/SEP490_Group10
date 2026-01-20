@@ -8,28 +8,42 @@ const addItemToCart = async (user_id, product_id, quantity) => {
   session.startTransaction();
 
   try {
-    // ===== 1️⃣ VALIDATE INPUT =====
+    /* =======================
+       1️⃣ VALIDATE INPUT
+    ======================= */
     if (!quantity || quantity < 1) {
       throw new Error("Số lượng phải >= 1");
     }
 
-    // ===== 2️⃣ CHECK PRODUCT =====
-    const product = await ProductModel.findById(product_id).session(session);
+    /* =======================
+       2️⃣ CHECK PRODUCT
+    ======================= */
+    const product = await ProductModel
+      .findById(product_id)
+      .session(session);
+
     if (!product || !product.status) {
       throw new Error("Sản phẩm không tồn tại hoặc đã ngừng bán");
     }
 
-    // ===== 3️⃣ LOAD / CREATE CART =====
-    let cart = await CartModel.findOne({ user_id }).session(session);
+    /* =======================
+       3️⃣ LOAD / CREATE CART
+    ======================= */
+    let cart = await CartModel
+      .findOne({ user_id })
+      .session(session);
+
     if (!cart) {
-      cart = await CartModel.create(
+      const [newCart] = await CartModel.create(
         [{ user_id, sum: 0 }],
         { session }
       );
-      cart = cart[0];
+      cart = newCart;
     }
 
-    // ===== 4️⃣ LOAD CART DETAIL =====
+    /* =======================
+       4️⃣ LOAD CART DETAIL
+    ======================= */
     let cartDetail = await CartDetailModel.findOne({
       cart_id: cart._id,
       product_id,
@@ -38,14 +52,18 @@ const addItemToCart = async (user_id, product_id, quantity) => {
     const currentQty = cartDetail ? cartDetail.quantity : 0;
     const newQty = currentQty + quantity;
 
-    // ===== 5️⃣ CHECK STOCK =====
+    /* =======================
+       5️⃣ CHECK STOCK
+    ======================= */
     if (product.onHandQuantity < newQty) {
       throw new Error(
         `Không đủ hàng cho sản phẩm ${product.name}. Còn ${product.onHandQuantity}`
       );
     }
 
-    // ===== 6️⃣ UPSERT CART DETAIL =====
+    /* =======================
+       6️⃣ UPSERT CART DETAIL
+    ======================= */
     if (cartDetail) {
       cartDetail.quantity = newQty;
       await cartDetail.save({ session });
@@ -63,12 +81,16 @@ const addItemToCart = async (user_id, product_id, quantity) => {
       );
     }
 
-    // ===== 7️⃣ RECALCULATE CART SUM =====
-    const items = await CartDetailModel.find({ cart_id: cart._id }).session(
-      session
+    /* =======================
+       7️⃣ RECALCULATE CART SUM
+       👉 sum = số loại sản phẩm
+    ======================= */
+    const distinctItemsCount = await CartDetailModel.countDocuments(
+      { cart_id: cart._id },
+      { session }
     );
 
-    cart.sum = items.reduce((total, item) => total + item.quantity, 0);
+    cart.sum = distinctItemsCount;
     await cart.save({ session });
 
     await session.commitTransaction();
@@ -84,6 +106,7 @@ const addItemToCart = async (user_id, product_id, quantity) => {
     session.endSession();
   }
 };
+
 
 const updateItemInCart = async (user_id, product_id, newQuantity) => {
   const product = await ProductModel.findById(product_id);

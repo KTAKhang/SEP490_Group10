@@ -39,7 +39,7 @@ const paymentSchema = new mongoose.Schema(
     // VNPay fields
     provider_txn_id: {
       type: String, // vnp_TxnRef / vnp_TransactionNo
-      index: true,
+     
     },
 
     provider_response: {
@@ -55,5 +55,12 @@ const paymentSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+/* =======================
+   🔒 ANTI-REPLAY INDEX
+======================= */
+paymentSchema.index(
+  { provider_txn_id: 1 },
+  { unique: true, sparse: true }
+);
 const PaymentModel = mongoose.model("payments", paymentSchema);
 module.exports = PaymentModel;

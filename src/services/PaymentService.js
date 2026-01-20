@@ -1,20 +1,22 @@
 const PaymentModel = require("../models/PaymentModel");
-const { createVnpayUrl,refund } = require("../utils/createVnpayUrl");
+const { createVnpayUrl, refund } = require("../utils/createVnpayUrl");
 const OrderModel = require("../models/OrderModel");
 /* ============================
    CREATE COD PAYMENT
 ============================ */
 const createCODPayment = async ({ order_id, amount, session }) => {
   return PaymentModel.create(
-    [{
-      order_id,
-      type: "PAYMENT",
-      method: "COD",
-      amount,
-      status: "UNPAID", // COD chưa thu tiền
-      note: "Thanh toán khi nhận hàng",
-    }],
-    { session }
+    [
+      {
+        order_id,
+        type: "PAYMENT",
+        method: "COD",
+        amount,
+        status: "UNPAID", // COD chưa thu tiền
+        note: "Thanh toán khi nhận hàng",
+      },
+    ],
+    { session },
   );
 };
 
@@ -22,29 +24,27 @@ const createCODPayment = async ({ order_id, amount, session }) => {
    CREATE VNPAY PENDING PAYMENT
 ============================ */
 const createOnlinePendingPayment = async ({ order_id, amount, session }) => {
-  console.log("hihi")
   return PaymentModel.create(
-    [{
-      order_id,
-      type: "PAYMENT",
-      method: "VNPAY",
-      amount,
-      status: "PENDING",
-      note: "Chờ thanh toán VNPAY",
-    }],
-    { session }
+    [
+      {
+        order_id,
+        type: "PAYMENT",
+        method: "VNPAY",
+        amount,
+        status: "PENDING",
+        note: "Chờ thanh toán VNPAY",
+      },
+    ],
+    { session },
   );
 };
 
-const createVnpayPaymentUrl = async ({
-  order_id,
-  user_id,
-  ip,
-}) => {
+const createVnpayPaymentUrl = async ({ order_id, user_id, ip, session }) => {
   /* =======================
      1️⃣ CHECK ORDER
   ======================= */
-  const order = await OrderModel.findById(order_id);
+  console.log("order_id", order_id);
+  const order = await OrderModel.findById(order_id).session(session);
   if (!order) {
     throw new Error("Không tìm thấy đơn hàng");
   }
@@ -60,8 +60,7 @@ const createVnpayPaymentUrl = async ({
     order_id,
     method: "VNPAY",
     type: "PAYMENT",
-  });
-
+  }).session(session);
   if (!payment) {
     throw new Error("Không tìm thấy thông tin thanh toán");
   }
@@ -73,11 +72,7 @@ const createVnpayPaymentUrl = async ({
   /* =======================
      3️⃣ CREATE VNPAY URL
   ======================= */
-  const payUrl = createVnpayUrl(
-    order._id,
-    payment.amount,
-    ip
-  );
+  const payUrl = createVnpayUrl(order._id, payment.amount, ip);
 
   return payUrl;
 };
@@ -92,8 +87,7 @@ const refundVNPaySync = async ({ order_id, session }) => {
     status: "SUCCESS",
   }).session(session);
 
-  if (!payment)
-    throw new Error("Không tìm thấy payment để hoàn tiền");
+  if (!payment) throw new Error("Không tìm thấy payment để hoàn tiền");
 
   const result = await refund({
     order_id,
@@ -106,16 +100,18 @@ const refundVNPaySync = async ({ order_id, session }) => {
   }
 
   await PaymentModel.create(
-    [{
-      order_id,
-      type: "REFUND",
-      method: "VNPAY",
-      amount: payment.amount,
-      status: "SUCCESS",
-      provider_response: result,
-      note: "Refund khi huỷ đơn",
-    }],
-    { session }
+    [
+      {
+        order_id,
+        type: "REFUND",
+        method: "VNPAY",
+        amount: payment.amount,
+        status: "SUCCESS",
+        provider_response: result,
+        note: "Refund khi huỷ đơn",
+      },
+    ],
+    { session },
   );
 };
 
@@ -123,5 +119,5 @@ module.exports = {
   createCODPayment,
   createOnlinePendingPayment,
   refundVNPaySync,
-  createVnpayPaymentUrl
+  createVnpayPaymentUrl,
 };
