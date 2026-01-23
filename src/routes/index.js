@@ -30,6 +30,7 @@ const PaymentRouter = require("./PaymentRouter");
 const StaffRouter = require("./StaffRouter");
 const CustomerRouter = require("./CustomerRouter");
 const DiscountRouter = require("./DiscountRouter");
+const NotificationRouter = require("./NotificationRouter");
 
 const routes = (app) => {
     // Authentication & Profile
@@ -78,6 +79,8 @@ const routes = (app) => {
     app.use("/customers", CustomerRouter);
     // Discount management routes
     app.use("/discounts", DiscountRouter);
+    // Notification routes
+    app.use("/notifications", NotificationRouter);
 };
 
 module.exports = routes;

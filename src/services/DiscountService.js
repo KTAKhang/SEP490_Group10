@@ -18,6 +18,10 @@ const DiscountModel = require("../models/DiscountModel");
 const DiscountUsageModel = require("../models/DiscountUsage");
 const UserModel = require("../models/UserModel");
 const RoleModel = require("../models/RolesModel");
+const OrderModel = require("../models/OrderModel");
+const PaymentModel = require("../models/PaymentModel");
+const NotificationService = require("./NotificationService");
+const mongoose = require("mongoose");
 
 const DiscountService = {
     /**
@@ -54,6 +58,22 @@ const DiscountService = {
             // Validate date range
             const start = new Date(startDate);
             const end = new Date(endDate);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // Reset time to start of day for comparison
+
+            // Check if start date is in the past
+            const startDateOnly = new Date(start);
+            startDateOnly.setHours(0, 0, 0, 0);
+            if (startDateOnly < today) {
+                return { status: "ERR", message: "Start date cannot be in the past" };
+            }
+
+            // Check if end date is in the past
+            const endDateOnly = new Date(end);
+            endDateOnly.setHours(0, 0, 0, 0);
+            if (endDateOnly < today) {
+                return { status: "ERR", message: "End date cannot be in the past" };
+            }
 
             if (start >= end) {
                 return { status: "ERR", message: "End date must be after start date" };
@@ -128,6 +148,26 @@ const DiscountService = {
             if (data.startDate || data.endDate) {
                 const start = data.startDate ? new Date(data.startDate) : discount.startDate;
                 const end = data.endDate ? new Date(data.endDate) : discount.endDate;
+                const today = new Date();
+                today.setHours(0, 0, 0, 0); // Reset time to start of day for comparison
+
+                // Check if start date is in the past
+                if (data.startDate) {
+                    const startDateOnly = new Date(start);
+                    startDateOnly.setHours(0, 0, 0, 0);
+                    if (startDateOnly < today) {
+                        return { status: "ERR", message: "Start date cannot be in the past" };
+                    }
+                }
+
+                // Check if end date is in the past
+                if (data.endDate) {
+                    const endDateOnly = new Date(end);
+                    endDateOnly.setHours(0, 0, 0, 0);
+                    if (endDateOnly < today) {
+                        return { status: "ERR", message: "End date cannot be in the past" };
+                    }
+                }
 
                 if (start >= end) {
                     return { status: "ERR", message: "End date must be after start date" };
@@ -188,6 +228,91 @@ const DiscountService = {
 
             await discount.save();
 
+            /**
+             * Send Firebase push notifications (non-blocking)
+             * 
+             * Notifications are sent in a try-catch block to ensure that notification failures
+             * do not affect the main business logic (discount approval).
+             * 
+             * Notification flow:
+             * 1. Notify the sales-staff who created the voucher that it has been approved
+             * 2. Notify all customers about the new available voucher
+             * 
+             * How to add notifications for other features:
+             * 
+             * 1. Import NotificationService at the top of your service file:
+             *    const NotificationService = require("./NotificationService");
+             * 
+             * 2. After your main business logic succeeds, add notification code:
+             * 
+             *    try {
+             *      // Send to specific user
+             *      await NotificationService.sendToUser(userId, {
+             *        title: "Notification Title",
+             *        body: "Notification message",
+             *        data: {
+             *          type: "your_feature",      // e.g., "order", "contact", "product"
+             *          action: "view_detail",    // e.g., "view_order", "view_contact"
+             *          // Add any IDs or data needed for navigation
+             *          orderId: order._id.toString(),
+             *          contactId: contact._id.toString()
+             *        }
+             *      });
+             * 
+             *      // Or send to all customers
+             *      await NotificationService.sendToAllCustomers({
+             *        title: "Announcement",
+             *        body: "Message to all customers",
+             *        data: { type: "announcement", action: "view_news" }
+             *      });
+             * 
+             *      // Or send to specific role
+             *      await NotificationService.sendToRole("sales-staff", {
+             *        title: "New Order",
+             *        body: "You have a new order",
+             *        data: { type: "order", action: "view_orders" }
+             *      });
+             *    } catch (notificationError) {
+             *      // Always wrap in try-catch to prevent notification failures from breaking main logic
+             *      console.error("Error sending notifications:", notificationError);
+             *    }
+             * 
+             * 3. Update frontend notificationService.js to handle your new notification type
+             *    in the handleNotificationClick function for proper navigation.
+             */
+            try {
+                // 1. Notify sales-staff who created the voucher
+                if (discount.createdBy) {
+                    await NotificationService.sendToUser(discount.createdBy, {
+                        title: "Voucher đã được duyệt",
+                        body: `Voucher ${discount.code} đã được admin duyệt và đang hoạt động`,
+                        data: {
+                            type: "discount",
+                            discountId: discount._id.toString(),
+                            action: "view_discount",
+                            code: discount.code
+                        }
+                    });
+                }
+
+                // 2. Notify all customers about new voucher
+                await NotificationService.sendToAllCustomers({
+                    title: "Voucher mới đã có sẵn!",
+                    body: `Giảm ${discount.discountPercent}% tối đa ${new Intl.NumberFormat('vi-VN').format(discount.maxDiscountAmount)} VNĐ. Mã: ${discount.code}`,
+                    data: {
+                        type: "discount",
+                        discountId: discount._id.toString(),
+                        action: "view_voucher",
+                        code: discount.code,
+                        discountPercent: discount.discountPercent.toString(),
+                        maxDiscountAmount: discount.maxDiscountAmount.toString()
+                    }
+                });
+            } catch (notificationError) {
+                // Log error but don't fail the approval
+                console.error("Error sending notifications for discount approval:", notificationError);
+            }
+
             return {
                 status: "OK",
                 message: "Discount code approved successfully",
@@ -229,6 +354,35 @@ const DiscountService = {
             discount.rejectedReason = rejectionReason.trim();
 
             await discount.save();
+
+            /**
+             * Send Firebase push notification to sales-staff (non-blocking)
+             * 
+             * Notifies the sales-staff who created the voucher that it has been rejected.
+             * This is wrapped in try-catch to ensure notification failures don't affect
+             * the main business logic.
+             * 
+             * See approveDiscount method above for detailed documentation on how to
+             * add notifications for other features.
+             */
+            try {
+                if (discount.createdBy) {
+                    await NotificationService.sendToUser(discount.createdBy, {
+                        title: "Voucher bị từ chối",
+                        body: `Voucher ${discount.code} bị từ chối. Lý do: ${rejectionReason.trim()}`,
+                        data: {
+                            type: "discount",
+                            discountId: discount._id.toString(),
+                            action: "view_discount",
+                            code: discount.code,
+                            status: "REJECTED"
+                        }
+                    });
+                }
+            } catch (notificationError) {
+                // Log error but don't fail the rejection
+                console.error("Error sending notification for discount rejection:", notificationError);
+            }
 
             return {
                 status: "OK",
@@ -321,8 +475,8 @@ const DiscountService = {
                 return { status: "ERR", message: "Discount not found" };
             }
 
-            const usageCount = await DiscountUsageModel.countDocuments({ discountId });
-            if (usageCount > 0) {
+            // Business rule: Admin cannot update voucher if it has been used (usedCount > 0)
+            if (discount.usedCount > 0) {
                 return {
                     status: "ERR",
                     message: "Cannot update discount. This discount has already been used by customers.",
@@ -332,6 +486,26 @@ const DiscountService = {
             if (data.startDate || data.endDate) {
                 const start = data.startDate ? new Date(data.startDate) : discount.startDate;
                 const end = data.endDate ? new Date(data.endDate) : discount.endDate;
+                const today = new Date();
+                today.setHours(0, 0, 0, 0); // Reset time to start of day for comparison
+
+                // Check if start date is in the past
+                if (data.startDate) {
+                    const startDateOnly = new Date(start);
+                    startDateOnly.setHours(0, 0, 0, 0);
+                    if (startDateOnly < today) {
+                        return { status: "ERR", message: "Start date cannot be in the past" };
+                    }
+                }
+
+                // Check if end date is in the past
+                if (data.endDate) {
+                    const endDateOnly = new Date(end);
+                    endDateOnly.setHours(0, 0, 0, 0);
+                    if (endDateOnly < today) {
+                        return { status: "ERR", message: "End date cannot be in the past" };
+                    }
+                }
 
                 if (start >= end) {
                     return { status: "ERR", message: "End date must be after start date" };
@@ -372,6 +546,21 @@ const DiscountService = {
     async getDiscounts(query = {}) {
         try {
             const { page = 1, limit = 10, status, isActive, sortBy = "createdAt", sortOrder = "desc" } = query;
+
+            // First, mark expired discounts automatically
+            const now = new Date();
+            await DiscountModel.updateMany(
+                {
+                    status: { $in: ["APPROVED", "PENDING"] },
+                    endDate: { $lt: now }
+                },
+                {
+                    $set: {
+                        status: "EXPIRED",
+                        isActive: false
+                    }
+                }
+            );
 
             const filter = {};
             if (status) filter.status = status;
@@ -536,11 +725,31 @@ const DiscountService = {
      */
     async applyDiscountCode(discountId, userId, orderValue, orderId = null) {
         try {
+            if (!discountId || !userId || orderValue === undefined) {
+                return { status: "ERR", message: "Missing required parameters" };
+            }
+
             const discount = await DiscountModel.findById(discountId);
             if (!discount) {
                 return { status: "ERR", message: "Discount not found" };
             }
 
+            // Validate discount is still valid
+            const now = new Date();
+            if (
+                discount.status !== "APPROVED" ||
+                !discount.isActive ||
+                now < discount.startDate ||
+                now > discount.endDate
+            ) {
+                return { status: "ERR", message: "Discount code is not valid" };
+            }
+
+            if (discount.usageLimit !== null && discount.usedCount >= discount.usageLimit) {
+                return { status: "ERR", message: "Discount code has reached its usage limit" };
+            }
+
+            // Check if user already used this discount
             const existingUsage = await DiscountUsageModel.findOne({
                 discountId: discount._id,
                 userId,
@@ -550,32 +759,110 @@ const DiscountService = {
                 return { status: "ERR", message: "You have already used this discount code" };
             }
 
+            // Validate minimum order value
+            if (orderValue < discount.minOrderValue) {
+                return {
+                    status: "ERR",
+                    message: `Minimum order value is ${discount.minOrderValue}`,
+                };
+            }
+
             const discountAmount = Math.min(
                 (orderValue * discount.discountPercent) / 100,
                 discount.maxDiscountAmount
             );
 
+            const finalAmount = orderValue - discountAmount;
+
+            // If an orderId is provided, update order and payment first
+            if (orderId) {
+                try {
+                    // Convert orderId to ObjectId if it's a string
+                    let orderObjectId = orderId;
+                    if (typeof orderId === 'string') {
+                        if (!mongoose.Types.ObjectId.isValid(orderId)) {
+                            return { status: "ERR", message: "Invalid order ID format" };
+                        }
+                        orderObjectId = new mongoose.Types.ObjectId(orderId);
+                    }
+
+                    // Verify order exists and belongs to user
+                    const order = await OrderModel.findById(orderObjectId);
+                    if (!order) {
+                        return { status: "ERR", message: "Order not found. Please wait a moment and try again." };
+                    }
+
+                    if (order.user_id.toString() !== userId.toString()) {
+                        return { status: "ERR", message: "Order does not belong to user" };
+                    }
+
+                    // Update order total to reflect discount
+                    const updateResult = await OrderModel.updateOne(
+                        { _id: orderObjectId },
+                        { $set: { total_price: finalAmount } }
+                    );
+
+                    if (updateResult.matchedCount === 0) {
+                        return { status: "ERR", message: "Failed to update order" };
+                    }
+
+                    if (updateResult.modifiedCount === 0) {
+                        // Order might already have the correct price, continue
+                        console.log(`Order ${orderId} already has price ${finalAmount}`);
+                    }
+
+                    // Update associated payment amount so payment uses discounted total
+                    const paymentUpdateResult = await PaymentModel.updateOne(
+                        { order_id: orderObjectId, type: "PAYMENT" },
+                        { $set: { amount: finalAmount } }
+                    );
+
+                    // Payment might not exist yet for some payment methods, that's okay
+                    if (paymentUpdateResult.matchedCount === 0) {
+                        console.warn(`Payment not found for order ${orderId}, discount still applied to order`);
+                    }
+                } catch (persistErr) {
+                    console.error("Error updating order/payment with discount:", persistErr);
+                    return { status: "ERR", message: `Failed to apply discount to order: ${persistErr.message}` };
+                }
+            }
+
+            // Save discount usage record (ALWAYS save usage, even if orderId is not provided)
+            let orderObjectId = null;
+            if (orderId) {
+                if (typeof orderId === 'string' && mongoose.Types.ObjectId.isValid(orderId)) {
+                    orderObjectId = new mongoose.Types.ObjectId(orderId);
+                } else if (orderId instanceof mongoose.Types.ObjectId) {
+                    orderObjectId = orderId;
+                }
+            }
+
             const usage = new DiscountUsageModel({
                 discountId: discount._id,
                 userId,
-                orderId,
+                orderId: orderObjectId,
+                discountCode: discount.code,
+                discountPercent: discount.discountPercent,
                 discountAmount,
                 orderValue,
             });
 
             await usage.save();
 
+            // Increment discount usedCount (CRITICAL: This must happen to track usage)
             discount.usedCount += 1;
             await discount.save();
 
             return {
                 status: "OK",
+                message: "Discount code applied successfully",
                 data: {
                     discountAmount,
-                    finalAmount: orderValue - discountAmount,
+                    finalAmount,
                 },
             };
         } catch (error) {
+            console.error("Error in applyDiscountCode:", error);
             return { status: "ERR", message: error.message };
         }
     },

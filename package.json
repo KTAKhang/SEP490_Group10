@@ -31,6 +31,7 @@
     "eco-be": "file:",
     "exceljs": "^4.4.0",
     "express": "^5.1.0",
+    "firebase-admin": "^13.6.0",
     "google-auth-library": "^9.15.1",
     "jsonwebtoken": "^9.0.2",
     "moment": "^2.30.1",
