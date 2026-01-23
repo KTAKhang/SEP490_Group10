@@ -1,5 +1,5 @@
 const ShopModel = require("../models/ShopModel");
-const { sanitizeHTMLWithImageValidation, validateHTMLSecurity } = require("../utils/htmlSanitizer");
+const { sanitizeHTMLWithImageValidation, validateHTMLSecurity, validateHTMLImages } = require("../utils/htmlSanitizer");
 const cloudinary = require("../config/cloudinaryConfig");
 
 /**
@@ -126,12 +126,21 @@ const updateShopDescription = async (payload = {}) => {
 
     // BR-15: Validate HTML security
     if (description && description.toString().trim()) {
-      const securityCheck = validateHTMLSecurity(description.toString());
+      const securityCheck = validateHTMLSecurity(description.toString().trim());
       if (!securityCheck.valid) {
         return {
           status: "ERR",
           message: securityCheck.message || "Nội dung chứa script độc hại không được phép",
           threats: securityCheck.threats,
+        };
+      }
+
+      // Validate images in HTML content (similar to News)
+      const imageValidation = validateHTMLImages(description.toString().trim());
+      if (!imageValidation.valid) {
+        return {
+          status: "ERR",
+          message: imageValidation.message,
         };
       }
     }
