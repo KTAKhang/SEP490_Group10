@@ -3,7 +3,7 @@ const crypto = require("crypto");
 const OrderModel = require("../models/OrderModel");
 const PaymentModel = require("../models/PaymentModel");
 const OrderStatusModel = require("../models/OrderStatusModel");
-const { createVnpayUrl,refund } = require("../utils/createVnpayUrl");
+const { createVnpayUrl, refund } = require("../utils/createVnpayUrl");
 const { vnpConfig } = require("../config/vnpayConfig");
 const { default: mongoose } = require("mongoose");
 
@@ -125,7 +125,7 @@ const vnpayReturn = async (req, res) => {
     if (payment.status === "SUCCESS") {
       await session.commitTransaction();
       return res.redirect(
-        `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`
+        `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
       );
     }
 
@@ -166,7 +166,7 @@ const vnpayReturn = async (req, res) => {
     if (order.order_status_id.equals(paidStatus._id)) {
       await session.commitTransaction();
       return res.redirect(
-        `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`
+        `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
       );
     }
 
@@ -194,7 +194,7 @@ const vnpayReturn = async (req, res) => {
       await session.commitTransaction();
 
       return res.redirect(
-        `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`
+        `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
       );
     }
 
@@ -203,10 +203,35 @@ const vnpayReturn = async (req, res) => {
     payment.provider_response = sortedParams;
     await payment.save({ session });
 
+    /* ===== ORDER → FAILED + RETRY 10 PHÚT ===== */
+    const TEN_MINUTES = 10 * 60 * 1000;
+
+    const status = await OrderStatusModel.findOne({ name: "PENDING" }).session(
+      session,
+    );
+
+    order.allow_retry = true;
+    order.auto_delete = true;
+    order.retry_expired_at = new Date(Date.now() + TEN_MINUTES);
+
+    // ghi history
+    order.status_history.push({
+      from_status: order.order_status_id,
+      to_status: status._id,
+      changed_by: order.user_id,
+      changed_by_role: "customer",
+      note: "VNPAY thanh toán thất bại – cho phép thanh toán lại trong 10 phút",
+    });
+
+    order.order_status_id = status._id;
+    await order.save({ session });
+
+    /* ===== COMMIT ===== */
     await session.commitTransaction();
 
+    /* ===== REDIRECT ===== */
     return res.redirect(
-      `http://localhost:5173/customer/payment-result?status=failed&orderId=${orderId}`
+      `http://localhost:5173/customer/payment-fail?status=failed&orderId=${orderId}`,
     );
   } catch (err) {
     console.error("🔥 VNPAY RETURN ERROR:", err.message);
@@ -245,21 +270,22 @@ const refundVNPay = async (req, res) => {
     }
 
     await PaymentModel.create(
-      [{
-        order_id,
-        type: "REFUND",
-        method: "VNPAY",
-        amount: payment.amount,
-        status: "SUCCESS",
-        provider_response: result,
-        note: "Hoàn tiền VNPay",
-      }],
-      { session }
+      [
+        {
+          order_id,
+          type: "REFUND",
+          method: "VNPAY",
+          amount: payment.amount,
+          status: "SUCCESS",
+          provider_response: result,
+          note: "Hoàn tiền VNPay",
+        },
+      ],
+      { session },
     );
 
     await session.commitTransaction();
     res.json({ success: true, message: "Hoàn tiền thành công" });
-
   } catch (err) {
     await session.abortTransaction();
     res.status(400).json({
@@ -270,7 +296,6 @@ const refundVNPay = async (req, res) => {
     session.endSession();
   }
 };
-
 
 module.exports = {
   createVnpayPaymentUrl,

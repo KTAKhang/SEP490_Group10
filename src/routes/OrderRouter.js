@@ -14,4 +14,6 @@ routerOrder.put("/update/:id", authAdminMiddleware, orderController.updateOrder)
 
 routerOrder.put("/cancel/:id", authUserMiddleware, orderController.cancelOrder);
 
+routerOrder.post("/retry-payment", authUserMiddleware, orderController.retryVnpayPayment);
+
 module.exports = routerOrder;
