@@ -1,8 +1,6 @@
 const SupplierService = require("../services/SupplierService");
 // Import các controller đã tách
 const HarvestBatchController = require("./HarvestBatchController");
-const QualityVerificationController = require("./QualityVerificationController");
-const SupplierPerformanceController = require("./SupplierPerformanceController");
 
 const createSupplier = async (req, res) => {
   try {
@@ -110,20 +108,6 @@ const updateCooperationStatus = async (req, res) => {
   }
 };
 
-const getActivityLog = async (req, res) => {
-  try {
-    // ✅ Hỗ trợ cả :id và :supplierId (từ router mới)
-    const supplierId = req.params.id || req.params.supplierId;
-    const response = await SupplierService.getActivityLog(supplierId, req.query);
-    return res.status(response.status === "OK" ? 200 : 400).json(response);
-  } catch (error) {
-    return res.status(500).json({
-      status: "ERR",
-      message: error.message || "Internal Server Error",
-    });
-  }
-};
-
 // ✅ Re-export các controller đã tách để giữ backward compatibility
 module.exports = {
   // Supplier Management
@@ -135,7 +119,6 @@ module.exports = {
   getSuppliersForBrand,
   updatePurchaseCost,
   updateCooperationStatus,
-  getActivityLog,
   
   // Harvest Batch Management (re-export từ HarvestBatchController)
   createHarvestBatch: HarvestBatchController.createHarvestBatch,
@@ -143,17 +126,4 @@ module.exports = {
   deleteHarvestBatch: HarvestBatchController.deleteHarvestBatch,
   getHarvestBatches: HarvestBatchController.getHarvestBatches,
   getHarvestBatchById: HarvestBatchController.getHarvestBatchById,
-  
-  // Quality Verification Management (re-export từ QualityVerificationController)
-  verifyQuality: QualityVerificationController.verifyQuality,
-  getQualityVerifications: QualityVerificationController.getQualityVerifications,
-  getQualityVerificationById: QualityVerificationController.getQualityVerificationById,
-  updateQualityVerification: QualityVerificationController.updateQualityVerification,
-  deleteQualityVerification: QualityVerificationController.deleteQualityVerification,
-  
-  // Supplier Performance Management (re-export từ SupplierPerformanceController)
-  evaluatePerformance: SupplierPerformanceController.evaluatePerformance,
-  getPerformances: SupplierPerformanceController.getPerformances,
-  getPerformanceById: SupplierPerformanceController.getPerformanceById,
-  deletePerformance: SupplierPerformanceController.deletePerformance,
 };

@@ -167,7 +167,7 @@ const deleteCategory = async (id) => {
 
 const getCategoryStats = async () => {
   try {
-    const [total, active, hidden] = await Promise.all([
+    const [total, active, inactive] = await Promise.all([
       CategoryModel.countDocuments({}),
       CategoryModel.countDocuments({ status: true }),
       CategoryModel.countDocuments({ status: false }),
@@ -179,7 +179,7 @@ const getCategoryStats = async () => {
       data: {
         total,
         active,
-        hidden,
+        inactive,
       },
     };
   } catch (error) {

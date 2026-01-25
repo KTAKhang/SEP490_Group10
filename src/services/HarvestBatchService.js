@@ -2,13 +2,11 @@ const mongoose = require("mongoose");
 const HarvestBatchModel = require("../models/HarvestBatchModel");
 const SupplierModel = require("../models/SupplierModel");
 const ProductModel = require("../models/ProductModel");
-const QualityVerificationModel = require("../models/QualityVerificationModel");
-const SupplierActivityLogModel = require("../models/SupplierActivityLogModel");
 
 /**
  * Tạo lô thu hoạch (Admin)
  */
-const createHarvestBatch = async (userId, payload = {}) => {
+const createHarvestBatch = async (payload = {}) => {
   try {
     const {
       supplierId,
@@ -87,7 +85,6 @@ const createHarvestBatch = async (userId, payload = {}) => {
       location: location?.toString().trim() || "",
       qualityGrade,
       notes: notes?.toString().trim() || "",
-      createdBy: new mongoose.Types.ObjectId(userId),
     });
 
     await harvestBatch.save();
@@ -96,20 +93,9 @@ const createHarvestBatch = async (userId, payload = {}) => {
     supplier.totalBatches = (supplier.totalBatches || 0) + 1;
     await supplier.save();
 
-    // Log activity
-    await SupplierActivityLogModel.create({
-      supplier: supplier._id,
-      action: "HARVEST_BATCH_CREATED",
-      description: `Tạo lô thu hoạch: ${batchNumber} - Sản phẩm: ${product.name}`,
-      relatedEntity: "HARVEST_BATCH",
-      relatedEntityId: harvestBatch._id,
-      performedBy: new mongoose.Types.ObjectId(userId),
-    });
-
     const populated = await HarvestBatchModel.findById(harvestBatch._id)
       .populate("supplier", "name type")
       .populate("product", "name brand")
-      .populate("createdBy", "user_name email")
       .lean();
 
     return {
@@ -125,7 +111,7 @@ const createHarvestBatch = async (userId, payload = {}) => {
 /**
  * Cập nhật lô thu hoạch (Admin)
  */
-const updateHarvestBatch = async (harvestBatchId, userId, payload = {}) => {
+const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
   try {
     if (!mongoose.isValidObjectId(harvestBatchId)) {
       return { status: "ERR", message: "harvestBatchId không hợp lệ" };
@@ -219,23 +205,9 @@ const updateHarvestBatch = async (harvestBatchId, userId, payload = {}) => {
 
     await harvestBatch.save();
 
-    // Log activity nếu có thay đổi
-    if (changes.size > 0) {
-      await SupplierActivityLogModel.create({
-        supplier: harvestBatch.supplier,
-        action: "HARVEST_BATCH_UPDATED",
-        description: `Cập nhật lô thu hoạch: ${harvestBatch.batchNumber}`,
-        relatedEntity: "HARVEST_BATCH",
-        relatedEntityId: harvestBatch._id,
-        changes: changes,
-        performedBy: new mongoose.Types.ObjectId(userId),
-      });
-    }
-
     const populated = await HarvestBatchModel.findById(harvestBatch._id)
       .populate("supplier", "name type")
       .populate("product", "name brand")
-      .populate("createdBy", "user_name email")
       .lean();
 
     return {
@@ -251,7 +223,7 @@ const updateHarvestBatch = async (harvestBatchId, userId, payload = {}) => {
 /**
  * Xóa lô thu hoạch (Admin)
  */
-const deleteHarvestBatch = async (harvestBatchId, userId) => {
+const deleteHarvestBatch = async (harvestBatchId) => {
   try {
     if (!mongoose.isValidObjectId(harvestBatchId)) {
       return { status: "ERR", message: "harvestBatchId không hợp lệ" };
@@ -270,15 +242,6 @@ const deleteHarvestBatch = async (harvestBatchId, userId) => {
       };
     }
 
-    // Không cho xóa nếu đã có quality verification
-    const hasVerification = await QualityVerificationModel.findOne({ harvestBatch: harvestBatch._id });
-    if (hasVerification) {
-      return {
-        status: "ERR",
-        message: "Không thể xóa lô thu hoạch đã có kết quả kiểm định chất lượng",
-      };
-    }
-
     const supplierId = harvestBatch.supplier;
     await harvestBatch.deleteOne();
 
@@ -288,16 +251,6 @@ const deleteHarvestBatch = async (harvestBatchId, userId) => {
       supplier.totalBatches = Math.max(0, supplier.totalBatches - 1);
       await supplier.save();
     }
-
-    // Log activity
-    await SupplierActivityLogModel.create({
-      supplier: supplierId,
-      action: "HARVEST_BATCH_DELETED",
-      description: `Xóa lô thu hoạch: ${harvestBatch.batchNumber}`,
-      relatedEntity: "HARVEST_BATCH",
-      relatedEntityId: harvestBatch._id,
-      performedBy: new mongoose.Types.ObjectId(userId),
-    });
 
     return {
       status: "OK",
@@ -319,7 +272,6 @@ const getHarvestBatches = async (filters = {}) => {
       search = "",
       supplierId,
       productId,
-      status,
       qualityGrade,
       minQuantity,
       maxQuantity,
@@ -332,7 +284,6 @@ const getHarvestBatches = async (filters = {}) => {
       updatedFrom,
       updatedTo,
       hasInventoryTransactions,
-      createdBy,
       sortBy = "createdAt",
       sortOrder = "desc",
     } = filters;
@@ -363,10 +314,6 @@ const getHarvestBatches = async (filters = {}) => {
 
     if (productId && mongoose.isValidObjectId(productId)) {
       query.product = new mongoose.Types.ObjectId(productId);
-    }
-
-    if (status && ["PENDING", "APPROVED", "REJECTED"].includes(status)) {
-      query.status = status;
     }
 
     if (qualityGrade && ["A", "B", "C", "D"].includes(qualityGrade)) {
@@ -467,10 +414,6 @@ const getHarvestBatches = async (filters = {}) => {
       query.inventoryTransactionIds = hasTx ? { $exists: true, $ne: [] } : { $in: [null, []] };
     }
 
-    if (createdBy && mongoose.isValidObjectId(createdBy)) {
-      query.createdBy = new mongoose.Types.ObjectId(createdBy);
-    }
-
     // Sort
     const allowedSortFields = [
       "batchNumber",
@@ -478,7 +421,6 @@ const getHarvestBatches = async (filters = {}) => {
       "harvestDate",
       "quantity",
       "receivedQuantity",
-      "status",
       "qualityGrade",
       "createdAt",
       "updatedAt",
@@ -491,7 +433,6 @@ const getHarvestBatches = async (filters = {}) => {
       HarvestBatchModel.find(query)
         .populate("supplier", "name type")
         .populate("product", "name brand")
-        .populate("createdBy", "user_name email")
         .sort(sortObj)
         .skip(skip)
         .limit(limitNum)
@@ -527,7 +468,6 @@ const getHarvestBatchById = async (harvestBatchId) => {
     const harvestBatch = await HarvestBatchModel.findById(harvestBatchId)
       .populate("supplier", "name type cooperationStatus")
       .populate("product", "name brand")
-      .populate("createdBy", "user_name email")
       .lean();
 
     if (!harvestBatch) {

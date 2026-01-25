@@ -53,10 +53,8 @@ const routes = (app) => {
     app.use("/admin/products", ProductRouter);
     app.use("/admin/harvest-batch", HarvestBatchRouter);
 
-    app.use("/admin/suppliers/activity-log", require("./SupplierActivityLogRouter")); // ✅ Admin only - Xem Activity Log của QC Staff
-    
     // Admin routes - Supplier Management
-    app.use("/admin/suppliers", SupplierRouter); // ✅ Includes: /harvest-batch, /quality, /performance
+    app.use("/admin/suppliers", SupplierRouter); // ✅ Includes: /harvest-batch
     // Note: /for-brand trong SupplierRouter dùng authAdminMiddleware (Admin only)
     
 

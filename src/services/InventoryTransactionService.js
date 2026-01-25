@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const InventoryTransactionModel = require("../models/InventoryTransactionModel");
 const ProductModel = require("../models/ProductModel");
+const HarvestBatchModel = require("../models/HarvestBatchModel");
 const { getTodayInVietnam, formatDateVN, compareDates, calculateDaysBetween } = require("../utils/dateVN");
 
 // Build receivingStatus expression based on updated fields
@@ -31,7 +32,7 @@ const stockStatusExpr = () => ({
  * - Validate: expiryDate >= ngày hiện tại + 1 ngày
  */
 const createReceipt = async (userId, payload = {}) => {
-  const { productId, quantity, expiryDate, note = "", referenceType = "", referenceId = null } = payload;
+  const { productId, quantity, expiryDate, note = "", referenceType = "", referenceId = null, harvestBatchId = null } = payload;
 
   if (!mongoose.isValidObjectId(productId)) {
     return { status: "ERR", message: "productId không hợp lệ" };
@@ -85,16 +86,54 @@ const createReceipt = async (userId, payload = {}) => {
     return { status: "ERR", message: "referenceId không hợp lệ" };
   }
 
+  // ✅ Validate và convert harvestBatchId
+  const harvestBatchIdValue = harvestBatchId
+    ? mongoose.isValidObjectId(harvestBatchId)
+      ? new mongoose.Types.ObjectId(harvestBatchId)
+      : null
+    : null;
+  if (harvestBatchId && !harvestBatchIdValue) {
+    return { status: "ERR", message: "harvestBatchId không hợp lệ" };
+  }
+
   const session = await mongoose.startSession();
   try {
     let updatedProduct = null;
     let txDoc = null;
 
     await session.withTransaction(async () => {
-      // Lấy product hiện tại để check receivedQuantity trước đó
+      // Lấy product hiện tại để check supplier và các thông tin khác
       const currentProduct = await ProductModel.findById(productId).session(session);
       if (!currentProduct) {
         throw new Error("Sản phẩm không tồn tại");
+      }
+
+      // ✅ Logic mới: Nếu sản phẩm có supplier, bắt buộc phải có harvestBatchId khi nhập hàng
+      if (currentProduct.supplier) {
+        if (!harvestBatchIdValue) {
+          throw new Error("Sản phẩm có nhà cung cấp, bắt buộc phải chọn lô thu hoạch (harvestBatchId) khi nhập hàng vào kho");
+        }
+      }
+
+      // ✅ Nếu có harvestBatchId, validate lại trong transaction để tránh race condition
+      if (harvestBatchIdValue) {
+        const currentHarvestBatch = await HarvestBatchModel.findById(harvestBatchIdValue).session(session);
+        if (!currentHarvestBatch) {
+          throw new Error("Lô thu hoạch không tồn tại");
+        }
+        // ✅ Bỏ qua validation status APPROVED - cho phép nhập kho với bất kỳ status nào
+        if (currentHarvestBatch.product.toString() !== productId) {
+          throw new Error("Lô thu hoạch không khớp với sản phẩm");
+        }
+        // ✅ Validate: harvest batch phải thuộc cùng supplier với product
+        if (currentHarvestBatch.supplier.toString() !== currentProduct.supplier?.toString()) {
+          throw new Error("Lô thu hoạch không thuộc nhà cung cấp của sản phẩm");
+        }
+
+        const remainingQty = currentHarvestBatch.quantity - (currentHarvestBatch.receivedQuantity || 0);
+        if (qty > remainingQty) {
+          throw new Error(`Số lượng nhập kho (${qty}) vượt quá số lượng còn lại trong lô thu hoạch (${remainingQty}). Vui lòng nhập không quá ${remainingQty}.`);
+        }
       }
 
       // ✅ Validate: Kiểm tra xem đây có phải lần nhập kho đầu tiên không
@@ -200,6 +239,27 @@ const createReceipt = async (userId, payload = {}) => {
         throw new Error("Nhập vượt kế hoạch (plannedQuantity)");
       }
 
+      // ✅ Cập nhật receivedQuantity của harvest batch nếu có (atomic update với validation)
+      if (harvestBatchIdValue) {
+        // ✅ Atomic update: đảm bảo receivedQuantity + qty <= quantity
+        const updatedHarvestBatch = await HarvestBatchModel.findOneAndUpdate(
+          {
+            _id: harvestBatchIdValue,
+            $expr: {
+              $lte: [{ $add: ["$receivedQuantity", qty] }, "$quantity"],
+            },
+          },
+          {
+            $inc: { receivedQuantity: qty },
+            $addToSet: { inventoryTransactionIds: null }, // Sẽ được set sau khi tạo transaction
+          },
+          { new: true, session }
+        );
+        if (!updatedHarvestBatch) {
+          throw new Error("Không thể cập nhật lô thu hoạch: số lượng nhập vượt quá số lượng lô thu hoạch");
+        }
+      }
+
       const created = await InventoryTransactionModel.create(
         [
           {
@@ -210,16 +270,34 @@ const createReceipt = async (userId, payload = {}) => {
             note: note?.toString?.() ? note.toString() : "",
             referenceType: referenceType?.toString?.() ? referenceType.toString() : "",
             referenceId: refIdValue,
+            harvestBatch: harvestBatchIdValue, // ✅ Liên kết với harvest batch
           },
         ],
         { session }
       );
       txDoc = created[0];
+
+      // ✅ Cập nhật inventoryTransactionIds trong harvest batch
+      if (harvestBatchIdValue) {
+        await HarvestBatchModel.findByIdAndUpdate(
+          harvestBatchIdValue,
+          { $addToSet: { inventoryTransactionIds: txDoc._id } },
+          { session }
+        );
+      }
     });
 
     const populatedTx = await InventoryTransactionModel.findById(txDoc._id)
       .populate("product", "name plannedQuantity receivedQuantity onHandQuantity reservedQuantity receivingStatus stockStatus")
       .populate("createdBy", "user_name email")
+      .populate({
+        path: "harvestBatch",
+        select: "batchCode batchNumber harvestDate harvestDateStr quantity receivedQuantity location qualityGrade notes supplier",
+        populate: {
+          path: "supplier",
+          select: "name type code contactPerson phone email address cooperationStatus",
+        },
+      }) // ✅ Thông tin lô thu hoạch (nếu có)
       .lean();
 
     return {
@@ -327,20 +405,20 @@ const createIssue = async (userId, payload = {}) => {
       txDoc = created[0];
     });
 
-    // ✅ Sau khi commit transaction, check và đánh dấu cần reset nếu bán hết
+    // ✅ Sau khi commit transaction, tự động reset nếu bán hết
     // (Không nên làm trong transaction vì có thể gây deadlock)
-    // Chỉ đánh dấu, không tự động reset (cần admin xác nhận)
-    let markResult = null;
+    // Tự động reset và lưu vào ProductBatchHistoryModel
+    let resetResult = null;
     if (updatedProduct.onHandQuantity === 0) {
       try {
-        const { markSoldOutProductForReset } = require("./ProductBatchService");
-        markResult = await markSoldOutProductForReset(productId);
-        if (markResult.status === "OK") {
-          console.log(`[${new Date().toISOString()}] Marked product ${productId} for reset (sold out)`);
+        const { autoResetSoldOutProduct } = require("./ProductBatchService");
+        resetResult = await autoResetSoldOutProduct(productId);
+        if (resetResult.status === "OK") {
+          console.log(`[${new Date().toISOString()}] Auto-reset product ${productId} (sold out)`);
         }
       } catch (error) {
         // Log error nhưng không fail transaction ISSUE
-        console.error(`[${new Date().toISOString()}] Error marking product ${productId} for reset:`, error);
+        console.error(`[${new Date().toISOString()}] Error auto-resetting product ${productId}:`, error);
       }
     }
 
@@ -444,6 +522,14 @@ const getReceiptHistory = async (filters = {}) => {
       InventoryTransactionModel.find(query)
         .populate("product", "name price category")
         .populate("createdBy", "user_name email") // ✅ Thông tin nhân viên nhập hàng
+        .populate({
+          path: "harvestBatch",
+          select: "batchCode batchNumber harvestDate harvestDateStr quantity receivedQuantity supplier",
+          populate: {
+            path: "supplier",
+            select: "name type code",
+          },
+        }) // ✅ Thông tin lô thu hoạch (nếu có) - chỉ các field cơ bản cho list view
         .sort(sortObj)
         .skip(skip)
         .limit(limitNum)
@@ -553,6 +639,14 @@ const getTransactionHistory = async (filters = {}) => {
       InventoryTransactionModel.find(query)
         .populate("product", "name price category")
         .populate("createdBy", "user_name email") // ✅ Thông tin người thao tác
+        .populate({
+          path: "harvestBatch",
+          select: "batchCode batchNumber harvestDate harvestDateStr quantity receivedQuantity supplier",
+          populate: {
+            path: "supplier",
+            select: "name type code",
+          },
+        }) // ✅ Thông tin lô thu hoạch (nếu có) - chỉ các field cơ bản cho list view
         .sort(sortObj)
         .skip(skip)
         .limit(limitNum)
@@ -610,6 +704,14 @@ const getReceiptById = async (transactionId) => {
           select: "name",
         },
       }) // ✅ Thông tin chi tiết nhân viên nhập hàng
+      .populate({
+        path: "harvestBatch",
+        select: "batchCode batchNumber harvestDate harvestDateStr quantity receivedQuantity location qualityGrade notes supplier",
+        populate: {
+          path: "supplier",
+          select: "name type code contactPerson phone email address cooperationStatus",
+        },
+      }) // ✅ Thông tin lô thu hoạch (nếu có)
       .lean();
 
     if (!transaction) {

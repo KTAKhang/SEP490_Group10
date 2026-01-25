@@ -28,9 +28,7 @@ ProductRouter.delete("/:id", inventoryAdminMiddleware, ProductController.deleteP
 // Admin: Batch management
 ProductRouter.patch("/:id/reset-batch", inventoryAdminMiddleware, ProductBatchController.resetProductBatch);
 ProductRouter.get("/:id/batch-history", inventoryAdminOrWarehouseMiddleware, ProductBatchController.getProductBatchHistory);
-ProductRouter.post("/batch/mark-expired", inventoryAdminMiddleware, ProductBatchController.manualMarkExpired);
-ProductRouter.get("/batch/pending-reset", inventoryAdminMiddleware, ProductBatchController.getPendingResetProducts);
-ProductRouter.post("/:id/confirm-reset", inventoryAdminMiddleware, ProductBatchController.confirmResetProduct);
+ProductRouter.post("/batch/auto-reset-expired", inventoryAdminMiddleware, ProductBatchController.manualAutoResetExpired);
 
 module.exports = ProductRouter;
 
