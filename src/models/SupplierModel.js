@@ -94,13 +94,6 @@ const supplierSchema = new mongoose.Schema(
     // ========================
     // Thống kê & đánh giá
     // ========================
-    performanceScore: {
-      type: Number,
-      min: 0,
-      max: 100,
-      default: 0,
-    },
-
     totalBatches: {
       type: Number,
       default: 0,

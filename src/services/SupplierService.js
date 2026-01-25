@@ -1,15 +1,10 @@
 const mongoose = require("mongoose");
 const SupplierModel = require("../models/SupplierModel");
 const HarvestBatchModel = require("../models/HarvestBatchModel");
-const QualityVerificationModel = require("../models/QualityVerificationModel");
-const SupplierPerformanceModel = require("../models/SupplierPerformanceModel");
-const SupplierActivityLogModel = require("../models/SupplierActivityLogModel");
 const ProductModel = require("../models/ProductModel");
 
 // Import các service đã tách
 const HarvestBatchService = require("./HarvestBatchService");
-const QualityVerificationService = require("./QualityVerificationService");
-const SupplierPerformanceService = require("./SupplierPerformanceService");
 
 /**
  * Tạo nhà cung cấp mới (Admin)
@@ -111,16 +106,6 @@ const createSupplier = async (userId, payload = {}) => {
     });
 
     await supplier.save();
-
-    // Log activity
-    await SupplierActivityLogModel.create({
-      supplier: supplier._id,
-      action: "CREATED",
-      description: `Tạo nhà cung cấp mới: ${supplier.name}`,
-      relatedEntity: "SUPPLIER",
-      relatedEntityId: supplier._id,
-      performedBy: new mongoose.Types.ObjectId(userId),
-    });
 
     return {
       status: "OK",
@@ -257,19 +242,6 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
     supplier.updatedBy = new mongoose.Types.ObjectId(userId);
     await supplier.save();
 
-    // Log activity
-    if (changes.size > 0) {
-      await SupplierActivityLogModel.create({
-        supplier: supplier._id,
-        action: "UPDATED",
-        description: `Cập nhật thông tin nhà cung cấp: ${supplier.name}`,
-        relatedEntity: "SUPPLIER",
-        relatedEntityId: supplier._id,
-        changes: changes,
-        performedBy: new mongoose.Types.ObjectId(userId),
-      });
-    }
-
     return {
       status: "OK",
       message: "Cập nhật nhà cung cấp thành công",
@@ -292,8 +264,6 @@ const getSuppliers = async (filters = {}) => {
       type,
       cooperationStatus,
       status,
-      minPerformanceScore,
-      maxPerformanceScore,
       minTotalBatches,
       maxTotalBatches,
       minTotalProductsSupplied,
@@ -341,20 +311,6 @@ const getSuppliers = async (filters = {}) => {
 
     if (status !== undefined) {
       query.status = status === "true" || status === true;
-    }
-
-    // Filter theo hiệu suất
-    if (minPerformanceScore !== undefined || maxPerformanceScore !== undefined) {
-      query.performanceScore = {};
-      if (minPerformanceScore !== undefined && !Number.isNaN(Number(minPerformanceScore))) {
-        query.performanceScore.$gte = Number(minPerformanceScore);
-      }
-      if (maxPerformanceScore !== undefined && !Number.isNaN(Number(maxPerformanceScore))) {
-        query.performanceScore.$lte = Number(maxPerformanceScore);
-      }
-      if (Object.keys(query.performanceScore).length === 0) {
-        delete query.performanceScore;
-      }
     }
 
     // Filter theo tổng lô và tổng sản phẩm
@@ -448,7 +404,6 @@ const getSuppliers = async (filters = {}) => {
       "type",
       "code",
       "cooperationStatus",
-      "performanceScore",
       "totalBatches",
       "totalProductsSupplied",
       "status",
@@ -517,34 +472,6 @@ const deleteSupplier = async (supplierId, userId) => {
         message: `Không thể xóa nhà cung cấp vì đang có ${harvestBatchesCount} lô thu hoạch. Vui lòng xóa các lô thu hoạch trước.`,
       };
     }
-
-    // Kiểm tra có quality verifications không
-    const qualityVerificationsCount = await QualityVerificationModel.countDocuments({ supplier: supplier._id });
-    if (qualityVerificationsCount > 0) {
-      return {
-        status: "ERR",
-        message: `Không thể xóa nhà cung cấp vì đang có ${qualityVerificationsCount} kết quả kiểm định chất lượng.`,
-      };
-    }
-
-    // Kiểm tra có performance evaluations không
-    const performancesCount = await SupplierPerformanceModel.countDocuments({ supplier: supplier._id });
-    if (performancesCount > 0) {
-      return {
-        status: "ERR",
-        message: `Không thể xóa nhà cung cấp vì đang có ${performancesCount} đánh giá hiệu suất. Vui lòng xóa các đánh giá trước.`,
-      };
-    }
-
-    // Log activity trước khi xóa
-    await SupplierActivityLogModel.create({
-      supplier: supplier._id,
-      action: "DELETED",
-      description: `Xóa nhà cung cấp: ${supplier.name}`,
-      relatedEntity: "SUPPLIER",
-      relatedEntityId: supplier._id,
-      performedBy: new mongoose.Types.ObjectId(userId),
-    });
 
     await supplier.deleteOne();
 
@@ -651,17 +578,6 @@ const updatePurchaseCost = async (supplierId, userId, payload = {}) => {
     product.purchasePrice = costValue;
     await product.save();
 
-    // Log activity
-    await SupplierActivityLogModel.create({
-      supplier: supplier._id,
-      action: "PURCHASE_COST_UPDATED",
-      description: `Cập nhật giá mua: ${product.name} - ${oldCost} -> ${costValue}`,
-      relatedEntity: "PRODUCT",
-      relatedEntityId: productId,
-      changes: new Map([["cost", { old: oldCost, new: costValue }]]),
-      performedBy: new mongoose.Types.ObjectId(userId),
-    });
-
     return {
       status: "OK",
       message: "Cập nhật giá mua thành công",
@@ -704,94 +620,10 @@ const updateCooperationStatus = async (supplierId, userId, payload = {}) => {
     supplier.updatedBy = new mongoose.Types.ObjectId(userId);
     await supplier.save();
 
-    // Log activity
-    await SupplierActivityLogModel.create({
-      supplier: supplier._id,
-      action: "COOPERATION_STATUS_CHANGED",
-      description: `Thay đổi trạng thái hợp tác: ${oldStatus} -> ${cooperationStatus}`,
-      relatedEntity: "SUPPLIER",
-      relatedEntityId: supplier._id,
-      changes: new Map([["cooperationStatus", { old: oldStatus, new: cooperationStatus }]]),
-      performedBy: new mongoose.Types.ObjectId(userId),
-    });
-
     return {
       status: "OK",
       message: "Cập nhật trạng thái hợp tác thành công",
       data: supplier,
-    };
-  } catch (error) {
-    return { status: "ERR", message: error.message };
-  }
-};
-
-/**
- * Lấy lịch sử hoạt động của nhà cung cấp
- */
-const getActivityLog = async (supplierId, filters = {}) => {
-  try {
-    if (!mongoose.isValidObjectId(supplierId)) {
-      return { status: "ERR", message: "supplierId không hợp lệ" };
-    }
-
-    const {
-      page = 1,
-      limit = 20,
-      action,
-      sortBy = "createdAt",
-      sortOrder = "desc",
-    } = filters;
-
-    const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
-    const skip = (pageNum - 1) * limitNum;
-
-    const query = {
-      supplier: new mongoose.Types.ObjectId(supplierId),
-    };
-
-    if (action) {
-      const allowedActions = [
-        "CREATED",
-        "UPDATED",
-        "HARVEST_BATCH_CREATED",
-        "QUALITY_VERIFIED",
-        "PURCHASE_COST_UPDATED",
-        "PERFORMANCE_EVALUATED",
-        "COOPERATION_STATUS_CHANGED",
-        "STATUS_CHANGED",
-      ];
-      if (allowedActions.includes(action)) {
-        query.action = action;
-      }
-    }
-
-    // Sort
-    const allowedSortFields = ["createdAt", "action"];
-    const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
-    const sortDirection = sortOrder === "asc" ? 1 : -1;
-    const sortObj = { [sortField]: sortDirection };
-
-    const [data, total] = await Promise.all([
-      SupplierActivityLogModel.find(query)
-        .populate("performedBy", "user_name email")
-        .sort(sortObj)
-        .skip(skip)
-        .limit(limitNum)
-        .lean(),
-      SupplierActivityLogModel.countDocuments(query),
-    ]);
-
-    return {
-      status: "OK",
-      message: "Lấy lịch sử hoạt động thành công",
-      data,
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total,
-        totalPages: Math.ceil(total / limitNum),
-      },
     };
   } catch (error) {
     return { status: "ERR", message: error.message };
@@ -809,7 +641,6 @@ module.exports = {
   getSuppliersForBrand,
   updatePurchaseCost,
   updateCooperationStatus,
-  getActivityLog,
   
   // Harvest Batch Management (re-export từ HarvestBatchService)
   createHarvestBatch: HarvestBatchService.createHarvestBatch,
@@ -817,17 +648,4 @@ module.exports = {
   deleteHarvestBatch: HarvestBatchService.deleteHarvestBatch,
   getHarvestBatches: HarvestBatchService.getHarvestBatches,
   getHarvestBatchById: HarvestBatchService.getHarvestBatchById,
-  
-  // Quality Verification Management (re-export từ QualityVerificationService)
-  verifyQuality: QualityVerificationService.verifyQuality,
-  getQualityVerifications: QualityVerificationService.getQualityVerifications,
-  getQualityVerificationById: QualityVerificationService.getQualityVerificationById,
-  updateQualityVerification: QualityVerificationService.updateQualityVerification,
-  deleteQualityVerification: QualityVerificationService.deleteQualityVerification,
-  
-  // Supplier Performance Management (re-export từ SupplierPerformanceService)
-  evaluatePerformance: SupplierPerformanceService.evaluatePerformance,
-  getPerformances: SupplierPerformanceService.getPerformances,
-  getPerformanceById: SupplierPerformanceService.getPerformanceById,
-  deletePerformance: SupplierPerformanceService.deletePerformance,
 };

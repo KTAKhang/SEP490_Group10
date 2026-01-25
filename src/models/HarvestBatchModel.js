@@ -87,21 +87,6 @@ const harvestBatchSchema = new mongoose.Schema(
       default: "",
     },
 
-    // Trạng thái - BR-SUP-13: PENDING (mặc định), APPROVED, REJECTED
-    status: {
-      type: String,
-      enum: ["PENDING", "APPROVED", "REJECTED"], // ✅ Xóa VERIFIED/DELIVERED (dư thừa)
-      default: "PENDING",
-      index: true,
-    },
-
-    // Người tạo (qc_staff)
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "users",
-      required: true,
-    },
-
     // ✅ Liên kết với Inventory Transactions (array của transaction IDs)
     inventoryTransactionIds: {
       type: [mongoose.Schema.Types.ObjectId],
@@ -123,7 +108,6 @@ harvestBatchSchema.set("toObject", { virtuals: true });
 
 // Index
 harvestBatchSchema.index({ supplier: 1, product: 1, harvestDate: -1 });
-harvestBatchSchema.index({ status: 1, harvestDate: -1 });
 // ✅ Unique constraint: không cho trùng (supplier, product, batchNumber, harvestDate)
 harvestBatchSchema.index({ supplier: 1, product: 1, batchNumber: 1, harvestDate: 1 }, { unique: true });
 
