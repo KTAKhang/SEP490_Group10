@@ -24,6 +24,7 @@ const harvestBatchSchema = new mongoose.Schema(
       unique: true,
       required: false, // ✅ Đảm bảo luôn có giá trị
       maxlength: [30, "Mã lô thu hoạch không được vượt quá 30 ký tự"],
+      immutable: true,
     },
 
     batchNumber: {
@@ -133,8 +134,8 @@ harvestBatchSchema.pre("save", function (next) {
     this.harvestDateStr = `${year}-${month}-${day}`;
   }
 
-  // ✅ BR-SUP-11: Tự động sinh batchCode nếu chưa có (khi tạo mới)
-  if (this.isNew && !this.batchCode) {
+  // ✅ BR-SUP-11: Tự động sinh batchCode khi tạo mới
+  if (this.isNew) {
     const timestamp = Date.now().toString(36).toUpperCase();
     const random = Math.random().toString(36).substring(2, 6).toUpperCase();
     this.batchCode = `HB-${timestamp}-${random}`;

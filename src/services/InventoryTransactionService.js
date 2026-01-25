@@ -136,6 +136,22 @@ const createReceipt = async (userId, payload = {}) => {
         }
       }
 
+      // ✅ Ràng buộc: Nếu đã từng nhập kho với lô thu hoạch, các lần sau phải dùng cùng lô
+      const existingReceipt = await InventoryTransactionModel.findOne({
+        product: new mongoose.Types.ObjectId(productId),
+        type: "RECEIPT",
+        harvestBatch: { $ne: null },
+      })
+        .sort({ createdAt: 1 })
+        .select("harvestBatch")
+        .session(session);
+
+      if (existingReceipt && harvestBatchIdValue) {
+        if (existingReceipt.harvestBatch?.toString() !== harvestBatchIdValue.toString()) {
+          throw new Error("Đã chọn lô thu hoạch ở lần nhập kho đầu tiên, các lần sau không thể đổi lô khác");
+        }
+      }
+
       // ✅ Validate: Kiểm tra xem đây có phải lần nhập kho đầu tiên không
       const isFirstReceipt = !currentProduct.warehouseEntryDate && !currentProduct.warehouseEntryDateStr;
 

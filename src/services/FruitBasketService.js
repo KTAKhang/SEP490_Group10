@@ -116,7 +116,7 @@ const validateImages = (images, imagePublicIds) => {
   if (imagePublicIdArray.length > 10) {
     return { status: "ERR", message: "Số lượng imagePublicIds không được vượt quá 10" };
   }
-  if (imageArray.length !== imagePublicIdArray.length) {
+  if (imagePublicIdArray.length > 0 && imageArray.length !== imagePublicIdArray.length) {
     return { status: "ERR", message: "Số lượng images và imagePublicIds phải bằng nhau" };
   }
 
@@ -172,7 +172,7 @@ const createFruitBasket = async (payload = {}) => {
   }
 };
 
-const getFruitBaskets = async ({ page = 1, limit = 20, search = "", status, sortBy = "createdAt", sortOrder = "desc" } = {}) => {
+const getFruitBaskets = async ({ page = 1, limit = 5, search = "", status, sortBy = "createdAt", sortOrder = "desc" } = {}) => {
   try {
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));

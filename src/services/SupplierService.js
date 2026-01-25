@@ -14,7 +14,6 @@ const createSupplier = async (userId, payload = {}) => {
     const {
       name,
       type,
-      code,
       contactPerson,
       phone,
       email,
@@ -38,9 +37,8 @@ const createSupplier = async (userId, payload = {}) => {
       return { status: "ERR", message: "Phải có ít nhất số điện thoại hoặc email" };
     }
 
-    // ✅ BR-SUP-03: Kiểm tra trùng (name + phone) hoặc code
+    // ✅ BR-SUP-03: Kiểm tra trùng (name + phone)
     const normalizedName = name.toString().trim();
-    let normalizedCode = code?.toString().trim().toUpperCase() || null;
 
     if (normalizedPhone) {
       const existingByNamePhone = await SupplierModel.findOne({
@@ -52,49 +50,9 @@ const createSupplier = async (userId, payload = {}) => {
       }
     }
 
-    if (normalizedCode) {
-      const existingByCode = await SupplierModel.findOne({ code: normalizedCode });
-      if (existingByCode) {
-        return { status: "ERR", message: `Mã nhà cung cấp "${normalizedCode}" đã tồn tại` };
-      }
-    } else {
-      // ✅ Auto-generate code nếu không có để tránh duplicate key error
-      // Format: {TYPE_PREFIX}{YYYYMMDD}{SEQUENCE}
-      const typePrefix = {
-        FARM: "F",
-        COOPERATIVE: "C",
-        BUSINESS: "B",
-      }[type] || "S";
-      
-      const today = new Date();
-      const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}`;
-      
-      // Tìm số thứ tự tiếp theo
-      const lastSupplier = await SupplierModel.findOne({
-        code: { $regex: `^${typePrefix}${dateStr}` },
-      }).sort({ code: -1 });
-      
-      let sequence = 1;
-      if (lastSupplier && lastSupplier.code) {
-        const lastSeq = parseInt(lastSupplier.code.slice(-3)) || 0;
-        sequence = lastSeq + 1;
-      }
-      
-      normalizedCode = `${typePrefix}${dateStr}${String(sequence).padStart(3, "0")}`;
-      
-      // Kiểm tra lại để đảm bảo không trùng
-      const existingByGeneratedCode = await SupplierModel.findOne({ code: normalizedCode });
-      if (existingByGeneratedCode) {
-        // Nếu trùng (rất hiếm), tăng sequence
-        sequence++;
-        normalizedCode = `${typePrefix}${dateStr}${String(sequence).padStart(3, "0")}`;
-      }
-    }
-
     const supplier = new SupplierModel({
       name: normalizedName,
       type,
-      code: normalizedCode,
       contactPerson: contactPerson?.toString().trim() || "",
       phone: normalizedPhone || "",
       email: normalizedEmail || "",
@@ -146,7 +104,6 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
     const allowed = [
       "name",
       "type",
-      "code",
       "contactPerson",
       "phone",
       "email",
@@ -191,22 +148,6 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
       }
       changes.set("type", { old: supplier.type, new: payload.type });
       supplier.type = payload.type;
-    }
-
-    if (payload.code !== undefined) {
-      const normalizedCode = payload.code?.toString().trim().toUpperCase() || null;
-      // ✅ BR-SUP-03: Kiểm tra trùng code
-      if (normalizedCode) {
-        const existingByCode = await SupplierModel.findOne({
-          _id: { $ne: supplierId },
-          code: normalizedCode,
-        });
-        if (existingByCode) {
-          return { status: "ERR", message: `Mã nhà cung cấp "${normalizedCode}" đã tồn tại` };
-        }
-      }
-      changes.set("code", { old: supplier.code, new: normalizedCode });
-      supplier.code = normalizedCode;
     }
 
     if (payload.contactPerson !== undefined) {
