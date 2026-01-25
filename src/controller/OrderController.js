@@ -140,8 +140,86 @@ const cancelOrder = async (req, res) => {
   }
 };
 
+/* =====================================================
+   CUSTOMER ORDER HISTORY
+===================================================== */
+const getMyOrders = async (req, res) => {
+  try {
+    const user_id = req.user._id;
+    const response = await OrderService.getOrdersByUser(user_id, req.query);
+    if (response.status === "ERR") return res.status(400).json(response);
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message || "Lấy lịch sử mua hàng thất bại",
+    });
+  }
+};
+
+const getMyOrderById = async (req, res) => {
+  try {
+    const user_id = req.user._id;
+    const response = await OrderService.getOrderByUser(req.params.id, user_id);
+    if (response.status === "ERR") return res.status(404).json(response);
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message || "Lấy chi tiết đơn hàng thất bại",
+    });
+  }
+};
+
+/* =====================================================
+   ADMIN ORDER MANAGEMENT
+===================================================== */
+const getOrdersAdmin = async (req, res) => {
+  try {
+    const response = await OrderService.getOrdersForAdmin(req.query);
+    if (response.status === "ERR") return res.status(400).json(response);
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message || "Lấy danh sách đơn hàng thất bại",
+    });
+  }
+};
+
+const getOrderDetailAdmin = async (req, res) => {
+  try {
+    const response = await OrderService.getOrderDetailForAdmin(req.params.id);
+    if (response.status === "ERR") return res.status(404).json(response);
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message || "Lấy chi tiết đơn hàng thất bại",
+    });
+  }
+};
+
+const getOrderStatusStatsAdmin = async (req, res) => {
+  try {
+    const response = await OrderService.getOrderStatusCounts();
+    if (response.status === "ERR") return res.status(400).json(response);
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message || "Lấy thống kê đơn hàng thất bại",
+    });
+  }
+};
+
 module.exports = {
   createOrder,
   updateOrder,
   cancelOrder,
+  getMyOrders,
+  getMyOrderById,
+  getOrdersAdmin,
+  getOrderDetailAdmin,
+  getOrderStatusStatsAdmin,
 };

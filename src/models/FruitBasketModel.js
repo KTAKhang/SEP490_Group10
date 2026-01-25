@@ -52,6 +52,7 @@ const fruitBasketSchema = new mongoose.Schema(
     },
     imagePublicIds: {
       type: [{ type: String, trim: true }],
+      default: [],
       validate: {
         validator: function (v) {
           return v.length <= 10;

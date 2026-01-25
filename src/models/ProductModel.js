@@ -116,7 +116,6 @@ const productSchema = new mongoose.Schema(
     },
 
     brand: { type: String, required: true, trim: true }, // ✅ Bắt buộc phải có brand (tên nhà cung cấp)
-    
     // ✅ Liên kết đến Supplier (tự động set khi admin chọn brand)
     supplier: {
       type: mongoose.Schema.Types.ObjectId,
