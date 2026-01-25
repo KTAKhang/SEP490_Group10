@@ -6,6 +6,7 @@ const ContactRouter = require("./ContactRouter");
 const CategoryRouter = require("./CategoryRouter");
 const ProductRouter = require("./ProductRouter");
 const InventoryRouter = require("./InventoryRouter");
+const FruitBasketRouter = require("./FruitBasketRouter");
 
 const SupplierRouter = require("./SupplierRouter");
 const HarvestBatchRouter = require("./HarvestBatchRouter");
@@ -18,6 +19,7 @@ const UploadRouter = require("./UploadRouter");
 
 const PublicProductRouter = require("./PublicProductRouter");
 const PublicCategoryRouter = require("./PublicCategoryRouter");
+const PublicFruitBasketRouter = require("./PublicFruitBasketRouter");
 const FavoriteRouter = require("./FavoriteRouter");
 
 
@@ -51,6 +53,7 @@ const routes = (app) => {
     // Admin routes
     app.use("/admin/categories", CategoryRouter);
     app.use("/admin/products", ProductRouter);
+    app.use("/admin/fruit-baskets", FruitBasketRouter);
     app.use("/admin/harvest-batch", HarvestBatchRouter);
 
     // Admin routes - Supplier Management
@@ -67,6 +70,7 @@ const routes = (app) => {
     // Public routes (không cần authentication)
     app.use("/products", PublicProductRouter);
     app.use("/categories", PublicCategoryRouter);
+    app.use("/fruit-baskets", PublicFruitBasketRouter);
     
     // Customer routes (chỉ Customer)
     app.use("/favorites", FavoriteRouter);
