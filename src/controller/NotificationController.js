@@ -53,6 +53,106 @@ const NotificationController = {
                 message: error.message
             });
         }
+    },
+
+    /**
+     * Get notifications for authenticated user
+     * GET /api/notifications
+     * Query params: page, limit, isRead, type
+     */
+    async getNotifications(req, res) {
+        try {
+            const userId = req.user._id;
+            const { page, limit, isRead, type } = req.query;
+
+            const result = await NotificationService.getUserNotifications(userId, {
+                page,
+                limit,
+                isRead,
+                type
+            });
+
+            if (result.status === "OK") {
+                return res.status(200).json(result);
+            }
+
+            return res.status(400).json(result);
+        } catch (error) {
+            return res.status(500).json({
+                status: "ERR",
+                message: error.message
+            });
+        }
+    },
+
+    /**
+     * Get unread notification count
+     * GET /api/notifications/unread-count
+     */
+    async getUnreadCount(req, res) {
+        try {
+            const userId = req.user._id;
+
+            const result = await NotificationService.getUnreadCount(userId);
+
+            if (result.status === "OK") {
+                return res.status(200).json(result);
+            }
+
+            return res.status(400).json(result);
+        } catch (error) {
+            return res.status(500).json({
+                status: "ERR",
+                message: error.message
+            });
+        }
+    },
+
+    /**
+     * Mark notification as read
+     * PUT /api/notifications/:notificationId/read
+     */
+    async markAsRead(req, res) {
+        try {
+            const userId = req.user._id;
+            const { notificationId } = req.params;
+
+            const result = await NotificationService.markAsRead(notificationId, userId);
+
+            if (result.status === "OK") {
+                return res.status(200).json(result);
+            }
+
+            return res.status(400).json(result);
+        } catch (error) {
+            return res.status(500).json({
+                status: "ERR",
+                message: error.message
+            });
+        }
+    },
+
+    /**
+     * Mark all notifications as read
+     * PUT /api/notifications/read-all
+     */
+    async markAllAsRead(req, res) {
+        try {
+            const userId = req.user._id;
+
+            const result = await NotificationService.markAllAsRead(userId);
+
+            if (result.status === "OK") {
+                return res.status(200).json(result);
+            }
+
+            return res.status(400).json(result);
+        } catch (error) {
+            return res.status(500).json({
+                status: "ERR",
+                message: error.message
+            });
+        }
     }
 };
 

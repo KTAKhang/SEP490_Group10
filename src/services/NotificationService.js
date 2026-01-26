@@ -66,6 +66,7 @@ const fs = require("fs");
 const path = require("path");
 const UserModel = require("../models/UserModel");
 const RoleModel = require("../models/RolesModel");
+const NotificationModel = require("../models/NotificationModel");
 
 // Initialize Firebase Admin SDK
 let firebaseInitialized = false;
@@ -127,18 +128,18 @@ function initializeFirebase() {
                         credential: admin.credential.cert(serviceAccountFromFile)
                     });
                 } else {
-                    console.warn("⚠️ Firebase not configured. Notifications will be disabled.");
-                    console.warn("⚠️ Please set FIREBASE_PROJECT_ID, FIREBASE_PRIVATE_KEY, FIREBASE_CLIENT_EMAIL, etc. in .env");
+                    console.warn("Firebase not configured. Notifications will be disabled.");
+                    console.warn("Please set FIREBASE_PROJECT_ID, FIREBASE_PRIVATE_KEY, FIREBASE_CLIENT_EMAIL, etc. in .env");
                     return;
                 }
             }
         }
         
         firebaseInitialized = true;
-        console.log("✅ Firebase Admin SDK initialized successfully");
+        console.log("Firebase Admin SDK initialized successfully");
     } catch (error) {
-        console.error("❌ Error initializing Firebase Admin SDK:", error.message);
-        console.warn("⚠️ Notifications will be disabled");
+        console.error("Error initializing Firebase Admin SDK:", error.message);
+        console.warn("Notifications will be disabled");
     }
 }
 
@@ -177,6 +178,9 @@ const NotificationService = {
     /**
      * Send notification to a single user
      * 
+     * Flow: Save to database first → Then send via FCM
+     * This ensures notifications persist even if FCM delivery fails.
+     * 
      * @param {String} userId - User ID
      * @param {Object} notification - Notification object
      * @param {String} notification.title - Notification title
@@ -187,76 +191,94 @@ const NotificationService = {
      */
     async sendToUser(userId, notification) {
         try {
-            if (!firebaseInitialized || admin.apps.length === 0) {
-                console.warn("Firebase not initialized, skipping notification");
-                return { status: "OK", message: "Firebase not configured, notification skipped" };
-            }
+            // Step 1: Save notification to database first (source of truth)
+            const savedNotification = new NotificationModel({
+                userId: userId,
+                title: notification.title,
+                body: notification.body,
+                type: notification.data?.type || "general",
+                data: notification.data || {},
+                imageUrl: notification.imageUrl || null,
+                isRead: false,
+            });
 
-            const user = await UserModel.findById(userId).select('fcmToken').lean();
-            
-            if (!user) {
-                return { status: "ERR", message: "User not found" };
-            }
+            await savedNotification.save();
 
-            if (!user.fcmToken) {
-                return { status: "ERR", message: "User does not have FCM token registered" };
-            }
+            // Step 2: Send via FCM (real-time delivery channel)
+            // If FCM fails, notification is still saved in database
+            let fcmResult = null;
+            if (firebaseInitialized && admin.apps.length > 0) {
+                try {
+                    const user = await UserModel.findById(userId).select('fcmToken').lean();
+                    
+                    if (user && user.fcmToken) {
+                        const message = {
+                            notification: {
+                                title: notification.title,
+                                body: notification.body,
+                                ...(notification.imageUrl && { imageUrl: notification.imageUrl })
+                            },
+                            data: {
+                                // Include notification ID so frontend can mark as read
+                                notificationId: savedNotification._id.toString(),
+                                ...(notification.data || {}),
+                                // Convert all data values to strings (FCM requirement)
+                                ...Object.fromEntries(
+                                    Object.entries(notification.data || {}).map(([key, value]) => [
+                                        key,
+                                        typeof value === 'string' ? value : JSON.stringify(value)
+                                    ])
+                                )
+                            },
+                            token: user.fcmToken,
+                            android: {
+                                priority: "high",
+                                notification: {
+                                    sound: "default",
+                                    channelId: "default"
+                                }
+                            },
+                            apns: {
+                                payload: {
+                                    aps: {
+                                        sound: "default"
+                                    }
+                                }
+                            }
+                        };
 
-            const message = {
-                notification: {
-                    title: notification.title,
-                    body: notification.body,
-                    ...(notification.imageUrl && { imageUrl: notification.imageUrl })
-                },
-                data: {
-                    ...(notification.data || {}),
-                    // Convert all data values to strings (FCM requirement)
-                    ...Object.fromEntries(
-                        Object.entries(notification.data || {}).map(([key, value]) => [
-                            key,
-                            typeof value === 'string' ? value : JSON.stringify(value)
-                        ])
-                    )
-                },
-                token: user.fcmToken,
-                android: {
-                    priority: "high",
-                    notification: {
-                        sound: "default",
-                        channelId: "default"
+                        const response = await admin.messaging().send(message);
+                        fcmResult = response;
+                        console.log("FCM notification sent successfully:", response);
+                    } else {
+                        console.warn(`User ${userId} does not have FCM token, notification saved to DB only`);
                     }
-                },
-                apns: {
-                    payload: {
-                        aps: {
-                            sound: "default"
-                        }
+                } catch (fcmError) {
+                    console.error("FCM delivery failed, but notification saved to DB:", fcmError);
+                    
+                    // Handle invalid token error
+                    if (fcmError.code === 'messaging/invalid-registration-token' || 
+                        fcmError.code === 'messaging/registration-token-not-registered') {
+                        // Remove invalid token from database
+                        await UserModel.updateOne(
+                            { _id: userId },
+                            { $unset: { fcmToken: "" } }
+                        );
                     }
+                    // Continue - notification is already saved in DB
                 }
-            };
+            } else {
+                console.warn("Firebase not initialized, notification saved to DB only");
+            }
 
-            const response = await admin.messaging().send(message);
-            
-            console.log("✅ Notification sent successfully:", response);
             return {
                 status: "OK",
-                message: "Notification sent successfully",
-                messageId: response
+                message: "Notification saved and sent successfully",
+                notificationId: savedNotification._id.toString(),
+                fcmMessageId: fcmResult
             };
         } catch (error) {
-            console.error("Error sending notification to user:", error);
-            
-            // Handle invalid token error
-            if (error.code === 'messaging/invalid-registration-token' || 
-                error.code === 'messaging/registration-token-not-registered') {
-                // Remove invalid token from database
-                await UserModel.updateOne(
-                    { _id: userId },
-                    { $unset: { fcmToken: "" } }
-                );
-                return { status: "ERR", message: "Invalid FCM token, removed from database" };
-            }
-
+            console.error("Error in sendToUser:", error);
             return { status: "ERR", message: error.message };
         }
     },
@@ -264,97 +286,122 @@ const NotificationService = {
     /**
      * Send notification to multiple users
      * 
+     * Flow: Save to database first → Then send via FCM
+     * 
      * @param {Array<String>} userIds - Array of User IDs
      * @param {Object} notification - Notification object
      * @returns {Promise<Object>} Result object with success/failure counts
      */
     async sendToUsers(userIds, notification) {
         try {
-            if (!firebaseInitialized || admin.apps.length === 0) {
-                console.warn("Firebase not initialized, skipping notifications");
-                return { status: "OK", message: "Firebase not configured, notifications skipped" };
-            }
-
             if (!Array.isArray(userIds) || userIds.length === 0) {
                 return { status: "ERR", message: "User IDs array is required" };
             }
 
-            const users = await UserModel.find({
-                _id: { $in: userIds },
-                fcmToken: { $exists: true, $ne: null }
-            }).select('fcmToken').lean();
+            // Step 1: Save notifications to database for all users
+            const notificationsToSave = userIds.map(userId => ({
+                userId: userId,
+                title: notification.title,
+                body: notification.body,
+                type: notification.data?.type || "general",
+                data: notification.data || {},
+                imageUrl: notification.imageUrl || null,
+                isRead: false,
+            }));
 
-            if (users.length === 0) {
-                return { status: "ERR", message: "No users with FCM tokens found" };
-            }
+            const savedNotifications = await NotificationModel.insertMany(notificationsToSave);
+            const notificationIds = savedNotifications.map(n => n._id.toString());
 
-            const tokens = users.map(u => u.fcmToken).filter(Boolean);
-            
-            if (tokens.length === 0) {
-                return { status: "ERR", message: "No valid FCM tokens found" };
-            }
+            // Step 2: Send via FCM (real-time delivery)
+            let fcmSuccessCount = 0;
+            let fcmFailureCount = 0;
 
-            const message = {
-                notification: {
-                    title: notification.title,
-                    body: notification.body,
-                    ...(notification.imageUrl && { imageUrl: notification.imageUrl })
-                },
-                data: {
-                    ...Object.fromEntries(
-                        Object.entries(notification.data || {}).map(([key, value]) => [
-                            key,
-                            typeof value === 'string' ? value : JSON.stringify(value)
-                        ])
-                    )
-                },
-                android: {
-                    priority: "high",
-                    notification: {
-                        sound: "default",
-                        channelId: "default"
-                    }
-                },
-                apns: {
-                    payload: {
-                        aps: {
-                            sound: "default"
+            if (firebaseInitialized && admin.apps.length > 0) {
+                try {
+                    const users = await UserModel.find({
+                        _id: { $in: userIds },
+                        fcmToken: { $exists: true, $ne: null }
+                    }).select('fcmToken _id').lean();
+
+                    if (users.length > 0) {
+                        const tokens = users.map(u => u.fcmToken).filter(Boolean);
+                        
+                        if (tokens.length > 0) {
+                            const message = {
+                                notification: {
+                                    title: notification.title,
+                                    body: notification.body,
+                                    ...(notification.imageUrl && { imageUrl: notification.imageUrl })
+                                },
+                                data: {
+                                    ...Object.fromEntries(
+                                        Object.entries(notification.data || {}).map(([key, value]) => [
+                                            key,
+                                            typeof value === 'string' ? value : JSON.stringify(value)
+                                        ])
+                                    )
+                                },
+                                android: {
+                                    priority: "high",
+                                    notification: {
+                                        sound: "default",
+                                        channelId: "default"
+                                    }
+                                },
+                                apns: {
+                                    payload: {
+                                        aps: {
+                                            sound: "default"
+                                        }
+                                    }
+                                }
+                            };
+
+                            // Send to multiple tokens (batch send)
+                            const response = await admin.messaging().sendEachForMulticast({
+                                tokens: tokens,
+                                ...message
+                            });
+
+                            fcmSuccessCount = response.successCount;
+                            fcmFailureCount = response.failureCount;
+
+                            // Handle failed tokens
+                            if (response.failureCount > 0) {
+                                const failedTokens = [];
+                                response.responses.forEach((resp, idx) => {
+                                    if (!resp.success) {
+                                        failedTokens.push(tokens[idx]);
+                                    }
+                                });
+
+                                // Remove invalid tokens from database
+                                if (failedTokens.length > 0) {
+                                    await UserModel.updateMany(
+                                        { fcmToken: { $in: failedTokens } },
+                                        { $unset: { fcmToken: "" } }
+                                    );
+                                }
+                            }
+
+                            console.log(`FCM: Sent ${fcmSuccessCount} notifications, ${fcmFailureCount} failed`);
                         }
                     }
+                } catch (fcmError) {
+                    console.error("FCM delivery failed, but notifications saved to DB:", fcmError);
+                    // Continue - notifications are already saved in DB
                 }
-            };
-
-            // Send to multiple tokens (batch send)
-            const response = await admin.messaging().sendEachForMulticast({
-                tokens: tokens,
-                ...message
-            });
-
-            // Handle failed tokens
-            if (response.failureCount > 0) {
-                const failedTokens = [];
-                response.responses.forEach((resp, idx) => {
-                    if (!resp.success) {
-                        failedTokens.push(tokens[idx]);
-                    }
-                });
-
-                // Remove invalid tokens from database
-                if (failedTokens.length > 0) {
-                    await UserModel.updateMany(
-                        { fcmToken: { $in: failedTokens } },
-                        { $unset: { fcmToken: "" } }
-                    );
-                }
+            } else {
+                console.warn("Firebase not initialized, notifications saved to DB only");
             }
 
-            console.log(`✅ Sent ${response.successCount} notifications, ${response.failureCount} failed`);
-            
             return {
                 status: "OK",
-                message: `Sent ${response.successCount} notifications`,
-                successCount: response.successCount,
-                failureCount: response.failureCount
+                message: `Saved ${savedNotifications.length} notifications, sent ${fcmSuccessCount} via FCM`,
+                savedCount: savedNotifications.length,
+                fcmSuccessCount: fcmSuccessCount,
+                fcmFailureCount: fcmFailureCount,
+                notificationIds: notificationIds
             };
         } catch (error) {
             console.error("Error sending notifications to users:", error);
@@ -365,31 +412,29 @@ const NotificationService = {
     /**
      * Send notification to all customers
      * 
+     * Flow: Get all customer IDs → Save to database → Send via FCM
+     * 
      * @param {Object} notification - Notification object
      * @returns {Promise<Object>} Result object
      */
     async sendToAllCustomers(notification) {
         try {
-            if (!firebaseInitialized || admin.apps.length === 0) {
-                console.warn("Firebase not initialized, skipping notification");
-                return { status: "OK", message: "Firebase not configured, notification skipped" };
-            }
-
             // Find customer role
             const customerRole = await RoleModel.findOne({ name: "customer" });
             if (!customerRole) {
                 return { status: "ERR", message: "Customer role not found" };
             }
 
-            // Get all customers with FCM tokens
+            // Get all active customers (with or without FCM tokens)
+            // We save notifications for all customers, even if they don't have FCM token
+            // They can see notifications when they log in
             const customers = await UserModel.find({
                 role_id: customerRole._id,
-                fcmToken: { $exists: true, $ne: null },
                 status: true // Only active customers
-            }).select('fcmToken').lean();
+            }).select('_id').lean();
 
             if (customers.length === 0) {
-                return { status: "ERR", message: "No customers with FCM tokens found" };
+                return { status: "ERR", message: "No active customers found" };
             }
 
             const userIds = customers.map(c => c._id.toString());
@@ -403,38 +448,171 @@ const NotificationService = {
     /**
      * Send notification to users with specific role
      * 
+     * Flow: Get all users with role → Save to database → Send via FCM
+     * 
      * @param {String} roleName - Role name (e.g., "customer", "admin", "sales-staff")
      * @param {Object} notification - Notification object
      * @returns {Promise<Object>} Result object
      */
     async sendToRole(roleName, notification) {
         try {
-            if (!firebaseInitialized || admin.apps.length === 0) {
-                console.warn("Firebase not initialized, skipping notification");
-                return { status: "OK", message: "Firebase not configured, notification skipped" };
-            }
-
             // Find role
             const role = await RoleModel.findOne({ name: roleName });
             if (!role) {
                 return { status: "ERR", message: `Role '${roleName}' not found` };
             }
 
-            // Get all users with this role and FCM tokens
+            // Get all active users with this role (with or without FCM tokens)
             const users = await UserModel.find({
                 role_id: role._id,
-                fcmToken: { $exists: true, $ne: null },
                 status: true // Only active users
-            }).select('fcmToken').lean();
+            }).select('_id').lean();
 
             if (users.length === 0) {
-                return { status: "ERR", message: `No users with role '${roleName}' and FCM tokens found` };
+                return { status: "ERR", message: `No active users with role '${roleName}' found` };
             }
 
             const userIds = users.map(u => u._id.toString());
             return await this.sendToUsers(userIds, notification);
         } catch (error) {
             console.error(`Error sending notification to role '${roleName}':`, error);
+            return { status: "ERR", message: error.message };
+        }
+    },
+
+    /**
+     * Get notifications for a user
+     * 
+     * @param {String} userId - User ID
+     * @param {Object} query - Query parameters (page, limit, isRead, type)
+     * @returns {Promise<Object>} Result object with notifications and pagination
+     */
+    async getUserNotifications(userId, query = {}) {
+        try {
+            const { page = 1, limit = 20, isRead, type } = query;
+
+            const filter = { userId: userId };
+            if (isRead !== undefined) {
+                filter.isRead = isRead === 'true' || isRead === true;
+            }
+            if (type) {
+                filter.type = type;
+            }
+
+            const notifications = await NotificationModel.find(filter)
+                .sort({ createdAt: -1 }) // Newest first
+                .skip((page - 1) * limit)
+                .limit(Number(limit))
+                .lean();
+
+            const total = await NotificationModel.countDocuments(filter);
+            const unreadCount = await NotificationModel.countDocuments({
+                userId: userId,
+                isRead: false
+            });
+
+            return {
+                status: "OK",
+                data: notifications,
+                pagination: {
+                    page: Number(page),
+                    limit: Number(limit),
+                    total: total,
+                    totalPages: Math.ceil(total / limit)
+                },
+                unreadCount: unreadCount
+            };
+        } catch (error) {
+            console.error("Error getting user notifications:", error);
+            return { status: "ERR", message: error.message };
+        }
+    },
+
+    /**
+     * Mark notification as read
+     * 
+     * @param {String} notificationId - Notification ID
+     * @param {String} userId - User ID (to verify ownership)
+     * @returns {Promise<Object>} Result object
+     */
+    async markAsRead(notificationId, userId) {
+        try {
+            const notification = await NotificationModel.findOne({
+                _id: notificationId,
+                userId: userId
+            });
+
+            if (!notification) {
+                return { status: "ERR", message: "Notification not found or access denied" };
+            }
+
+            if (notification.isRead) {
+                return { status: "OK", message: "Notification already marked as read", data: notification };
+            }
+
+            notification.isRead = true;
+            notification.readAt = new Date();
+            await notification.save();
+
+            return {
+                status: "OK",
+                message: "Notification marked as read",
+                data: notification
+            };
+        } catch (error) {
+            console.error("Error marking notification as read:", error);
+            return { status: "ERR", message: error.message };
+        }
+    },
+
+    /**
+     * Mark all notifications as read for a user
+     * 
+     * @param {String} userId - User ID
+     * @returns {Promise<Object>} Result object
+     */
+    async markAllAsRead(userId) {
+        try {
+            const result = await NotificationModel.updateMany(
+                { userId: userId, isRead: false },
+                { 
+                    $set: { 
+                        isRead: true,
+                        readAt: new Date()
+                    } 
+                }
+            );
+
+            return {
+                status: "OK",
+                message: `Marked ${result.modifiedCount} notifications as read`,
+                modifiedCount: result.modifiedCount
+            };
+        } catch (error) {
+            console.error("Error marking all notifications as read:", error);
+            return { status: "ERR", message: error.message };
+        }
+    },
+
+    /**
+     * Get unread notification count for a user
+     * 
+     * @param {String} userId - User ID
+     * @returns {Promise<Object>} Result object with count
+     */
+    async getUnreadCount(userId) {
+        try {
+            const count = await NotificationModel.countDocuments({
+                userId: userId,
+                isRead: false
+            });
+
+            return {
+                status: "OK",
+                count: count
+            };
+        } catch (error) {
+            console.error("Error getting unread count:", error);
             return { status: "ERR", message: error.message };
         }
     }
