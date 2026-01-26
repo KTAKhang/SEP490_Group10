@@ -7,6 +7,8 @@
 const UserModel = require("../models/UserModel");
 const RoleModel = require("../models/RolesModel");
 const EmailService = require("../services/CustomerEmailService");
+const OrderModel = require("../models/OrderModel");
+const OrderStatusModel = require("../models/OrderStatusModel");
 
 const CUSTOMER_ROLE = "customer";
 
@@ -243,7 +245,8 @@ const CustomerService = {
                 $or: [
                     { user_name: { $regex: keyword, $options: 'i' } },
                     { email: { $regex: keyword, $options: 'i' } },
-                    { phone: { $regex: keyword, $options: 'i' } }
+                    { phone: { $regex: keyword, $options: 'i' } },
+                    { address: { $regex: keyword, $options: 'i' } }
                 ]
             };
 
@@ -359,6 +362,56 @@ const CustomerService = {
                     total,
                     totalPages: Math.ceil(total / limit)
                 }
+            };
+        } catch (error) {
+            return { status: "ERR", message: error.message };
+        }
+    },
+
+    /**
+     * Get all orders for a specific customer
+     *
+     * @param {String} customerId - Customer ID
+     * @returns {Promise<Object>} List of customer orders
+     */
+    async getCustomerOrders(customerId) {
+        try {
+            if (!customerId) {
+                return { status: "ERR", message: "Customer ID is required" };
+            }
+
+            const customerRole = await RoleModel.findOne({ name: CUSTOMER_ROLE });
+            if (!customerRole) {
+                return { status: "ERR", message: "Customer role not found" };
+            }
+
+            // Verify customer exists
+            const customer = await UserModel.findOne({
+                _id: customerId,
+                role_id: customerRole._id
+            });
+
+            if (!customer) {
+                return { status: "ERR", message: "Customer not found" };
+            }
+
+            // Get all orders for this customer
+            const orders = await OrderModel.find({ user_id: customerId })
+                .populate('order_status_id', 'name')
+                .sort({ createdAt: -1 }) // Sort by newest first
+                .lean();
+
+            // Format orders with status name
+            const formattedOrders = orders.map(order => ({
+                ...order,
+                status_name: order.order_status_id?.name || 'UNKNOWN',
+                order_status_id: order.order_status_id?._id || order.order_status_id,
+            }));
+
+            return {
+                status: "OK",
+                data: formattedOrders,
+                total: formattedOrders.length
             };
         } catch (error) {
             return { status: "ERR", message: error.message };

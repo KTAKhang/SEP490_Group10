@@ -45,6 +45,14 @@ router.get("/", CustomerController.getCustomers);
 router.patch("/:id/status", CustomerController.updateCustomerStatus);
 
 /**
+ * @route   GET /customers/:id/orders
+ * @desc    Get all orders for a customer
+ * @params  id - Customer ID
+ * @access  Admin
+ */
+router.get("/:id/orders", CustomerController.getCustomerOrders);
+
+/**
  * @route   GET /customers/:id
  * @desc    Get detailed information of a customer
  * @params  id - Customer ID
