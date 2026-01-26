@@ -20,7 +20,7 @@ const getFruitBaskets = async (req, res) => {
   }
 };
 
-const getFruitBasketById = async (req, res) => {
+const getFruitBasketById = async (req, res) => { // Get basket ID from URL params
   try {
     const response = await FruitBasketService.getFruitBasketById(req.params.id);
     if (response.status === "ERR") return res.status(404).json(response);
