@@ -27,12 +27,13 @@ const supplierSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Mã nhà cung cấp (có thể nhập hoặc sinh tự động)
+    // Mã nhà cung cấp (tự động sinh, không cho nhập)
     code: {
       type: String,
       trim: true,
       uppercase: true,
       maxlength: [20, "Mã nhà cung cấp không được vượt quá 20 ký tự"],
+      immutable: true,
     },
 
     // ========================
@@ -94,13 +95,6 @@ const supplierSchema = new mongoose.Schema(
     // ========================
     // Thống kê & đánh giá
     // ========================
-    performanceScore: {
-      type: Number,
-      min: 0,
-      max: 100,
-      default: 0,
-    },
-
     totalBatches: {
       type: Number,
       default: 0,
@@ -165,10 +159,52 @@ supplierSchema.index({ name: "text" });
 
 
 // Phải có ít nhất phone hoặc email
-supplierSchema.pre("save", function (next) {
+const buildSupplierCode = async (supplierDoc) => {
+  const typePrefix = {
+    FARM: "F",
+    COOPERATIVE: "C",
+    BUSINESS: "B",
+  }[supplierDoc.type] || "S";
+
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}`;
+
+  const Model = supplierDoc.constructor;
+  const lastSupplier = await Model.findOne({
+    code: { $regex: `^${typePrefix}${dateStr}` },
+  })
+    .sort({ code: -1 })
+    .select("code")
+    .lean();
+
+  let sequence = 1;
+  if (lastSupplier?.code) {
+    const lastSeq = parseInt(lastSupplier.code.slice(-3)) || 0;
+    sequence = lastSeq + 1;
+  }
+
+  let code = `${typePrefix}${dateStr}${String(sequence).padStart(3, "0")}`;
+  while (await Model.findOne({ code }).select("_id").lean()) {
+    sequence += 1;
+    code = `${typePrefix}${dateStr}${String(sequence).padStart(3, "0")}`;
+  }
+
+  return code;
+};
+
+supplierSchema.pre("save", async function (next) {
   if (!this.phone && !this.email) {
     return next(new Error("Phải có ít nhất số điện thoại hoặc email"));
   }
+
+  if (this.isNew) {
+    this.code = await buildSupplierCode(this);
+  }
+
+  if (!this.isNew && this.isModified("code")) {
+    return next(new Error("Mã nhà cung cấp không thể chỉnh sửa sau khi tạo"));
+  }
+
   next();
 });
 

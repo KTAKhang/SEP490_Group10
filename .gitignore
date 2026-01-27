@@ -1,2 +1,11 @@
 node_modules
 .env
+.env.local
+.env.production
+
+# Firebase Service Account Key Files
+src/config/firebase-service-account.json
+config/firebase-service-account.json
+*.json
+!package.json
+!package-lock.json

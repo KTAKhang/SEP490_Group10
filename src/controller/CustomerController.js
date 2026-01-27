@@ -127,6 +127,27 @@ const CustomerController = {
                 message: error.message
             });
         }
+    },
+
+    /**
+     * Get all orders for a customer
+     * GET /customers/:id/orders
+     */
+    async getCustomerOrders(req, res) {
+        try {
+            const { id } = req.params;
+            const result = await CustomerService.getCustomerOrders(id);
+            
+            if (result.status === "OK") {
+                return res.status(200).json(result);
+            }
+            return res.status(404).json(result);
+        } catch (error) {
+            return res.status(500).json({
+                status: "ERR",
+                message: error.message
+            });
+        }
     }
 };
 

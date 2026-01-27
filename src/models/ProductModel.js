@@ -116,7 +116,6 @@ const productSchema = new mongoose.Schema(
     },
 
     brand: { type: String, required: true, trim: true }, // ✅ Bắt buộc phải có brand (tên nhà cung cấp)
-    
     // ✅ Liên kết đến Supplier (tự động set khi admin chọn brand)
     supplier: {
       type: mongoose.Schema.Types.ObjectId,
@@ -166,19 +165,6 @@ const productSchema = new mongoose.Schema(
       match: [/^\d{4}-\d{2}-\d{2}$/, "expiryDateStr phải có format YYYY-MM-DD"],
     },
 
-    // ✅ Đánh dấu sản phẩm cần reset (chờ admin xác nhận)
-    pendingBatchReset: {
-      type: Boolean,
-      default: false,
-      index: true,
-    },
-
-    // ✅ Lý do cần reset: "SOLD_OUT" | "EXPIRED"
-    resetReason: {
-      type: String,
-      enum: ["SOLD_OUT", "EXPIRED"],
-      default: null,
-    },
   },
   { 
     timestamps: true,

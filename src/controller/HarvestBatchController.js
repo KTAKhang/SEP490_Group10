@@ -2,8 +2,7 @@ const HarvestBatchService = require("../services/HarvestBatchService");
 
 const createHarvestBatch = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const response = await HarvestBatchService.createHarvestBatch(userId, req.body);
+    const response = await HarvestBatchService.createHarvestBatch(req.body);
     return res.status(response.status === "OK" ? 200 : 400).json(response);
   } catch (error) {
     return res.status(500).json({
@@ -16,8 +15,7 @@ const createHarvestBatch = async (req, res) => {
 const updateHarvestBatch = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user._id;
-    const response = await HarvestBatchService.updateHarvestBatch(id, userId, req.body);
+    const response = await HarvestBatchService.updateHarvestBatch(id, req.body);
     return res.status(response.status === "OK" ? 200 : 400).json(response);
   } catch (error) {
     return res.status(500).json({
@@ -30,8 +28,7 @@ const updateHarvestBatch = async (req, res) => {
 const deleteHarvestBatch = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user._id;
-    const response = await HarvestBatchService.deleteHarvestBatch(id, userId);
+    const response = await HarvestBatchService.deleteHarvestBatch(id);
     return res.status(response.status === "OK" ? 200 : 400).json(response);
   } catch (error) {
     return res.status(500).json({

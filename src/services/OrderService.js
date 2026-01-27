@@ -12,6 +12,60 @@ const PaymentService = require("../services/PaymentService");
 const { default: mongoose } = require("mongoose");
 const { createVnpayUrl } = require("../utils/createVnpayUrl");
 
+const normalizeStatusName = (value) => {
+  if (!value) return "";
+  return value
+    .toString()
+    .trim()
+    .toUpperCase()
+    .replace(/[_\s]+/g, "-");
+};
+
+const normalizeToken = (value) => (value ? value.toString().trim().toUpperCase() : "");
+
+const buildStatusRegex = (value) => {
+  const normalized = normalizeStatusName(value);
+  if (!normalized) return null;
+  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const flexible = escaped.replace(/-/g, "[-_\\s]+");
+  return new RegExp(`^${flexible}$`, "i");
+};
+
+const findStatusByName = async (name, session) => {
+  const regex = buildStatusRegex(name);
+  if (!regex) return null;
+  return OrderStatusModel.findOne({ name: { $regex: regex } }).session(session || null);
+};
+
+const getOrderStatusName = async (statusId, session) => {
+  if (!statusId) return "";
+  const statusDoc = await OrderStatusModel.findById(statusId).session(session || null);
+  return normalizeStatusName(statusDoc?.name || "");
+};
+
+const isValidStatusTransition = (paymentMethod, currentStatus, nextStatus) => {
+  const method = normalizeToken(paymentMethod);
+  const current = normalizeStatusName(currentStatus);
+  const next = normalizeStatusName(nextStatus);
+
+  const transitions = {
+    COD: {
+      PENDING: ["READY-TO-SHIP", "CANCELLED"],
+      "READY-TO-SHIP": ["SHIPPING"],
+      SHIPPING: ["COMPLETED"],
+    },
+    VNPAY: {
+      PENDING: ["PAID", "CANCELLED"],
+      PAID: ["READY-TO-SHIP"],
+      "READY-TO-SHIP": ["SHIPPING"],
+      SHIPPING: ["COMPLETED"],
+    },
+  };
+
+  const allowed = transitions[method] || {};
+  return (allowed[current] || []).includes(next);
+};
+
 /* =====================================================
    HELPER: PUSH STATUS HISTORY
 ===================================================== */
@@ -259,11 +313,17 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     const order = await OrderModel.findById(order_id).session(session);
     if (!order) throw new Error("Không tìm thấy đơn hàng");
 
-    const newStatus = await OrderStatusModel.findOne({
-      name: new_status_name,
-    }).session(session);
+    const newStatus = await findStatusByName(new_status_name, session);
 
     if (!newStatus) throw new Error("Trạng thái không hợp lệ");
+
+    const currentStatusName = await getOrderStatusName(order.order_status_id, session);
+    const nextStatusName = normalizeStatusName(newStatus.name);
+    const paymentMethod = normalizeToken(order.payment_method);
+
+    if (!isValidStatusTransition(paymentMethod, currentStatusName, nextStatusName)) {
+      throw new Error("Không hợp lệ theo luồng trạng thái đơn hàng");
+    }
 
     const fromStatus = order.order_status_id;
 
@@ -298,13 +358,13 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     /* ========= COD ========= */
 
     // COD giao thành công → thu tiền
-    if (new_status_name === "COMPLETED" && payment.method === "COD") {
+    if (nextStatusName === "COMPLETED" && payment.method === "COD") {
       payment.status = "SUCCESS";
       await payment.save({ session });
     }
 
     // Admin huỷ COD
-    if (new_status_name === "CANCELLED" && payment.method === "COD") {
+    if (nextStatusName === "CANCELLED" && payment.method === "COD") {
       payment.status = "FAILED";
       await payment.save({ session });
     }
@@ -313,7 +373,7 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
 
     // Admin huỷ khi VNPAY CHƯA thanh toán
     if (
-      new_status_name === "CANCELLED" &&
+      nextStatusName === "CANCELLED" &&
       payment.method === "VNPAY" &&
       payment.status === "PENDING"
     ) {
@@ -323,7 +383,7 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
 
     // ✅ Admin huỷ khi VNPAY ĐÃ THANH TOÁN
     if (
-      new_status_name === "CANCELLED" &&
+      nextStatusName === "CANCELLED" &&
       payment.method === "VNPAY" &&
       payment.status === "SUCCESS"
     ) {
@@ -344,6 +404,13 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
         ],
         { session },
       );
+    }
+
+    // Online: chỉ cho chuyển PENDING -> PAID khi payment đã SUCCESS
+    if (payment.method === "VNPAY" && nextStatusName === "PAID") {
+      if (payment.status !== "SUCCESS") {
+        throw new Error("Chưa ghi nhận thanh toán thành công");
+      }
     }
 
     await session.commitTransaction();
@@ -570,10 +637,302 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
     session.endSession();
   }
 };
+/* =====================================================
+   CUSTOMER ORDER HISTORY
+===================================================== */
+const parseStatusNames = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.map((item) => item.toString().trim().toUpperCase()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim().toUpperCase())
+      .filter(Boolean);
+  }
+  return [];
+};
+
+const getOrdersByUser = async (user_id, filters = {}) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(user_id)) {
+      return { status: "ERR", message: "user_id không hợp lệ" };
+    }
+
+    const {
+      page = 1,
+      limit = 10,
+      status_name,
+      status_names,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = filters;
+
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 10));
+    const skip = (pageNum - 1) * limitNum;
+
+    const query = { user_id: new mongoose.Types.ObjectId(user_id) };
+
+    const normalizedStatusNames = parseStatusNames(status_names || status_name);
+    if (normalizedStatusNames.length > 0) {
+      const statusDocs = await OrderStatusModel.find({
+        name: { $in: normalizedStatusNames },
+      });
+      if (statusDocs.length !== normalizedStatusNames.length) {
+        return { status: "ERR", message: "Một hoặc nhiều trạng thái đơn hàng không hợp lệ" };
+      }
+      query.order_status_id = { $in: statusDocs.map((doc) => doc._id) };
+    }
+
+    const allowedSortFields = ["createdAt", "updatedAt", "total_price"];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortObj = { [sortField]: sortDirection };
+
+    const [data, total] = await Promise.all([
+      OrderModel.find(query)
+        .populate("order_status_id", "name description")
+        .sort(sortObj)
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      OrderModel.countDocuments(query),
+    ]);
+
+    return {
+      status: "OK",
+      message: "Lấy lịch sử mua hàng thành công",
+      data,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
+const getOrderByUser = async (order_id, user_id) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(order_id)) {
+      return { status: "ERR", message: "order_id không hợp lệ" };
+    }
+    if (!mongoose.Types.ObjectId.isValid(user_id)) {
+      return { status: "ERR", message: "user_id không hợp lệ" };
+    }
+
+    const order = await OrderModel.findOne({
+      _id: new mongoose.Types.ObjectId(order_id),
+      user_id: new mongoose.Types.ObjectId(user_id),
+    })
+      .populate("order_status_id", "name description")
+      .populate("status_history.from_status", "name")
+      .populate("status_history.to_status", "name")
+      .populate("status_history.changed_by", "user_name email")
+      .lean();
+
+    if (!order) {
+      return { status: "ERR", message: "Đơn hàng không tồn tại" };
+    }
+
+    const details = await OrderDetailModel.find({ order_id: order._id }).lean();
+
+    return {
+      status: "OK",
+      message: "Lấy chi tiết đơn hàng thành công",
+      data: {
+        order,
+        details,
+      },
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
+/* =====================================================
+   ADMIN ORDER MANAGEMENT
+===================================================== */
+const getOrdersForAdmin = async (filters = {}) => {
+  try {
+    const {
+      page = 1,
+      limit = 5,
+      search = "",
+      status_names,
+      payment_method,
+      payment_status,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = filters;
+
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const query = {};
+
+    if (search) {
+      const escaped = search.toString().trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(escaped, "i");
+      query.$or = [
+        { receiver_name: regex },
+        { receiver_phone: regex },
+      ];
+    }
+
+    const normalizedStatusNames = parseStatusNames(status_names);
+    if (normalizedStatusNames.length > 0) {
+      const statusDocs = await OrderStatusModel.find({
+        name: { $in: normalizedStatusNames.map((name) => buildStatusRegex(name)).filter(Boolean) },
+      });
+      if (statusDocs.length !== normalizedStatusNames.length) {
+        return { status: "ERR", message: "Một hoặc nhiều trạng thái đơn hàng không hợp lệ" };
+      }
+      query.order_status_id = { $in: statusDocs.map((doc) => doc._id) };
+    }
+
+    if (payment_method) {
+      query.payment_method = normalizeToken(payment_method);
+    }
+
+    const allowedSortFields = ["createdAt", "updatedAt", "total_price"];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortObj = { [sortField]: sortDirection };
+
+    const [orders, total] = await Promise.all([
+      OrderModel.find(query)
+        .populate("order_status_id", "name description")
+        .sort(sortObj)
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      OrderModel.countDocuments(query),
+    ]);
+
+    const orderIds = orders.map((order) => order._id);
+    const paymentQuery = {
+      order_id: { $in: orderIds },
+      type: "PAYMENT",
+    };
+    if (payment_status) {
+      paymentQuery.status = normalizeToken(payment_status);
+    }
+
+    const payments = await PaymentModel.find(paymentQuery).lean();
+    const paymentMap = new Map(payments.map((payment) => [payment.order_id.toString(), payment]));
+
+    const data = orders
+      .map((order) => ({
+        ...order,
+        payment: paymentMap.get(order._id.toString()) || null,
+      }))
+      .filter((order) => {
+        if (!payment_status) return true;
+        return order.payment !== null;
+      });
+
+    return {
+      status: "OK",
+      message: "Lấy danh sách đơn hàng thành công",
+      data,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
+const getOrderDetailForAdmin = async (order_id) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(order_id)) {
+      return { status: "ERR", message: "order_id không hợp lệ" };
+    }
+
+    const order = await OrderModel.findById(order_id)
+      .populate("order_status_id", "name description")
+      .populate("status_history.from_status", "name")
+      .populate("status_history.to_status", "name")
+      .populate("status_history.changed_by", "user_name email")
+      .lean();
+
+    if (!order) {
+      return { status: "ERR", message: "Đơn hàng không tồn tại" };
+    }
+
+    const [details, payment] = await Promise.all([
+      OrderDetailModel.find({ order_id: order._id }).lean(),
+      PaymentModel.findOne({ order_id: order._id, type: "PAYMENT" }).lean(),
+    ]);
+
+    return {
+      status: "OK",
+      message: "Lấy chi tiết đơn hàng thành công",
+      data: {
+        order,
+        details,
+        payment,
+      },
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
+const getOrderStatusCounts = async () => {
+  try {
+    const statuses = await OrderStatusModel.find().lean();
+
+    const counts = await OrderModel.aggregate([
+      {
+        $group: {
+          _id: "$order_status_id",
+          total: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const countMap = new Map(counts.map((item) => [item._id?.toString(), item.total]));
+    const data = statuses.map((status) => ({
+      status_id: status._id,
+      status_name: status.name,
+      total: countMap.get(status._id.toString()) || 0,
+    }));
+
+    const totalOrders = data.reduce((sum, item) => sum + item.total, 0);
+
+    return {
+      status: "OK",
+      message: "Lấy thống kê trạng thái đơn hàng thành công",
+      data: {
+        totalOrders,
+        statusCounts: data,
+      },
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
 
 module.exports = {
   confirmCheckoutAndCreateOrder,
   updateOrder,
   cancelOrderByCustomer,
   retryVnpayPayment,
+  getOrdersByUser,
+  getOrderByUser,
+  getOrdersForAdmin,
+  getOrderDetailForAdmin,
+  getOrderStatusCounts,
 };

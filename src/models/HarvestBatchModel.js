@@ -22,8 +22,9 @@ const harvestBatchSchema = new mongoose.Schema(
       trim: true,
       uppercase: true,
       unique: true,
-      required: true, // ✅ Đảm bảo luôn có giá trị
+      required: false, // ✅ Đảm bảo luôn có giá trị
       maxlength: [30, "Mã lô thu hoạch không được vượt quá 30 ký tự"],
+      immutable: true,
     },
 
     batchNumber: {
@@ -87,21 +88,6 @@ const harvestBatchSchema = new mongoose.Schema(
       default: "",
     },
 
-    // Trạng thái - BR-SUP-13: PENDING (mặc định), APPROVED, REJECTED
-    status: {
-      type: String,
-      enum: ["PENDING", "APPROVED", "REJECTED"], // ✅ Xóa VERIFIED/DELIVERED (dư thừa)
-      default: "PENDING",
-      index: true,
-    },
-
-    // Người tạo (qc_staff)
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "users",
-      required: true,
-    },
-
     // ✅ Liên kết với Inventory Transactions (array của transaction IDs)
     inventoryTransactionIds: {
       type: [mongoose.Schema.Types.ObjectId],
@@ -123,7 +109,6 @@ harvestBatchSchema.set("toObject", { virtuals: true });
 
 // Index
 harvestBatchSchema.index({ supplier: 1, product: 1, harvestDate: -1 });
-harvestBatchSchema.index({ status: 1, harvestDate: -1 });
 // ✅ Unique constraint: không cho trùng (supplier, product, batchNumber, harvestDate)
 harvestBatchSchema.index({ supplier: 1, product: 1, batchNumber: 1, harvestDate: 1 }, { unique: true });
 
@@ -149,8 +134,8 @@ harvestBatchSchema.pre("save", function (next) {
     this.harvestDateStr = `${year}-${month}-${day}`;
   }
 
-  // ✅ BR-SUP-11: Tự động sinh batchCode nếu chưa có (khi tạo mới)
-  if (this.isNew && !this.batchCode) {
+  // ✅ BR-SUP-11: Tự động sinh batchCode khi tạo mới
+  if (this.isNew) {
     const timestamp = Date.now().toString(36).toUpperCase();
     const random = Math.random().toString(36).substring(2, 6).toUpperCase();
     this.batchCode = `HB-${timestamp}-${random}`;

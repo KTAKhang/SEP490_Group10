@@ -6,6 +6,7 @@ const ContactRouter = require("./ContactRouter");
 const CategoryRouter = require("./CategoryRouter");
 const ProductRouter = require("./ProductRouter");
 const InventoryRouter = require("./InventoryRouter");
+const FruitBasketRouter = require("./FruitBasketRouter");
 
 const SupplierRouter = require("./SupplierRouter");
 const HarvestBatchRouter = require("./HarvestBatchRouter");
@@ -18,6 +19,7 @@ const UploadRouter = require("./UploadRouter");
 
 const PublicProductRouter = require("./PublicProductRouter");
 const PublicCategoryRouter = require("./PublicCategoryRouter");
+const PublicFruitBasketRouter = require("./PublicFruitBasketRouter");
 const FavoriteRouter = require("./FavoriteRouter");
 
 
@@ -30,6 +32,7 @@ const ChatRouter = require("./ChatRouter");
 const StaffRouter = require("./StaffRouter");
 const CustomerRouter = require("./CustomerRouter");
 const DiscountRouter = require("./DiscountRouter");
+const NotificationRouter = require("./NotificationRouter");
 
 const routes = (app) => {
     // Authentication & Profile
@@ -52,12 +55,11 @@ const routes = (app) => {
     // Admin routes
     app.use("/admin/categories", CategoryRouter);
     app.use("/admin/products", ProductRouter);
+    app.use("/admin/fruit-baskets", FruitBasketRouter);
     app.use("/admin/harvest-batch", HarvestBatchRouter);
 
-    app.use("/admin/suppliers/activity-log", require("./SupplierActivityLogRouter")); // ✅ Admin only - Xem Activity Log của QC Staff
-    
     // Admin routes - Supplier Management
-    app.use("/admin/suppliers", SupplierRouter); // ✅ Includes: /harvest-batch, /quality, /performance
+    app.use("/admin/suppliers", SupplierRouter); // ✅ Includes: /harvest-batch
     // Note: /for-brand trong SupplierRouter dùng authAdminMiddleware (Admin only)
     
 
@@ -70,6 +72,7 @@ const routes = (app) => {
     // Public routes (không cần authentication)
     app.use("/products", PublicProductRouter);
     app.use("/categories", PublicCategoryRouter);
+    app.use("/fruit-baskets", PublicFruitBasketRouter);
     
     // Customer routes (chỉ Customer)
     app.use("/favorites", FavoriteRouter);
@@ -79,6 +82,8 @@ const routes = (app) => {
     app.use("/customers", CustomerRouter);
     // Discount management routes
     app.use("/discounts", DiscountRouter);
+    // Notification routes
+    app.use("/notifications", NotificationRouter);
 };
 
 module.exports = routes;
