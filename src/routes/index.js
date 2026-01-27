@@ -28,7 +28,7 @@ const CheckoutRouter = require("./CheckoutRouter");
 const OrderStatusRouter = require("./OrderStatusRouter");
 const OrderRouter = require("./OrderRouter");
 const PaymentRouter = require("./PaymentRouter");
-  
+const ChatRouter = require("./ChatRouter");
 const StaffRouter = require("./StaffRouter");
 const CustomerRouter = require("./CustomerRouter");
 const DiscountRouter = require("./DiscountRouter");
@@ -38,6 +38,7 @@ const routes = (app) => {
     // Authentication & Profile
     app.use("/auth", AuthRouter);
     app.use("/profile", ProfileRouter);
+    app.use("/chat", ChatRouter);
 
    app.use("/contacts", ContactRouter);
     // Public shop info (for customer - no auth required)

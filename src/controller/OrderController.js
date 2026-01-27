@@ -8,7 +8,10 @@ const createOrder = async (req, res) => {
     const user_id = req.user._id;
     const { selected_product_ids, receiverInfo, payment_method } = req.body;
 
-    if (!Array.isArray(selected_product_ids) || selected_product_ids.length === 0) {
+    if (
+      !Array.isArray(selected_product_ids) ||
+      selected_product_ids.length === 0
+    ) {
       return res.status(400).json({
         success: false,
         message: "Vui lòng chọn ít nhất một sản phẩm",
@@ -48,15 +51,13 @@ const createOrder = async (req, res) => {
       note: receiverInfo.note?.trim(),
     };
 
-   const result =
-  await OrderService.confirmCheckoutAndCreateOrder({
-    user_id,
-    selected_product_ids,
-    receiverInfo: normalizedReceiver,
-    payment_method,
-    ip: req.ip,
-  });
-
+    const result = await OrderService.confirmCheckoutAndCreateOrder({
+      user_id,
+      selected_product_ids,
+      receiverInfo: normalizedReceiver,
+      payment_method,
+      ip: req.ip,
+    });
 
     if (!result.success) {
       return res.status(400).json(result);
@@ -70,7 +71,6 @@ const createOrder = async (req, res) => {
     });
   }
 };
-
 
 /* =====================================================
    UPDATE ORDER STATUS (ADMIN / STAFF)
@@ -92,7 +92,7 @@ const updateOrder = async (req, res) => {
       status_name,
       req.user._id,
       req.user.role,
-      note || ""
+      note || "",
     );
 
     return res.status(200).json({
@@ -100,7 +100,6 @@ const updateOrder = async (req, res) => {
       message: "Cập nhật trạng thái đơn hàng thành công",
       ...result,
     });
-
   } catch (error) {
     return res.status(400).json({
       success: false,
@@ -131,7 +130,6 @@ const cancelOrder = async (req, res) => {
       message: "Hủy đơn hàng thành công",
       ...result,
     });
-
   } catch (error) {
     return res.status(400).json({
       success: false,
@@ -140,6 +138,35 @@ const cancelOrder = async (req, res) => {
   }
 };
 
+const retryVnpayPayment = async (req, res) => {
+  try {
+    const user_id = req.user._id;
+    const {order_id} = req.body;
+
+    if (!order_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Thiếu order_id",
+      });
+    }
+    const result = await OrderService.retryVnpayPayment({
+      user_id,
+      order_id,
+      ip: req.ip,
+    });
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    return res.status(201).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Retry Order Fail",
+    });
+  }
+};
 /* =====================================================
    CUSTOMER ORDER HISTORY
 ===================================================== */
@@ -217,9 +244,11 @@ module.exports = {
   createOrder,
   updateOrder,
   cancelOrder,
+  retryVnpayPayment,
   getMyOrders,
   getMyOrderById,
   getOrdersAdmin,
   getOrderDetailAdmin,
   getOrderStatusStatsAdmin,
+
 };
