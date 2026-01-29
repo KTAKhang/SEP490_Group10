@@ -85,6 +85,24 @@ const orderSchema = new mongoose.Schema(
       enum: ["COD", "VNPAY"],
       required: true,
     },
+
+     /* =========================
+       🔁 RETRY + AUTO DELETE
+    ========================= */
+    allow_retry: {
+      type: Boolean,
+      default: false,
+    },
+
+    retry_expired_at: {
+      type: Date,
+      default: null,
+    },
+
+    auto_delete: {
+      type: Boolean,
+      default: false,
+    },
     status: {
       type: Boolean,
       required: [true, "Trạng thái là bắt buộc"],

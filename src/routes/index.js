@@ -29,16 +29,22 @@ const CheckoutRouter = require("./CheckoutRouter");
 const OrderStatusRouter = require("./OrderStatusRouter");
 const OrderRouter = require("./OrderRouter");
 const PaymentRouter = require("./PaymentRouter");
+
 const AdminReviewRouter = require("./AdminReviewRouter");
   
+
+const ChatRouter = require("./ChatRouter");
+
 const StaffRouter = require("./StaffRouter");
 const CustomerRouter = require("./CustomerRouter");
 const DiscountRouter = require("./DiscountRouter");
+const NotificationRouter = require("./NotificationRouter");
 
 const routes = (app) => {
     // Authentication & Profile
     app.use("/auth", AuthRouter);
     app.use("/profile", ProfileRouter);
+    app.use("/chat", ChatRouter);
 
    app.use("/contacts", ContactRouter);
     // Public shop info (for customer - no auth required)
@@ -84,6 +90,8 @@ const routes = (app) => {
     app.use("/customers", CustomerRouter);
     // Discount management routes
     app.use("/discounts", DiscountRouter);
+    // Notification routes
+    app.use("/notifications", NotificationRouter);
 };
 
 module.exports = routes;

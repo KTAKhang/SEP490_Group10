@@ -10,6 +10,7 @@ const StockLockModel = require("../models/StockLockModel");
 const PaymentService = require("../services/PaymentService");
 
 const { default: mongoose } = require("mongoose");
+const { createVnpayUrl } = require("../utils/createVnpayUrl");
 
 const normalizeStatusName = (value) => {
   if (!value) return "";
@@ -549,6 +550,93 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
   }
 };
 
+const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    /* =======================
+       1️⃣ LOAD ORDER
+    ======================= */
+    const order = await OrderModel.findById(order_id).session(session);
+    if (!order) throw new Error("Không tìm thấy đơn hàng");
+
+    if (order.user_id.toString() !== user_id.toString()) {
+      throw new Error("Không có quyền thanh toán đơn này");
+    }
+
+    /* ===== CHECK RETRY WINDOW ===== */
+    if (!order.allow_retry) {
+      throw new Error("Đơn hàng không cho phép thanh toán lại");
+    }
+
+    if (!order.retry_expired_at || order.retry_expired_at < new Date()) {
+      throw new Error("Đơn hàng đã quá thời gian thanh toán lại");
+    }
+    /* =======================
+       2️⃣ CHECK ORDER STATUS
+    ======================= */
+    const paidStatus = await OrderStatusModel.findOne({ name: "PAID" });
+    if (order.order_status_id.equals(paidStatus._id)) {
+      throw new Error("Đơn hàng đã được thanh toán");
+    }
+
+    const failedStatus = await OrderStatusModel.findOne({ name: "PENDING" });
+    if (!order.order_status_id.equals(failedStatus._id)) {
+      throw new Error("Trạng thái đơn hàng không hợp lệ để thanh toán lại");
+    }
+
+    /* =======================
+       3️⃣ LOAD PAYMENT FAILED
+    ======================= */
+    const payment = await PaymentModel.findOne({
+      order_id,
+      method: "VNPAY",
+      type: "PAYMENT",
+    }).session(session);
+
+    if (!payment) {
+      throw new Error("Không tìm thấy thông tin thanh toán");
+    }
+
+    if (payment.status !== "FAILED") {
+      throw new Error("Chỉ có thể thanh toán lại khi đơn thất bại");
+    }
+
+    /* ===== LOCK ORDER BEFORE RETRY ===== */
+    order.allow_retry = false;
+    order.auto_delete = false;
+    await order.save({ session });
+
+    /* =======================
+       4️⃣ RESET PAYMENT
+    ======================= */
+    payment.status = "PENDING";
+    payment.provider_txn_id = null;
+    payment.provider_response = null;
+    await payment.save({ session });
+
+    /* =======================
+       5️⃣ CREATE NEW VNPAY URL
+    ======================= */
+    const paymentUrl = createVnpayUrl(order._id, payment.amount, ip);
+
+    await session.commitTransaction();
+
+    return {
+      success: true,
+      payment_url: paymentUrl,
+    };
+  } catch (err) {
+    await session.abortTransaction();
+    return {
+      success: false,
+      message: err.message,
+    };
+  } finally {
+    session.endSession();
+  }
+};
 /* =====================================================
    CUSTOMER ORDER HISTORY
 ===================================================== */
@@ -841,6 +929,7 @@ module.exports = {
   confirmCheckoutAndCreateOrder,
   updateOrder,
   cancelOrderByCustomer,
+  retryVnpayPayment,
   getOrdersByUser,
   getOrderByUser,
   getOrdersForAdmin,
