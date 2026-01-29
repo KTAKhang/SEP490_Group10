@@ -20,6 +20,7 @@ const UploadRouter = require("./UploadRouter");
 const PublicProductRouter = require("./PublicProductRouter");
 const PublicCategoryRouter = require("./PublicCategoryRouter");
 const PublicFruitBasketRouter = require("./PublicFruitBasketRouter");
+const ReviewRouter = require("./ReviewRouter");
 const FavoriteRouter = require("./FavoriteRouter");
 
 
@@ -28,6 +29,7 @@ const CheckoutRouter = require("./CheckoutRouter");
 const OrderStatusRouter = require("./OrderStatusRouter");
 const OrderRouter = require("./OrderRouter");
 const PaymentRouter = require("./PaymentRouter");
+const AdminReviewRouter = require("./AdminReviewRouter");
   
 const StaffRouter = require("./StaffRouter");
 const CustomerRouter = require("./CustomerRouter");
@@ -49,6 +51,8 @@ const routes = (app) => {
     app.use("/orderstatus", OrderStatusRouter);
     app.use("/order", OrderRouter);
     app.use("/payment", PaymentRouter);
+    app.use("/reviews", ReviewRouter);
+    app.use("/admin/reviews", AdminReviewRouter);
     
     // Admin routes
     app.use("/admin/categories", CategoryRouter);
