@@ -2,169 +2,204 @@ const ProfileService = require("../services/ProfileService");
 const UserModel = require("../models/UserModel");
 
 const checkRole = async (userID) => {
-    try {
-        const user = await UserModel.findById(userID).populate("role_id", "name -_id");
+  try {
+    const user = await UserModel.findById(userID).populate(
+      "role_id",
+      "name -_id",
+    );
 
-        if (!user || !user.role_id || !user.role_id.name) {
-            return { status: "ERR", message: "User or role not found" };
-        }
-
-        return {
-            status: "OK",
-            role: user.role_id.name,
-            id: user._id,
-        };
-    } catch (error) {
-        return { status: "ERR", message: "Error checking user role", detail: error.message };
+    if (!user || !user.role_id || !user.role_id.name) {
+      return { status: "ERR", message: "User or role not found" };
     }
+
+    return {
+      status: "OK",
+      role: user.role_id.name,
+      id: user._id,
+    };
+  } catch (error) {
+    return {
+      status: "ERR",
+      message: "Error checking user role",
+      detail: error.message,
+    };
+  }
 };
 
 const updateProfile = async (req, res) => {
-    try {
-        const id = req.user._id;
-        const { user_name, phone, address } = req.body;
-        const file = req.file;
+  try {
+    const id = req.user._id;
+    const { user_name, phone, address, birthday, gender } = req.body;
+    const file = req.file;
 
-        // Validate user_name
-        const isStrictUserName = (name) => /^[\p{L}\p{N}_ ]{3,30}$/u.test(name);
-        if (!isStrictUserName(user_name)) {
-            return res.status(400).json({
-                status: "ERR",
-                message: "Tên người dùng phải từ 3–30 ký tự, chỉ gồm chữ cái, số, khoảng trắng hoặc dấu gạch dưới",
-            });
-        }
-
-        // Validate phone
-        const isStrictPhone = (phone) => /^0\d{8,10}$/.test(phone);
-        if (!isStrictPhone(phone)) {
-            return res.status(400).json({
-                status: "ERR",
-                message: "Số điện thoại không hợp lệ (phải bắt đầu bằng 0 và có 9–11 chữ số)",
-            });
-        }
-
-        // Validate address
-        const isStrictAddress = (addr) => /^[\p{L}\p{N}\s,.\-\/]{5,100}$/u.test(addr);
-        if (!isStrictAddress(address)) {
-            return res.status(400).json({
-                status: "ERR",
-                message: "Địa chỉ phải từ 5–100 ký tự, chỉ chứa chữ, số, khoảng trắng và các ký tự , . - /",
-            });
-        }
-
-        // Validate file upload
-        if (file) {
-            const maxSize = 3 * 1024 * 1024; // 3MB
-            if (file.size > maxSize) {
-                return res.status(400).json({
-                    status: "ERR",
-                    message: "File size must be under 3MB",
-                });
-            }
-            const allowedTypes = ["image/jpeg", "image/png"];
-            if (!allowedTypes.includes(file.mimetype)) {
-                return res.status(400).json({
-                    status: "ERR",
-                    message: "Only JPG, PNG images are allowed",
-                });
-            }
-        }
-
-        const response = await ProfileService.updateProfile(id, { user_name, phone, address }, file);
-        return res.status(200).json(response);
-
-    } catch (error) {
-        console.error("Update user error:", error);
-        return res.status(500).json({
-            status: "ERR",
-            message: "Server error",
-            detail: error.message,
-        });
+    // Validate user_name
+    const isStrictUserName = (name) => /^[\p{L}\p{N}_ ]{3,30}$/u.test(name);
+    if (!isStrictUserName(user_name)) {
+      return res.status(400).json({
+        status: "ERR",
+        message:
+          "Tên người dùng phải từ 3–30 ký tự, chỉ gồm chữ cái, số, khoảng trắng hoặc dấu gạch dưới",
+      });
     }
+
+    // Validate phone
+    const isStrictPhone = (phone) => /^0\d{8,10}$/.test(phone);
+    if (!isStrictPhone(phone)) {
+      return res.status(400).json({
+        status: "ERR",
+        message:
+          "Số điện thoại không hợp lệ (phải bắt đầu bằng 0 và có 9–11 chữ số)",
+      });
+    }
+
+    // Validate address
+    const isStrictAddress = (addr) =>
+      /^[\p{L}\p{N}\s,.\-\/]{5,100}$/u.test(addr);
+    if (!isStrictAddress(address)) {
+      return res.status(400).json({
+        status: "ERR",
+        message:
+          "Địa chỉ phải từ 5–100 ký tự, chỉ chứa chữ, số, khoảng trắng và các ký tự , . - /",
+      });
+    }
+
+    const isValidBirthday = (date) => {
+      const birth = new Date(date);
+      if (isNaN(birth)) return false;
+
+      const age = new Date().getFullYear() - birth.getFullYear();
+      return age >= 13;
+    };
+
+    if (!isValidBirthday(birthday)) {
+      return res.status(400).json({
+        status: "ERR",
+        message: "Invalid date of birth (must be 13 years old or older)",
+      });
+    }
+
+    const validGenders = ["male", "female", "other"];
+    if (!validGenders.includes(gender)) {
+      return res.status(400).json({
+        status: "ERR",
+        message: "Gender invalid",
+      });
+    }
+
+    // Validate file upload
+    if (file) {
+      const maxSize = 3 * 1024 * 1024; // 3MB
+      if (file.size > maxSize) {
+        return res.status(400).json({
+          status: "ERR",
+          message: "File size must be under 3MB",
+        });
+      }
+      const allowedTypes = ["image/jpeg", "image/png"];
+      if (!allowedTypes.includes(file.mimetype)) {
+        return res.status(400).json({
+          status: "ERR",
+          message: "Only JPG, PNG images are allowed",
+        });
+      }
+    }
+
+    const response = await ProfileService.updateProfile(
+      id,
+      { user_name, phone, address, birthday, gender },
+      file,
+    );
+    return res.status(200).json(response);
+  } catch (error) {
+    console.error("Update user error:", error);
+    return res.status(500).json({
+      status: "ERR",
+      message: "Server error",
+      detail: error.message,
+    });
+  }
 };
 
-
 const getUserById = async (req, res) => {
-    try {
-        const id = req.user._id;
+  try {
+    const id = req.user._id;
 
-        if (!id) {
-            return res.status(400).json({
-                status: "ERR",
-                message: "User ID is required",
-            });
-        }
-
-        const response = await ProfileService.getUserById(id);
-
-        if (!response || response.status === "ERR") {
-            return res.status(404).json({
-                status: "ERR",
-                message: response?.message || "User not found",
-            });
-        }
-
-        return res.status(200).json({
-            status: "OK",
-            data: response.data || response,
-        });
-    } catch (error) {
-        return res.status(500).json({
-            status: "ERR",
-            message: "Internal Server Error",
-            detail: error.message,
-        });
+    if (!id) {
+      return res.status(400).json({
+        status: "ERR",
+        message: "User ID is required",
+      });
     }
+
+    const response = await ProfileService.getUserById(id);
+
+    if (!response || response.status === "ERR") {
+      return res.status(404).json({
+        status: "ERR",
+        message: response?.message || "User not found",
+      });
+    }
+
+    return res.status(200).json({
+      status: "OK",
+      data: response.data || response,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: "Internal Server Error",
+      detail: error.message,
+    });
+  }
 };
 
 const changePassword = async (req, res) => {
-    try {
-        const { old_password, new_password } = req.body;
-        const userID = req.user._id;
+  try {
+    const { old_password, new_password } = req.body;
+    const userID = req.user._id;
 
-        if (!old_password || !new_password) {
-            return res.status(400).json({
-                status: "ERR",
-                message: "All fields are required",
-            });
-        }
-
-        const isStrictPassword = (password) => {
-            const regex = /^(?=.*[A-Z])(?=.*\d).{8,8}$/;
-            return regex.test(password);
-        };
-
-        if (!isStrictPassword(new_password)) {
-            return res.status(400).json({
-                status: "ERR",
-                message:
-                    "Mật khẩu phải chứa 8 ký tự, bao gồm chữ hoa và số",
-            });
-        }
-
-        const response = await ProfileService.changePassword(
-            userID,
-            old_password,
-            new_password
-        );
-
-        if (response.status === "ERR") {
-            return res.status(400).json(response);
-        }
-
-        return res.status(200).json(response);
-    } catch (error) {
-        return res.status(500).json({
-            status: "ERR",
-            message: "Internal Server Error",
-            detail: error.message,
-        });
+    if (!old_password || !new_password) {
+      return res.status(400).json({
+        status: "ERR",
+        message: "All fields are required",
+      });
     }
+
+    const isStrictPassword = (password) => {
+      const regex = /^(?=.*[A-Z])(?=.*\d).{8,8}$/;
+      return regex.test(password);
+    };
+
+    if (!isStrictPassword(new_password)) {
+      return res.status(400).json({
+        status: "ERR",
+        message: "Mật khẩu phải chứa 8 ký tự, bao gồm chữ hoa và số",
+      });
+    }
+
+    const response = await ProfileService.changePassword(
+      userID,
+      old_password,
+      new_password,
+    );
+
+    if (response.status === "ERR") {
+      return res.status(400).json(response);
+    }
+
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: "Internal Server Error",
+      detail: error.message,
+    });
+  }
 };
 
 module.exports = {
-    checkRole,
-    updateProfile,
-    getUserById,
-    changePassword,
+  checkRole,
+  updateProfile,
+  getUserById,
+  changePassword,
 };

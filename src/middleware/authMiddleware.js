@@ -4,81 +4,183 @@ dotenv.config();
 const UserModel = require("../models/UserModel");
 
 const authAdminMiddleware = async (req, res, next) => {
-    const authHeader = req.headers?.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return res.status(401).json({ message: "No token provided", status: "ERR" });
-    }
-
-    const token = authHeader.split(" ")[1];
-
     try {
-        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
-        const userData = await UserModel.findById(decoded._id).populate("role_id", "name");
-
-        if (userData?.role_id?.name === "admin") {
-            req.user = decoded;
-            return next();
+        const authHeader = req.headers?.authorization;
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Token is not provided",
+            });
         }
 
-        return res.status(403).json({ message: "Access denied", status: "ERR" });
-    } catch (err) {
-        return res.status(401).json({ message: "Invalid token", status: "ERR" });
+        const token = authHeader.split(" ")[1];
+        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+
+        const user = await UserModel.findById(decoded._id).populate("role_id", "name");
+
+        if (!user) {
+            return res.status(404).json({
+                status: "ERR",
+                message: "User not found",
+            });
+        }
+
+        if (user.status === false) {
+            return res.status(403).json({
+                status: "ERR",
+                message: "Account is locked",
+            });
+        }
+
+        if (user.role_id?.name !== "admin") {
+            return res.status(403).json({
+                status: "ERR",
+                message: "Access denied",
+            });
+        }
+
+        req.user = user;
+        next();
+    } catch (error) {
+        if (error.name === "TokenExpiredError") {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Token has expired",
+            });
+        }
+
+        if (error.name === "JsonWebTokenError") {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Invalid token",
+            });
+        }
+
+        return res.status(500).json({
+            status: "ERR",
+            message: error.message,
+        });
     }
 };
 
 
 const authMiddleware = async (req, res, next) => {
-    const authHeader = req.headers?.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return res.status(401).json({ message: "No token provided", status: "ERR" });
-    }
-
-    const token = authHeader.split(" ")[1];
-
-    try {
-        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
-        const userData = await UserModel.findById(decoded._id).populate("role_id", "name");
-
-        // Nếu là admin hoặc đang truy cập thông tin của chính họ
-        if (userData?.role_id?.name === "admin" || decoded._id === req.params._id) {
-            req.user = userData;
-            return next();
-        }
-
-        return res.status(403).json({ message: "Access denied", status: "ERR" });
-    } catch (err) {
-        return res.status(401).json({ message: "Invalid token", status: "ERR" });
-    }
-};
-
-
-const authUserMiddleware = (req, res, next) => {
     try {
         const authHeader = req.headers?.authorization;
         if (!authHeader || !authHeader.startsWith("Bearer ")) {
-            return res
-                .status(401)
-                .json({ message: "No token provided", status: "ERR" });
+            return res.status(401).json({
+                status: "ERR",
+                message: "Token is not provided",
+            });
         }
 
         const token = authHeader.split(" ")[1];
+        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
 
-        jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
-            if (err) {
-                return res
-                    .status(403)
-                    .json({ message: "Token is not valid", status: "ERR" });
-            }
+        const user = await UserModel.findById(decoded._id).populate("role_id", "name");
 
-            req.user = decoded;
-            next();
-        });
+        if (!user) {
+            return res.status(404).json({
+                status: "ERR",
+                message: "User not found",
+            });
+        }
+
+        if (user.status === false) {
+            return res.status(403).json({
+                status: "ERR",
+                message: "Account is locked",
+            });
+        }
+
+        const isAdmin = user.role_id?.name === "admin";
+        const isOwner = decoded._id === req.params._id;
+
+        if (!isAdmin && !isOwner) {
+            return res.status(403).json({
+                status: "ERR",
+                message: "Access denied",
+            });
+        }
+
+        req.user = user;
+        next();
     } catch (error) {
-        return res
-            .status(500)
-            .json({ message: "Internal server error", status: "ERR" });
+        if (error.name === "TokenExpiredError") {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Token has expired",
+            });
+        }
+
+        if (error.name === "JsonWebTokenError") {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Invalid token",
+            });
+        }
+
+        return res.status(500).json({
+            status: "ERR",
+            message: error.message,
+        });
     }
 };
+
+
+const authUserMiddleware = async (req, res, next) => {
+    try {
+        const authHeader = req.headers?.authorization;
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Token is not provided",
+            });
+        }
+
+        const token = authHeader.split(" ")[1];
+        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+
+        const user = await UserModel.findById(decoded._id).populate("role_id", "name");
+
+        if (!user) {
+            return res.status(404).json({
+                status: "ERR",
+                message: "User not found",
+            });
+        }
+
+        if (user.status === false) {
+            return res.status(403).json({
+                status: "ERR",
+                message: "Account is locked",
+            });
+        }
+
+        req.user = user;
+        next();
+    } catch (error) {
+        if (error.name === "TokenExpiredError") {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Token has expired",
+            });
+        }
+
+        if (error.name === "JsonWebTokenError") {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Invalid token",
+            });
+        }
+
+        return res.status(500).json({
+            status: "ERR",
+            message: error.message,
+        });
+    }
+};
+
 /**
  * athour: KhoaNDCE170420
  * menthod: authSalesStaffMiddleware
