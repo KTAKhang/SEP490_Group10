@@ -28,6 +28,8 @@ const CheckoutRouter = require("./CheckoutRouter");
 const OrderStatusRouter = require("./OrderStatusRouter");
 const OrderRouter = require("./OrderRouter");
 const PaymentRouter = require("./PaymentRouter");
+const PreOrderRouter = require("./PreOrderRouter");
+const AdminPreOrderRouter = require("./AdminPreOrderRouter");
 const ChatRouter = require("./ChatRouter");
 const StaffRouter = require("./StaffRouter");
 const CustomerRouter = require("./CustomerRouter");
@@ -51,7 +53,8 @@ const routes = (app) => {
     app.use("/orderstatus", OrderStatusRouter);
     app.use("/order", OrderRouter);
     app.use("/payment", PaymentRouter);
-    
+    app.use("/preorder", PreOrderRouter);
+
     // Admin routes
     app.use("/admin/categories", CategoryRouter);
     app.use("/admin/products", ProductRouter);
@@ -64,6 +67,7 @@ const routes = (app) => {
     
 
     app.use("/admin/shop", ShopRouter);
+    app.use("/admin/preorder", AdminPreOrderRouter);
     // Warehouse staff
     app.use("/inventory", InventoryRouter);
     // News

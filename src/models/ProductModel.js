@@ -75,6 +75,13 @@ const productSchema = new mongoose.Schema(
       },
     },
 
+    // ✅ Số kg đã phân bổ cho đặt trước (pre-order). Dùng để hiển thị "trừ" khỏi stock khả dụng.
+    preOrderAllocatedKg: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     receivingStatus: {
       type: String,
       enum: ["NOT_RECEIVED", "PARTIAL", "RECEIVED"], // Chưa nhập / Chưa đủ / Đã nhập đủ
