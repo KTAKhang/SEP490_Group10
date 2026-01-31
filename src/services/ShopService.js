@@ -20,6 +20,7 @@ const getShopInfo = async () => {
         address: "Chưa cập nhật",
         email: "",
         phone: "",
+        logo: "",
         description: "",
         workingHours: "",
         images: [],
@@ -46,7 +47,7 @@ const getShopInfo = async () => {
  */
 const updateShopBasicInfo = async (payload = {}) => {
   try {
-    const { shopName, address, email, phone } = payload;
+    const { shopName, address, email, phone, logo } = payload;
 
     // BR-06: Shop name is required
     if (!shopName || !shopName.toString().trim()) {
@@ -85,6 +86,7 @@ const updateShopBasicInfo = async (payload = {}) => {
         address: address.toString().trim(),
         email: email ? email.toString().trim().toLowerCase() : "",
         phone: phone ? phone.toString().trim() : "",
+        logo: logo ? logo.toString().trim() : "",
         description: "",
         workingHours: "",
         images: [],
@@ -96,6 +98,7 @@ const updateShopBasicInfo = async (payload = {}) => {
       shop.address = address.toString().trim();
       shop.email = email ? email.toString().trim().toLowerCase() : "";
       shop.phone = phone ? phone.toString().trim() : "";
+      shop.logo = logo ? logo.toString().trim() : "";
       // BR-11: Timestamp will be updated automatically by mongoose timestamps
     }
 
@@ -153,6 +156,7 @@ const updateShopDescription = async (payload = {}) => {
         address: "Chưa cập nhật",
         email: "",
         phone: "",
+        logo: "",
         description: "",
         workingHours: "",
         images: [],
@@ -199,6 +203,7 @@ const updateWorkingHours = async (payload = {}) => {
         address: "Chưa cập nhật",
         email: "",
         phone: "",
+        logo: "",
         description: "",
         workingHours: workingHours.toString().trim(),
         images: [],
@@ -256,6 +261,7 @@ const updateShopImages = async (images = [], imagePublicIds = []) => {
         address: "Chưa cập nhật",
         email: "",
         phone: "",
+        logo: "",
         description: "",
         workingHours: "",
         images: validImages,
