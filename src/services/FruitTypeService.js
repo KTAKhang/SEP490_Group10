@@ -16,16 +16,25 @@ function isPreOrderLockedByHarvest(estimatedHarvestDate) {
 /**
  * List fruit types available for pre-order (allowPreOrder = true, status = ACTIVE).
  * Loại trái có estimatedHarvestDate trong vòng 3 ngày tới bị chốt, không hiển thị.
+ * Supports page, limit, keyword (search by name).
  */
-const listAvailableForPreOrder = async () => {
-  const list = await FruitTypeModel.find({
-    allowPreOrder: true,
-    status: "ACTIVE",
-  })
-    .sort({ name: 1 })
-    .lean();
+const listAvailableForPreOrder = async (query = {}) => {
+  const { page = 1, limit = 20, keyword } = query;
+  const filter = { allowPreOrder: true, status: "ACTIVE" };
+  if (keyword && String(keyword).trim()) {
+    filter.name = { $regex: String(keyword).trim(), $options: "i" };
+  }
+  const list = await FruitTypeModel.find(filter).sort({ name: 1 }).lean();
   const filtered = list.filter((ft) => !isPreOrderLockedByHarvest(ft.estimatedHarvestDate));
-  return { status: "OK", data: filtered };
+  const total = filtered.length;
+  const limitNum = Math.max(1, Math.min(100, Number(limit) || 20));
+  const pageNum = Math.max(1, Number(page) || 1);
+  const data = filtered.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+  return {
+    status: "OK",
+    data,
+    pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) },
+  };
 };
 
 /**
@@ -38,31 +47,38 @@ const getAvailableById = async (id) => {
     allowPreOrder: true,
     status: "ACTIVE",
   }).lean();
-  if (!doc) throw new Error("Không tìm thấy loại trái cây hoặc không mở đặt trước");
+  if (!doc) throw new Error("Fruit type not found or not open for pre-order");
   if (isPreOrderLockedByHarvest(doc.estimatedHarvestDate)) {
-    throw new Error("Đã chốt đặt trước loại trái này: còn dưới 3 ngày đến ngày thu hoạch.");
+    throw new Error("Pre-order closed for this fruit: less than 3 days until harvest.");
   }
   if (doc.depositPercent == null) doc.depositPercent = 50;
   return { status: "OK", data: doc };
 };
 
 /**
- * Admin: list all fruit types with optional filter.
+ * Admin: list all fruit types with optional filter, search (keyword by name), sort.
  */
 const listAdmin = async (query = {}) => {
-  const { status, allowPreOrder, page = 1, limit = 20 } = query;
+  const { status, allowPreOrder, page = 1, limit = 20, keyword, sortBy = "createdAt", sortOrder = "desc" } = query;
   const filter = {};
   if (status) filter.status = status;
   if (allowPreOrder !== undefined) filter.allowPreOrder = allowPreOrder === "true" || allowPreOrder === true;
+  if (keyword && String(keyword).trim()) {
+    filter.name = { $regex: String(keyword).trim(), $options: "i" };
+  }
+  const sortField = ["name", "estimatedPrice", "createdAt"].includes(sortBy) ? sortBy : "createdAt";
+  const sortOpt = { [sortField]: sortOrder === "asc" ? 1 : -1 };
 
+  const limitNum = Math.max(1, Math.min(100, Number(limit) || 20));
+  const pageNum = Math.max(1, Number(page) || 1);
   const [data, total] = await Promise.all([
-    FruitTypeModel.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(Number(limit)).lean(),
+    FruitTypeModel.find(filter).sort(sortOpt).skip((pageNum - 1) * limitNum).limit(limitNum).lean(),
     FruitTypeModel.countDocuments(filter),
   ]);
   return {
     status: "OK",
     data,
-    pagination: { page: Number(page), limit: Number(limit), total, totalPages: Math.ceil(total / limit) },
+    pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) },
   };
 };
 
@@ -71,7 +87,7 @@ const listAdmin = async (query = {}) => {
  */
 const getById = async (id) => {
   const doc = await FruitTypeModel.findById(id).lean();
-  if (!doc) throw new Error("Không tìm thấy loại trái cây");
+  if (!doc) throw new Error("Fruit type not found");
   return { status: "OK", data: doc };
 };
 
@@ -92,16 +108,29 @@ const create = async (payload) => {
     imagePublicId,
   } = payload;
 
-  if (!name || estimatedPrice == null || minOrderKg == null || maxOrderKg == null) {
-    throw new Error("Thiếu name, estimatedPrice, minOrderKg hoặc maxOrderKg");
+  if (name == null || String(name).trim() === "") {
+    throw new Error("Fruit name cannot be empty");
+  }
+  if (estimatedPrice == null || estimatedPrice === "") {
+    throw new Error("Estimated price is required");
+  }
+  if (minOrderKg == null || minOrderKg === "") {
+    throw new Error("Min order (kg) is required");
+  }
+  if (maxOrderKg == null || maxOrderKg === "") {
+    throw new Error("Max order (kg) is required");
   }
   const minKg = Number(minOrderKg);
   const maxKg = Number(maxOrderKg);
   if (Number.isNaN(minKg) || Number.isNaN(maxKg)) {
-    throw new Error("minOrderKg và maxOrderKg phải là số");
+    throw new Error("Min order and max order must be valid numbers");
   }
   if (minKg > maxKg) {
-    throw new Error("minOrderKg không được lớn hơn maxOrderKg");
+    throw new Error("Min order (kg) cannot be greater than max order (kg)");
+  }
+  const priceNum = Number(estimatedPrice);
+  if (Number.isNaN(priceNum) || priceNum < 0) {
+    throw new Error("Estimated price must be a valid number greater than or equal to 0");
   }
 
   const doc = await FruitTypeModel.create({
@@ -124,7 +153,7 @@ const create = async (payload) => {
  */
 const update = async (id, payload) => {
   const doc = await FruitTypeModel.findById(id);
-  if (!doc) throw new Error("Không tìm thấy loại trái cây");
+  if (!doc) throw new Error("Fruit type not found");
 
   const {
     name,
@@ -162,7 +191,7 @@ const update = async (id, payload) => {
   const minKg = Number(doc.minOrderKg);
   const maxKg = Number(doc.maxOrderKg);
   if (!Number.isNaN(minKg) && !Number.isNaN(maxKg) && minKg > maxKg) {
-    throw new Error("minOrderKg không được lớn hơn maxOrderKg");
+    throw new Error("Min order (kg) cannot be greater than max order (kg)");
   }
   await doc.save();
   return { status: "OK", data: doc };

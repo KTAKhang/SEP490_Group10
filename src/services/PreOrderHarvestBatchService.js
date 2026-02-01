@@ -1,3 +1,11 @@
+/**
+ * Pre-order Harvest Batch Service
+ *
+ * Business logic for admin creation and listing of pre-order receive batches (PreOrderHarvestBatch).
+ * Each fruit type can have only one batch; quantity must equal pre-order demand. Warehouse staff then
+ * receive stock against these batches (PreOrderStock / PreOrderReceive).
+ */
+
 const mongoose = require("mongoose");
 const PreOrderHarvestBatchModel = require("../models/PreOrderHarvestBatchModel");
 const HarvestBatchModel = require("../models/HarvestBatchModel");
@@ -6,9 +14,30 @@ const SupplierModel = require("../models/SupplierModel");
 const PreOrderModel = require("../models/PreOrderModel");
 
 /**
- * Admin: tạo lô nhập hàng trả đơn.
- * - Mỗi loại trái chỉ được tạo một lô duy nhất.
- * - Số lượng nhập phải đúng bằng nhu cầu (demand).
+ * Admin: create a pre-order receive batch for a fruit type. One batch per fruit type only; quantity must equal demand.
+ *
+ * Business rules:
+ * - Fruit type must exist; quantityKg must be a positive number
+ * - No existing PreOrderHarvestBatch for this fruitTypeId
+ * - quantityKg must equal demand (sum of quantityKg from pre-orders with status WAITING_FOR_PRODUCT or READY_FOR_FULFILLMENT)
+ * - Either harvestBatchId (linked harvest batch) or supplierId + harvestDate + batchNumber must be provided; supplier must be ACTIVE
+ *
+ * Flow:
+ * 1. Validate fruitTypeId and quantityKg; load fruit type
+ * 2. Check no existing batch for fruitTypeId
+ * 3. Aggregate demand for this fruit type; validate quantityKg === demandKg
+ * 4. Resolve supplierId, harvestDate, batchNumber: from HarvestBatch if harvestBatchId given, else from params (supplierId, harvestDate, batchNumber)
+ * 5. Create PreOrderHarvestBatch; return populated document (fruitTypeId, supplierId, harvestBatchId)
+ *
+ * @param {Object} params - Input parameters
+ * @param {string} [params.harvestBatchId] - Optional linked harvest batch ID (supplier/date/number taken from it)
+ * @param {string} params.fruitTypeId - Fruit type document ID
+ * @param {string} [params.supplierId] - Required if no harvestBatchId; supplier must be ACTIVE
+ * @param {number} params.quantityKg - Planned quantity (must equal demand)
+ * @param {string} [params.harvestDate] - Required if no harvestBatchId
+ * @param {string} [params.batchNumber] - Required if no harvestBatchId
+ * @param {string} [params.notes] - Optional notes (max 500 chars)
+ * @returns {Promise<{ status: string, data: Object }>}
  */
 async function createBatch({
   harvestBatchId,
@@ -90,11 +119,28 @@ async function createBatch({
 }
 
 /**
- * Danh sách lô nhập trả đơn – Planned/Received/status (NOT_RECEIVED | PARTIAL | FULLY_RECEIVED).
- * Admin + Warehouse dùng.
+ * List pre-order receive batches with optional filters (fruitTypeId, supplierId, status), keyword search (fruit name, batchCode, batchNumber),
+ * sort and pagination. Each batch is enriched with status: NOT_RECEIVED | PARTIAL | FULLY_RECEIVED (derived from receivedKg vs quantityKg).
+ *
+ * Flow:
+ * 1. Build query from fruitTypeId, supplierId; fetch all matching batches with populate (fruitTypeId, supplierId, harvestBatchId)
+ * 2. Map each batch to add remainingKg and status (NOT_RECEIVED / PARTIAL / FULLY_RECEIVED)
+ * 3. Optional status filter; optional keyword filter (fruit name, batchCode, batchNumber)
+ * 4. Sort in memory (harvestDate, createdAt, quantityKg, batchCode); paginate (slice) and return
+ *
+ * @param {Object} [filters={}] - Filter and pagination options
+ * @param {string} [filters.fruitTypeId] - Optional fruit type ID
+ * @param {string} [filters.supplierId] - Optional supplier ID
+ * @param {string} [filters.status] - Optional: NOT_RECEIVED | PARTIAL | FULLY_RECEIVED
+ * @param {number} [filters.page=1] - Page number
+ * @param {number} [filters.limit=20] - Items per page
+ * @param {string} [filters.keyword] - Search in fruit name, batchCode, batchNumber (case-insensitive)
+ * @param {string} [filters.sortBy="harvestDate"] - harvestDate | createdAt | quantityKg | batchCode
+ * @param {string} [filters.sortOrder="desc"] - asc | desc
+ * @returns {Promise<{ status: string, data: Array, pagination: Object }>}
  */
 async function listBatches(filters = {}) {
-  const { fruitTypeId, supplierId, status } = filters;
+  const { fruitTypeId, supplierId, status, page = 1, limit = 20, keyword, sortBy = "harvestDate", sortOrder = "desc" } = filters;
   const query = {};
   if (fruitTypeId && mongoose.isValidObjectId(fruitTypeId)) query.fruitTypeId = fruitTypeId;
   if (supplierId && mongoose.isValidObjectId(supplierId)) query.supplierId = supplierId;
@@ -121,11 +167,44 @@ async function listBatches(filters = {}) {
   if (status) {
     data = data.filter((d) => d.status === status);
   }
-  return { status: "OK", data };
+  if (keyword && String(keyword).trim()) {
+    const k = String(keyword).trim().toLowerCase();
+    data = data.filter(
+      (d) =>
+        (d.fruitTypeId?.name || "").toLowerCase().includes(k) ||
+        (d.batchCode || "").toLowerCase().includes(k) ||
+        (d.harvestBatchId?.batchCode || "").toLowerCase().includes(k) ||
+        (d.batchNumber || "").toLowerCase().includes(k)
+    );
+  }
+  const total = data.length;
+  const sortField = ["harvestDate", "createdAt", "quantityKg", "batchCode"].includes(sortBy) ? sortBy : "harvestDate";
+  const asc = sortOrder === "asc" ? 1 : -1;
+  data.sort((a, b) => {
+    let va = a[sortField] ?? (sortField === "batchCode" ? (a.batchCode || a.harvestBatchId?.batchCode || "") : 0);
+    let vb = b[sortField] ?? (sortField === "batchCode" ? (b.batchCode || b.harvestBatchId?.batchCode || "") : 0);
+    if (sortField === "harvestDate" || sortField === "createdAt") {
+      va = new Date(va).getTime();
+      vb = new Date(vb).getTime();
+    }
+    if (typeof va === "string") return asc * (va.localeCompare(vb));
+    return asc * (va - vb);
+  });
+  const limitNum = Math.max(1, Math.min(100, Number(limit) || 20));
+  const pageNum = Math.max(1, Number(page) || 1);
+  const paginated = data.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+  return {
+    status: "OK",
+    data: paginated,
+    pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) },
+  };
 }
 
 /**
- * Chi tiết một lô (Admin / Warehouse).
+ * Get a single pre-order receive batch by ID. Returns batch with remainingKg and status (NOT_RECEIVED | PARTIAL | FULLY_RECEIVED).
+ *
+ * @param {string} id - PreOrderHarvestBatch document ID
+ * @returns {Promise<{ status: string, data?: Object, message?: string }>} OK with data, or ERR with message if invalid ID or not found
  */
 async function getBatchById(id) {
   if (!mongoose.isValidObjectId(id)) {

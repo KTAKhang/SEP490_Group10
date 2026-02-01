@@ -8,6 +8,7 @@ const { uploadFruitTypeImage } = require("../middleware/uploadMiddleware");
 
 router.get("/pre-orders", authAdminMiddleware, AdminPreOrderController.listPreOrders);
 router.get("/pre-orders/:id", authAdminMiddleware, AdminPreOrderController.getPreOrderDetail);
+router.put("/pre-orders/:id/complete", authAdminMiddleware, AdminPreOrderController.markCompleted);
 
 router.get("/demand", authAdminMiddleware, PreOrderAllocationController.getDemand);
 router.get("/allocations", authAdminMiddleware, PreOrderAllocationController.listAllocations);

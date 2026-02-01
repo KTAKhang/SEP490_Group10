@@ -2,7 +2,7 @@ const FruitTypeService = require("../services/FruitTypeService");
 
 const listAvailable = async (req, res) => {
   try {
-    const response = await FruitTypeService.listAvailableForPreOrder();
+    const response = await FruitTypeService.listAvailableForPreOrder(req.query);
     return res.status(200).json(response);
   } catch (err) {
     return res.status(500).json({ status: "ERR", message: err.message });

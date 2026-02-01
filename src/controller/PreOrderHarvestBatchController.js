@@ -20,11 +20,16 @@ const createBatch = async (req, res) => {
 
 const listBatches = async (req, res) => {
   try {
-    const { fruitTypeId, supplierId, status } = req.query;
+    const { fruitTypeId, supplierId, status, page, limit, keyword, sortBy, sortOrder } = req.query;
     const response = await PreOrderHarvestBatchService.listBatches({
       fruitTypeId,
       supplierId,
       status,
+      page,
+      limit,
+      keyword,
+      sortBy,
+      sortOrder,
     });
     return res.status(200).json(response);
   } catch (err) {

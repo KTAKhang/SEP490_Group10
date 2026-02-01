@@ -2,7 +2,8 @@ const PreOrderAllocationService = require("../services/PreOrderAllocationService
 
 const getDemand = async (req, res) => {
   try {
-    const response = await PreOrderAllocationService.getDemandByFruitType();
+    const { page, limit, keyword } = req.query;
+    const response = await PreOrderAllocationService.getDemandByFruitType({ page, limit, keyword });
     return res.status(200).json(response);
   } catch (err) {
     return res.status(500).json({ status: "ERR", message: err.message });

@@ -579,10 +579,31 @@ const DiscountService = {
 
             const total = await DiscountModel.countDocuments(filter);
 
+            // Thống kê theo đúng bộ lọc (toàn bộ dữ liệu, không chỉ trang hiện tại)
+            const [pending, approved, rejected, expired, active, inactive] = await Promise.all([
+                DiscountModel.countDocuments({ ...filter, status: "PENDING" }),
+                DiscountModel.countDocuments({ ...filter, status: "APPROVED" }),
+                DiscountModel.countDocuments({ ...filter, status: "REJECTED" }),
+                DiscountModel.countDocuments({ ...filter, status: "EXPIRED" }),
+                DiscountModel.countDocuments({ ...filter, isActive: true }),
+                DiscountModel.countDocuments({ ...filter, isActive: false }),
+            ]);
+
+            const statistics = {
+                total,
+                pending,
+                approved,
+                rejected,
+                expired,
+                active,
+                inactive,
+            };
+
             return {
                 status: "OK",
                 data: discounts,
                 pagination: { page: Number(page), limit: Number(limit), total },
+                statistics,
             };
         } catch (error) {
             return { status: "ERR", message: error.message };
@@ -617,30 +638,44 @@ const DiscountService = {
     },
 
     /**
-     * Get valid discount codes for customers
+     * Get valid discount codes for customers (phù hợp đơn hàng: minOrderValue <= orderValue, chưa dùng)
      *
+     * @param {String} [userId] - User ID để loại mã đã dùng
+     * @param {Number} [orderValue] - Giá trị đơn hàng để lọc mã thỏa đơn tối thiểu
      * @returns {Object}
      */
-    async getValidDiscountsForCustomer() {
+    async getValidDiscountsForCustomer(userId = null, orderValue = null) {
         try {
             const now = new Date();
 
-            const discounts = await DiscountModel.find({
+            const query = {
                 status: "APPROVED",
                 isActive: true,
                 startDate: { $lte: now },
                 endDate: { $gte: now },
-            })
-                .lean()
-                .sort({ createdAt: -1 });
+            };
 
-            const validDiscounts = discounts.filter(
+            if (orderValue != null && orderValue !== "") {
+                query.minOrderValue = { $lte: Number(orderValue) };
+            }
+
+            let discounts = await DiscountModel.find(query)
+                .lean()
+                .sort({ discountPercent: -1, maxDiscountAmount: -1 });
+
+            discounts = discounts.filter(
                 (d) => d.usageLimit === null || d.usedCount < d.usageLimit
             );
 
+            if (userId) {
+                const usedDiscountIds = await DiscountUsageModel.find({ userId }).distinct("discountId");
+                const usedSet = new Set(usedDiscountIds.map((id) => id.toString()));
+                discounts = discounts.filter((d) => !usedSet.has(d._id.toString()));
+            }
+
             return {
                 status: "OK",
-                data: validDiscounts,
+                data: discounts,
             };
         } catch (error) {
             return { status: "ERR", message: error.message };

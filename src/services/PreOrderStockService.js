@@ -1,3 +1,11 @@
+/**
+ * Pre-order Stock Service
+ *
+ * Business logic for pre-order stock (PreOrderStock) and receive records (PreOrderReceive).
+ * Warehouse staff receive stock by fruit type or by pre-order harvest batch; Admin and Warehouse view stock list
+ * (receivedKg, allocatedKg, availableKg per fruit type) and receive history.
+ */
+
 const mongoose = require("mongoose");
 const PreOrderStockModel = require("../models/PreOrderStockModel");
 const PreOrderReceiveModel = require("../models/PreOrderReceiveModel");
@@ -6,8 +14,15 @@ const PreOrderAllocationModel = require("../models/PreOrderAllocationModel");
 const FruitTypeModel = require("../models/FruitTypeModel");
 
 /**
- * Danh sách kho trả đơn theo FruitType: receivedKg, allocatedKg, availableKg.
- * Warehouse staff + Admin xem.
+ * List pre-order stock by fruit type: receivedKg, allocatedKg, availableKg (receivedKg - allocatedKg).
+ * Includes fruit types that allow pre-order and are ACTIVE but have no stock record yet (receivedKg = 0).
+ *
+ * Flow:
+ * 1. Load all PreOrderStock with populated fruitTypeId (name); load all PreOrderAllocation and build allocMap (fruitTypeId -> allocatedKg)
+ * 2. Map each stock to { _id, fruitTypeId, fruitTypeName, receivedKg, allocatedKg, availableKg }
+ * 3. Load FruitType where allowPreOrder and status ACTIVE; for any not already in data, append row with receivedKg/allocatedKg/availableKg = 0
+ *
+ * @returns {Promise<{ status: string, data: Array }>}
  */
 async function listStock() {
   const stocks = await PreOrderStockModel.find().populate("fruitTypeId", "name").lean();
@@ -48,7 +63,20 @@ async function listStock() {
 }
 
 /**
- * Warehouse staff: nhập kho trả đơn – tạo PreOrderReceive và cộng PreOrderStock.receivedKg.
+ * Warehouse staff: record a receive into pre-order stock by fruit type. Creates PreOrderReceive and increments PreOrderStock.receivedKg.
+ *
+ * Flow:
+ * 1. Validate fruit type exists and quantityKg > 0
+ * 2. Create PreOrderReceive (fruitTypeId, quantityKg, receivedBy, note)
+ * 3. FindOneAndUpdate PreOrderStock for fruitTypeId: $inc receivedKg by quantityKg (upsert: true)
+ * 4. Return created receive and updated stock
+ *
+ * @param {Object} params - Input parameters
+ * @param {string} params.fruitTypeId - Fruit type document ID
+ * @param {number} params.quantityKg - Quantity received (kg)
+ * @param {string} params.receivedBy - User ID of warehouse staff
+ * @param {string} [params.note] - Optional note
+ * @returns {Promise<{ status: string, data: Object, stock: Object }>}
  */
 async function createReceive({ fruitTypeId, quantityKg, receivedBy, note }) {
   const ft = await FruitTypeModel.findById(fruitTypeId).lean();
@@ -74,8 +102,26 @@ async function createReceive({ fruitTypeId, quantityKg, receivedBy, note }) {
 }
 
 /**
- * Warehouse staff: nhập kho trả đơn theo lô (PreOrderHarvestBatch).
- * Chỉ được nhập đủ một lần duy nhất, đúng bằng số kế hoạch (quantityKg của lô). Không chỉnh sửa sau.
+ * Warehouse staff: receive pre-order stock by batch (PreOrderHarvestBatch). One-time receive only per batch; quantity must equal planned (batch.quantityKg).
+ *
+ * Business rules:
+ * - Batch must exist; batch must not already have receivedKg > 0 or any PreOrderReceive record
+ * - quantityKg must equal batch.quantityKg (planned)
+ *
+ * Flow:
+ * 1. Load batch; validate not already received (batch.receivedKg === 0, no PreOrderReceive for this batch)
+ * 2. Validate quantityKg === batch.quantityKg
+ * 3. Create PreOrderReceive (preOrderHarvestBatchId, fruitTypeId, quantityKg, receivedBy, note)
+ * 4. Update PreOrderHarvestBatch: $inc receivedKg by quantityKg
+ * 5. Update PreOrderStock for fruitTypeId: $inc receivedKg by quantityKg (upsert)
+ * 6. Return created receive, updated batch, and updated stock
+ *
+ * @param {Object} params - Input parameters
+ * @param {string} params.preOrderHarvestBatchId - PreOrderHarvestBatch document ID
+ * @param {number} params.quantityKg - Quantity received (must equal batch.quantityKg)
+ * @param {string} params.receivedBy - User ID of warehouse staff
+ * @param {string} [params.note] - Optional note
+ * @returns {Promise<{ status: string, data: Object, batch: Object, stock: Object }>}
  */
 async function createReceiveByBatch({ preOrderHarvestBatchId, quantityKg, receivedBy, note }) {
   if (!mongoose.isValidObjectId(preOrderHarvestBatchId)) {
@@ -126,7 +172,18 @@ async function createReceiveByBatch({ preOrderHarvestBatchId, quantityKg, receiv
 }
 
 /**
- * Lịch sử nhập kho trả đơn (theo fruitType, preOrderHarvestBatchId hoặc tất cả).
+ * List pre-order receive history with optional filter by fruitTypeId or preOrderHarvestBatchId, pagination.
+ *
+ * Flow:
+ * 1. Build filter from fruitTypeId, preOrderHarvestBatchId (if valid ObjectId)
+ * 2. Find PreOrderReceive with populate (fruitTypeId, preOrderHarvestBatchId, receivedBy); sort by createdAt desc; skip/limit
+ * 3. Return list and pagination metadata
+ *
+ * @param {string} [fruitTypeId] - Optional fruit type ID to filter by
+ * @param {number} [page=1] - Page number
+ * @param {number} [limit=20] - Items per page
+ * @param {string} [preOrderHarvestBatchId=null] - Optional batch ID to filter by
+ * @returns {Promise<{ status: string, data: Array, pagination: Object }>}
  */
 async function listReceives(fruitTypeId, page = 1, limit = 20, preOrderHarvestBatchId = null) {
   const filter = {};
@@ -154,7 +211,10 @@ async function listReceives(fruitTypeId, page = 1, limit = 20, preOrderHarvestBa
 }
 
 /**
- * Lấy receivedKg cho một fruitType (từ PreOrderStock).
+ * Get total received kg for a fruit type from PreOrderStock. Returns 0 if no stock record exists.
+ *
+ * @param {string} fruitTypeId - Fruit type document ID
+ * @returns {Promise<number>} receivedKg (0 if no record)
  */
 async function getReceivedKgByFruitType(fruitTypeId) {
   const s = await PreOrderStockModel.findOne({ fruitTypeId }).lean();

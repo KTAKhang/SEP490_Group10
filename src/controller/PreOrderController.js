@@ -24,7 +24,8 @@ const createPaymentIntent = async (req, res) => {
 const getMyPreOrders = async (req, res) => {
   try {
     const userId = req.user._id;
-    const response = await PreOrderService.getMyPreOrders(userId);
+    const { page, limit, sortBy, sortOrder, status } = req.query;
+    const response = await PreOrderService.getMyPreOrders(userId, { page, limit, sortBy, sortOrder, status });
     return res.status(200).json(response);
   } catch (err) {
     return res.status(500).json({ status: "ERR", message: err.message });

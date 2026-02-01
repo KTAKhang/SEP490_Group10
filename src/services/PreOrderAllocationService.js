@@ -1,3 +1,13 @@
+/**
+ * Pre-order Allocation Service
+ *
+ * Business logic for admin allocation of pre-order stock: demand by fruit type (from PreOrder + PreOrderStock),
+ * upsert allocation (one-time per fruit type when fully received), list allocations. Does not use Product model.
+ *
+ * Flow: Warehouse receives stock at Pre-order Stock → Admin runs allocation (upsertAllocation) when receivedKg >= demand
+ * → Allocation is one-time only; then fruit type is set INACTIVE. triggerReadyAndNotifyForFruitType sends email/FCM.
+ */
+
 const mongoose = require("mongoose");
 const PreOrderModel = require("../models/PreOrderModel");
 const PreOrderAllocationModel = require("../models/PreOrderAllocationModel");
@@ -6,12 +16,27 @@ const FruitTypeModel = require("../models/FruitTypeModel");
 const { triggerReadyAndNotifyForFruitType } = require("./preorderFulfillmentLogic");
 
 const CANCEL_WINDOW_HOURS = 24;
+/** Optional: only count pre-orders created before this many hours ago (0 = no cutoff). */
 const DEMAND_CUTOFF_HOURS = 0;
 
 /**
- * Demand dashboard: nhu cầu theo FruitType + receivedKg từ kho trả đơn (PreOrderStock), không dùng Product.
+ * Demand dashboard: aggregate demand (quantityKg) by fruit type from pre-orders (status WAITING_FOR_PRODUCT or READY_FOR_FULFILLMENT),
+ * join with PreOrderAllocation (allocatedKg) and PreOrderStock (receivedKg). Optionally filter by keyword (fruit type name) and paginate.
+ *
+ * Flow:
+ * 1. Aggregate PreOrder: match status in [WAITING_FOR_PRODUCT, READY_FOR_FULFILLMENT], optional createdAt cutoff; group by fruitTypeId, sum quantityKg, count
+ * 2. Load allocations and stocks for those fruitTypeIds; build allocMap (fruitTypeId -> total allocatedKg) and stockMap (fruitTypeId -> receivedKg)
+ * 3. Load FruitType for names; build result rows: demandKg, orderCount, allocatedKg, receivedKgFromPreOrderStock, remainingKg, fullyReceived
+ * 4. Optional keyword filter (fruit type name); paginate (slice) and return data + pagination
+ *
+ * @param {Object} [query={}] - Optional page, limit, keyword
+ * @param {number} [query.page=1] - Page number
+ * @param {number} [query.limit=20] - Items per page
+ * @param {string} [query.keyword] - Filter by fruit type name (case-insensitive substring)
+ * @returns {Promise<{ status: string, data: Array, pagination: Object }>}
  */
-const getDemandByFruitType = async () => {
+const getDemandByFruitType = async (query = {}) => {
+  const { page = 1, limit = 20, keyword } = query;
   const match = { status: { $in: ["WAITING_FOR_PRODUCT", "READY_FOR_FULFILLMENT"] } };
   if (DEMAND_CUTOFF_HOURS > 0) {
     const cutoff = new Date(Date.now() - DEMAND_CUTOFF_HOURS * 60 * 60 * 1000);
@@ -38,7 +63,7 @@ const getDemandByFruitType = async () => {
   const fruitTypes = await FruitTypeModel.find({ _id: { $in: fruitTypeIds } }).lean();
   const fruitMap = Object.fromEntries(fruitTypes.map((f) => [f._id.toString(), f]));
 
-  const result = demandAgg.map((d) => {
+  let result = demandAgg.map((d) => {
     const fid = d._id.toString();
     const ft = fruitMap[fid];
     const allocatedKg = allocMap[fid] || 0;
@@ -57,12 +82,38 @@ const getDemandByFruitType = async () => {
     };
   });
 
-  return { status: "OK", data: result };
+  if (keyword && String(keyword).trim()) {
+    const k = String(keyword).trim().toLowerCase();
+    result = result.filter((r) => (r.fruitTypeName || "").toLowerCase().includes(k));
+  }
+  const total = result.length;
+  const limitNum = Math.max(1, Math.min(100, Number(limit) || 20));
+  const pageNum = Math.max(1, Number(page) || 1);
+  const data = result.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+  return {
+    status: "OK",
+    data,
+    pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) },
+  };
 };
 
 /**
- * Admin: phân bổ trả đơn từ kho trả đơn. Chỉ cho phép khi đã nhập đủ (Fully received).
- * Phân bổ cứng = toàn bộ khả dụng (receivedKg), trả một lần duy nhất; sau đó inactive loại trái (đã ngừng kinh doanh).
+ * Admin: allocate pre-order stock for a fruit type. Allowed only when PreOrderStock receivedKg >= demand (fully received).
+ * Allocation is one-time only per fruit type (allocatedKg = receivedKg). After allocation, fruit type is set INACTIVE.
+ * Triggers email and FCM to customers (triggerReadyAndNotifyForFruitType).
+ *
+ * Flow:
+ * 1. Load fruit type; load PreOrderStock for fruitTypeId (receivedKg)
+ * 2. Aggregate demand: sum(quantityKg) for pre-orders with status WAITING_FOR_PRODUCT or READY_FOR_FULFILLMENT
+ * 3. Validate: receivedKg > 0, receivedKg >= demandKg; no existing allocation with allocatedKg > 0
+ * 4. Delete any existing allocation rows for fruitTypeId; create new allocation with allocatedKg = receivedKg
+ * 5. Call triggerReadyAndNotifyForFruitType (email + FCM); on error log and continue
+ * 6. Set fruit type status to INACTIVE
+ *
+ * @param {Object} params - Input parameters
+ * @param {string} params.fruitTypeId - Fruit type document ID
+ * @param {number} [params.allocatedKg] - Ignored; allocation amount is set to receivedKg
+ * @returns {Promise<{ status: string, data: Object }>}
  */
 const upsertAllocation = async ({ fruitTypeId, allocatedKg }) => {
   const ft = await FruitTypeModel.findById(fruitTypeId);
@@ -92,7 +143,6 @@ const upsertAllocation = async ({ fruitTypeId, allocatedKg }) => {
     );
   }
 
-  // Phân bổ cứng = toàn bộ khả dụng (trả một lần xong luôn)
   const kg = receivedKg;
 
   await PreOrderAllocationModel.deleteMany({ fruitTypeId });
@@ -104,14 +154,16 @@ const upsertAllocation = async ({ fruitTypeId, allocatedKg }) => {
     console.warn("PreOrder triggerReadyAfterAllocation:", e.message);
   }
 
-  // Sau khi phân bổ xong: inactive loại trái (đã ngừng kinh doanh)
   await FruitTypeModel.findByIdAndUpdate(fruitTypeId, { status: "INACTIVE" });
 
   return { status: "OK", data: doc };
 };
 
 /**
- * Admin: danh sách allocation (theo fruitType).
+ * Admin: list allocation records, optionally filtered by fruit type. Used for demand/allocations UI.
+ *
+ * @param {string} [fruitTypeId] - Optional fruit type ID to filter by
+ * @returns {Promise<{ status: string, data: Array }>} List of allocations with populated fruitTypeId (name)
  */
 const listAllocations = async (fruitTypeId) => {
   const filter = fruitTypeId ? { fruitTypeId } : {};
