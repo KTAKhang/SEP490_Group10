@@ -6,6 +6,8 @@ const CategoryModel = require("../models/CategoryModel");
 const ProductModel = require("../models/ProductModel");
 const FruitBasketModel = require("../models/FruitBasketModel");
 const FruitTypeModel = require("../models/FruitTypeModel");
+const ReviewModel = require("../models/ReviewModel");
+
 
 // Sử dụng memory storage để nhận file từ multipart/form-data
 const upload = multer({
@@ -406,6 +408,136 @@ const uploadFruitBasketImages = (req, res, next) => {
 
 module.exports.uploadFruitBasketImages = uploadFruitBasketImages;
 
+// Middleware: Upload nhiều ảnh review lên Cloudinary
+const uploadReviewImages = (req, res, next) => {
+    const handler = upload.array("images", 3);
+    handler(req, res, async (err) => {
+        if (err) {
+            console.error(`❌ Multer error:`, err);
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            let oldImagesFromDB = [];
+            let oldImagePublicIdsFromDB = [];
+
+            if (req.params && req.params.id) {
+                try {
+                    const review = await ReviewModel.findById(req.params.id).select("images imagePublicIds");
+                    if (review) {
+                        oldImagesFromDB = Array.isArray(review.images) ? review.images : [];
+                        oldImagePublicIdsFromDB = Array.isArray(review.imagePublicIds) ? review.imagePublicIds : [];
+                    }
+                } catch (err) {
+                    console.warn("Không thể lấy ảnh cũ từ database:", err.message);
+                }
+            }
+
+            let existingImages = [];
+            let existingImagePublicIds = [];
+
+            if (req.body.existingImages) {
+                try {
+                    existingImages = typeof req.body.existingImages === "string"
+                        ? JSON.parse(req.body.existingImages)
+                        : req.body.existingImages;
+                } catch (e) {
+                    existingImages = Array.isArray(req.body.existingImages) ? req.body.existingImages : [];
+                }
+            }
+
+            if (req.body.existingImagePublicIds) {
+                try {
+                    existingImagePublicIds = typeof req.body.existingImagePublicIds === "string"
+                        ? JSON.parse(req.body.existingImagePublicIds)
+                        : req.body.existingImagePublicIds;
+                } catch (e) {
+                    existingImagePublicIds = Array.isArray(req.body.existingImagePublicIds) ? req.body.existingImagePublicIds : [];
+                }
+            }
+
+            if (existingImages.length === 0 && oldImagesFromDB.length > 0) {
+                existingImages = oldImagesFromDB;
+            }
+            if (existingImagePublicIds.length === 0 && oldImagePublicIdsFromDB.length > 0) {
+                existingImagePublicIds = oldImagePublicIdsFromDB;
+            }
+
+            if (Array.isArray(req.files) && req.files.length > 0) {
+                const uploads = req.files.map((file) =>
+                    uploadToCloudinary(file.buffer, "reviews")
+                );
+
+                const results = await Promise.all(uploads);
+                const newImages = results.map((r) => r.secure_url);
+                const newImagePublicIds = results.map((r) => r.public_id);
+
+                const finalImages = [...existingImages, ...newImages];
+                const finalImagePublicIds = [...existingImagePublicIds, ...newImagePublicIds];
+
+                const allOldImagePublicIds = oldImagePublicIdsFromDB.length > 0
+                    ? oldImagePublicIdsFromDB
+                    : existingImagePublicIds;
+
+                if (allOldImagePublicIds.length > 0) {
+                    const imagesToDelete = allOldImagePublicIds.filter(
+                        oldId => !finalImagePublicIds.includes(oldId)
+                    );
+
+                    if (imagesToDelete.length > 0) {
+                        Promise.all(
+                            imagesToDelete.map(publicId =>
+                                cloudinary.uploader.destroy(publicId).catch(err => {
+                                    console.warn(`Không thể xóa ảnh ${publicId} trên Cloudinary:`, err.message);
+                                })
+                            )
+                        ).catch(err => {
+                            console.warn("Lỗi khi xóa ảnh cũ:", err.message);
+                        });
+                    }
+                }
+
+                req.body.images = finalImages;
+                req.body.imagePublicIds = finalImagePublicIds;
+            } else {
+                if (req.body.images !== undefined || req.body.imagePublicIds !== undefined) {
+                    let imagesArray = req.body.images;
+                    let imagePublicIdsArray = req.body.imagePublicIds;
+
+                    if (typeof imagesArray === "string") {
+                        try {
+                            imagesArray = JSON.parse(imagesArray);
+                        } catch (e) {
+                            imagesArray = [];
+                        }
+                    }
+
+                    if (typeof imagePublicIdsArray === "string") {
+                        try {
+                            imagePublicIdsArray = JSON.parse(imagePublicIdsArray);
+                        } catch (e) {
+                            imagePublicIdsArray = [];
+                        }
+                    }
+
+                    req.body.images = Array.isArray(imagesArray) ? imagesArray : [];
+                    req.body.imagePublicIds = Array.isArray(imagePublicIdsArray) ? imagePublicIdsArray : [];
+                } else {
+                    req.body.images = existingImages;
+                    req.body.imagePublicIds = existingImagePublicIds;
+                }
+            }
+
+            return next();
+        } catch (error) {
+            console.error(`❌ Upload middleware error:`, error);
+            console.error(`❌ Error stack:`, error.stack);
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports.uploadReviewImages = uploadReviewImages;
+
 // Middleware: Upload news thumbnail lên Cloudinary
 const uploadNewsThumbnail = (req, res, next) => {
     const handler = upload.single("thumbnail");
@@ -505,6 +637,47 @@ const uploadNewsContentImage = (req, res, next) => {
 };
 
 module.exports.uploadNewsContentImage = uploadNewsContentImage;
+
+// Middleware: Upload shop description image lên Cloudinary
+const uploadShopDescriptionImage = (req, res, next) => {
+    const handler = upload.single("image"); // Field name for description image
+    handler(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            if (req.file && req.file.buffer) {
+                // Validate file type
+                const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+                if (!allowedMimes.includes(req.file.mimetype)) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Ảnh phải là định dạng jpg, png hoặc webp",
+                    });
+                }
+
+                // Upload với stream + optimization vào folder "shop/description"
+                const result = await uploadToCloudinary(req.file.buffer, "shop/description");
+
+                // Trả về URL và publicId để frontend sử dụng
+                req.uploadedImage = {
+                    url: result.secure_url,
+                    publicId: result.public_id,
+                };
+            } else {
+                return res.status(400).json({
+                    status: "ERR",
+                    message: "Không có file ảnh được upload",
+                });
+            }
+            return next();
+        } catch (error) {
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports.uploadShopDescriptionImage = uploadShopDescriptionImage;
 
 // Middleware: Upload nhiều ảnh shop lên Cloudinary
 const uploadShopImages = (req, res, next) => {
@@ -718,3 +891,52 @@ const uploadShopImage = (req, res, next) => {
 };
 
 module.exports.uploadShopImage = uploadShopImage;
+
+// Middleware: Upload homepage asset image lên Cloudinary
+const uploadHomepageAssetImage = (req, res, next) => {
+    const handler = upload.single("image");
+    handler(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            if (req.file && req.file.buffer) {
+                // Validate file type
+                const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+                if (!allowedMimes.includes(req.file.mimetype)) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Ảnh phải là định dạng jpg, png hoặc webp",
+                    });
+                }
+
+                // Check file size (5MB limit)
+                if (req.file.size > 5 * 1024 * 1024) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Kích thước file vượt quá 5MB",
+                    });
+                }
+
+                // Upload với stream + optimization vào folder "homepage"
+                const result = await uploadToCloudinary(req.file.buffer, "homepage");
+
+                // Trả về URL và publicId để frontend sử dụng
+                req.uploadedImage = {
+                    url: result.secure_url,
+                    publicId: result.public_id,
+                };
+            } else {
+                return res.status(400).json({
+                    status: "ERR",
+                    message: "Không có file ảnh được upload",
+                });
+            }
+            return next();
+        } catch (error) {
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports.uploadHomepageAssetImage = uploadHomepageAssetImage;

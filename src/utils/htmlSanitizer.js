@@ -5,33 +5,70 @@ const sanitize = require('sanitize-html');
  * @param {string} html - HTML content cần sanitize
  * @returns {string} - HTML đã được sanitize
  */
+/**
+ * Sanitize HTML content từ CKEditor hoặc các rich text editor khác
+ * Loại bỏ malicious code, giữ lại format cần thiết cho content editor
+ */
 const sanitizeHTML = (html) => {
   if (!html) return '';
   
   return sanitize(html, {
-    // Cho phép các HTML tags cần thiết
+    // Cho phép các HTML tags cần thiết cho CKEditor
     allowedTags: [
       'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-      'p', 'br',
-      'strong', 'em', 'u', 's', 'b', 'i',
+      'p', 'br', 'hr',
+      'strong', 'em', 'u', 's', 'b', 'i', 'sub', 'sup',
       'ul', 'ol', 'li',
       'a', 'img',
       'blockquote', 'pre', 'code',
       'div', 'span',
-      'table', 'thead', 'tbody', 'tr', 'th', 'td',
+      'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
     ],
     
-    // Cho phép các attributes
+    // Cho phép các attributes cho CKEditor
     allowedAttributes: {
-      'a': ['href', 'target', 'rel'],
-      'img': ['src', 'alt', 'title', 'width', 'height'],
+      'a': ['href', 'target', 'rel', 'title'],
+      'img': ['src', 'alt', 'title', 'width', 'height', 'style'], // Cho phép style cho ảnh (alignment)
       '*': ['class', 'id'],
-      'th': ['colspan', 'rowspan'],
+      'th': ['colspan', 'rowspan', 'scope'],
       'td': ['colspan', 'rowspan'],
+      'table': ['border', 'cellpadding', 'cellspacing', 'width'],
+      'p': ['style'], // Cho phép style cho paragraph (text-align, etc.)
+      'div': ['style'], // Cho phép style cho div (text-align, etc.)
+      'span': ['style'], // Cho phép style cho span (color, font-size, etc.)
     },
     
     // Không cho phép data attributes (có thể chứa malicious code)
     allowDataAttributes: false,
+    
+    // Sanitize style attribute - chỉ cho phép các style an toàn
+    allowedStyles: {
+      '*': {
+        // Text formatting
+        'color': [/^#[0-9a-fA-F]{3,6}$/, /^rgb\(/, /^rgba\(/, /^hsl\(/, /^hsla\(/, /^transparent$/, /^inherit$/, /^initial$/, /^unset$/],
+        'text-align': [/^left$/, /^right$/, /^center$/, /^justify$/],
+        'font-size': [/^[\d.]+(px|em|rem|%)$/],
+        'font-weight': [/^normal$/, /^bold$/, /^bolder$/, /^lighter$/, /^\d+$/],
+        'font-style': [/^normal$/, /^italic$/, /^oblique$/],
+        'text-decoration': [/^none$/, /^underline$/, /^line-through$/, /^overline$/],
+        // Layout
+        'margin': [/^[\d.]+(px|em|rem|%)$/],
+        'margin-top': [/^[\d.]+(px|em|rem|%)$/],
+        'margin-bottom': [/^[\d.]+(px|em|rem|%)$/],
+        'margin-left': [/^[\d.]+(px|em|rem|%)$/],
+        'margin-right': [/^[\d.]+(px|em|rem|%)$/],
+        'padding': [/^[\d.]+(px|em|rem|%)$/],
+        'width': [/^[\d.]+(px|em|rem|%)$/, /^auto$/, /^100%$/],
+        'height': [/^[\d.]+(px|em|rem|%)$/, /^auto$/],
+        // Image alignment (cho CKEditor)
+        'float': [/^left$/, /^right$/, /^none$/],
+        'display': [/^block$/, /^inline$/, /^inline-block$/, /^none$/],
+      },
+      'img': {
+        'max-width': [/^[\d.]+(px|em|rem|%)$/, /^100%$/],
+        'height': [/^auto$/, /^[\d.]+(px|em|rem|%)$/],
+      },
+    },
     
     // Tự động thêm rel="noopener" cho link external
     transformTags: {

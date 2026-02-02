@@ -12,216 +12,222 @@ const dotenv = require("dotenv");
 dotenv.config();
 
 const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: process.env.SMTP_PORT,
-    secure: true,
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-    },
+  host: process.env.SMTP_HOST,
+  port: process.env.SMTP_PORT,
+  secure: true,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
 });
-
-
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const loginWithGoogle = async (idToken) => {
-    try {
-        const ticket = await client.verifyIdToken({
-            idToken,
-            audience: process.env.GOOGLE_CLIENT_ID,
-        });
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
 
-        const payload = ticket.getPayload();
-        const { sub: googleId, email, name, picture } = payload;
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, name, picture } = payload;
 
-        let user = await UserModel.findOne({
-            $or: [{ googleId }, { email }],
-        });
+    let user = await UserModel.findOne({
+      $or: [{ googleId }, { email }],
+    });
 
-        if (user) {
-            if (!user.googleId) user.googleId = googleId;
-            if (!user.isGoogleAccount) user.isGoogleAccount = true;
-            if (picture && !user.avatar) user.avatar = picture;
-        } else {
-            user = new UserModel({
-                user_name: name,
-                email,
-                googleId,
-                isGoogleAccount: true,
-                avatar: picture,
-                role_id: new mongoose.Types.ObjectId(
-                    "68c158d04aacbd32cdffce3b" // customer
-                ),
-            });
-        }
-
-        if (user.status === false) {
-            const err = new Error("Tài khoản bị chặn");
-            err.status = "ERR";
-            throw err;
-        }
-
-        await user.save();
-
-        const populatedUser = await UserModel
-            .findById(user._id)
-            .populate("role_id", "name -_id");
-
-        const roleName = populatedUser?.role_id?.name || "customer";
-
-        const accessToken = jwtService.generalAccessToken({
-            _id: user._id,
-            role: roleName,
-            isAdmin: roleName === "admin",
-        });
-
-        const refreshToken = jwtService.generalRefreshToken({
-            _id: user._id,
-            role: roleName,
-            isAdmin: roleName === "admin",
-        });
-
-        user.refreshToken = refreshToken;
-        await user.save();
-
-        return {
-            status: "OK",
-            message: "Đăng nhập Google thành công",
-            data: {
-                _id: populatedUser._id,
-                user_name: populatedUser.user_name,
-                email: populatedUser.email,
-                avatar: populatedUser.avatar,
-                role_name: roleName,
-                status: populatedUser.status,
-                isGoogleAccount: populatedUser.isGoogleAccount,
-                createdAt: populatedUser.createdAt,
-                updatedAt: populatedUser.updatedAt,
-            },
-            token: {
-                access_token: accessToken,
-                refresh_token: refreshToken,
-            },
-        };
-    } catch (error) {
-        throw error;
+    if (user) {
+      if (!user.googleId) user.googleId = googleId;
+      if (!user.isGoogleAccount) user.isGoogleAccount = true;
+      if (picture && !user.avatar) user.avatar = picture;
+    } else {
+      user = new UserModel({
+        user_name: name,
+        email,
+        googleId,
+        isGoogleAccount: true,
+        avatar: picture,
+        role_id: new mongoose.Types.ObjectId(
+          "68c158d04aacbd32cdffce3b", // customer
+        ),
+      });
     }
+
+    if (user.status === false) {
+      const err = new Error("Tài khoản bị chặn");
+      err.status = "ERR";
+      throw err;
+    }
+
+    await user.save();
+
+    const populatedUser = await UserModel.findById(user._id).populate(
+      "role_id",
+      "name -_id",
+    );
+
+    const roleName = populatedUser?.role_id?.name || "customer";
+
+    const accessToken = jwtService.generalAccessToken({
+      _id: user._id,
+      role: roleName,
+      isAdmin: roleName === "admin",
+    });
+
+    const refreshToken = jwtService.generalRefreshToken({
+      _id: user._id,
+      role: roleName,
+      isAdmin: roleName === "admin",
+    });
+
+    user.refreshToken = refreshToken;
+    await user.save();
+
+    return {
+      status: "OK",
+      message: "Đăng nhập Google thành công",
+      data: {
+        _id: populatedUser._id,
+        user_name: populatedUser.user_name,
+        email: populatedUser.email,
+        avatar: populatedUser.avatar,
+        role_name: roleName,
+        status: populatedUser.status,
+        isGoogleAccount: populatedUser.isGoogleAccount,
+        createdAt: populatedUser.createdAt,
+        updatedAt: populatedUser.updatedAt,
+      },
+      token: {
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      },
+    };
+  } catch (error) {
+    throw error;
+  }
 };
 
 const loginUser = async ({ email, password }) => {
-    try {
-        const user = await UserModel.findOne({
-            email: { $regex: new RegExp(`^${email}$`, "i") },
-        });
-        if (!user) throw { status: "ERR", message: "Tài khoản không tồn tại" };
+  try {
+    const user = await UserModel.findOne({
+      email: { $regex: new RegExp(`^${email}$`, "i") },
+    });
+    if (!user) throw { status: "ERR", message: "Tài khoản không tồn tại" };
 
-        if (user.status === false) throw { status: "ERR", message: "Tài khoản bị chặn" };
+    if (user.status === false)
+      throw { status: "ERR", message: "Tài khoản bị chặn" };
 
-        const passwordMatch = bcrypt.compareSync(password, user.password);
+    const passwordMatch = bcrypt.compareSync(password, user.password);
 
-        if (!passwordMatch) throw { status: "ERR", message: "Mật khẩu không đúng" };
+    if (!passwordMatch) throw { status: "ERR", message: "Mật khẩu không đúng" };
 
-        const populatedUser = await UserModel.findById(user._id).populate("role_id", "name -_id");
-        const roleName = populatedUser?.role_id?.name || "customer";
-        const accessToken = jwtService.generalAccessToken({
-            _id: user._id,
-            isAdmin: roleName === "admin",
-            role: roleName,
-        });
-        const refreshToken = jwtService.generalRefreshToken({
-            _id: user._id,
-            isAdmin: roleName === "admin",
-            role: roleName,
-        });
-        user.refreshToken = refreshToken;
-        await user.save();
-        return {
-            status: "OK",
-            message: "Đăng nhập thành công",
-            data: {
-                _id: populatedUser._id,
-                user_name: populatedUser.user_name,
-                email: populatedUser.email,
-                avatar: populatedUser.avatar,
-                role_name: populatedUser.role_id.name,
-                phone: populatedUser.phone,
-                address: populatedUser.address,
-                status: populatedUser.status,
-                isGoogleAccount: populatedUser.isGoogleAccount ?? false, // ✅ fallback về false nếu undefined/null
-                createdAt: populatedUser.createdAt,
-                updatedAt: populatedUser.updatedAt,
-            },
-            token: {
-                access_token: accessToken, refresh_token: refreshToken
-            },
-        };
-    } catch (error) {
-        throw error;
-    }
+    const populatedUser = await UserModel.findById(user._id).populate(
+      "role_id",
+      "name -_id",
+    );
+    const roleName = populatedUser?.role_id?.name || "customer";
+    const accessToken = jwtService.generalAccessToken({
+      _id: user._id,
+      isAdmin: roleName === "admin",
+      role: roleName,
+    });
+    const refreshToken = jwtService.generalRefreshToken({
+      _id: user._id,
+      isAdmin: roleName === "admin",
+      role: roleName,
+    });
+    user.refreshToken = refreshToken;
+    await user.save();
+    return {
+      status: "OK",
+      message: "Đăng nhập thành công",
+      data: {
+        _id: populatedUser._id,
+        user_name: populatedUser.user_name,
+        email: populatedUser.email,
+        avatar: populatedUser.avatar,
+        role_name: populatedUser.role_id.name,
+        phone: populatedUser.phone,
+        address: populatedUser.address,
+        status: populatedUser.status,
+        isGoogleAccount: populatedUser.isGoogleAccount ?? false, // ✅ fallback về false nếu undefined/null
+        createdAt: populatedUser.createdAt,
+        updatedAt: populatedUser.updatedAt,
+      },
+      token: {
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      },
+    };
+  } catch (error) {
+    throw error;
+  }
 };
 
 // Refresh token
 const refreshAccessToken = async (refreshToken) => {
-    try {
-        const payload = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
-        const user = await UserModel.findById(payload._id);
+  try {
+    const payload = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+    const user = await UserModel.findById(payload._id);
 
-        if (!user || user.refreshToken !== refreshToken)
-            throw { status: "ERR", message: "refresh token không hợp lệ" };
+    if (!user || user.refreshToken !== refreshToken)
+      throw { status: "ERR", message: "refresh token không hợp lệ" };
 
-        const newAccessToken = jwtService.generalAccessToken({
-            _id: user._id,
-            isAdmin: payload.isAdmin,
-            role: payload.role,
-        });
+    const newAccessToken = jwtService.generalAccessToken({
+      _id: user._id,
+      isAdmin: payload.isAdmin,
+      role: payload.role,
+    });
 
-        return { access_token: newAccessToken };
-    } catch (err) {
-        if (err.name === "TokenExpiredError") {
-            throw { status: "ERR", message: "Refresh token đã hết hạn" };
-        }
-        throw { status: "ERR", message: "Refresh token không hợp lệ" };
+    return { access_token: newAccessToken };
+  } catch (err) {
+    if (err.name === "TokenExpiredError") {
+      throw { status: "ERR", message: "Refresh token đã hết hạn" };
     }
+    throw { status: "ERR", message: "Refresh token không hợp lệ" };
+  }
 };
 
 const logoutUser = async (userId) => {
-    // Xoá refresh token trong DB
-    await UserModel.findByIdAndUpdate(userId, { $unset: { refreshToken: 1 } });
-    return { status: "OK", message: "Đăng xuất thành công", userId };
+  // Xoá refresh token trong DB
+  await UserModel.findByIdAndUpdate(userId, { $unset: { refreshToken: 1 } });
+  return { status: "OK", message: "Đăng xuất thành công", userId };
 };
 
-const sendRegisterOTP = async (user_name, email, password, phone, address) => {
-    const existingUser = await UserModel.findOne({ email });
-    const existingUserName = await UserModel.findOne({ user_name });
-    if (existingUser) {
-        return { status: "ERR", message: "Email đã được đăng ký!" };
-    }
+const sendRegisterOTP = async (user_name, email, password, phone, address, birthday, gender) => {
+  const existingUser = await UserModel.findOne({ email });
+  const existingUserName = await UserModel.findOne({ user_name });
+  if (existingUser) {
+    return { status: "ERR", message: "Email address has been registered!" };
+  }
 
-    if (existingUserName) {
-        return { status: "ERR", message: "Tên người dùng đã được sử dụng!" };
-    }
+  if (existingUserName) {
+    return { status: "ERR", message: "The username is already in use!" };
+  }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    await TempOTPModel.findOneAndUpdate(
-        { email },
-        {
-            otp,
-            expiresAt: Date.now() + 10 * 60 * 1000,
-            user_name,
-            password,
-            phone,
-            address,
-        },
-        { upsert: true, new: true }
-    );
+  await TempOTPModel.findOneAndUpdate(
+    { email },
+    {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      user_name,
+      password,
+      phone,
+      address,
+      birthday,
+      gender,
+    },
+    { upsert: true, new: true },
+  );
 
-    await transporter.sendMail({
-        from: process.env.SMTP_USER,
-        to: email,
-        subject: "🔐 OTP for Registration",
-        html: `
+  await transporter.sendMail({
+    from: process.env.SMTP_USER,
+    to: email,
+    subject: "🔐 OTP for Registration",
+    html: `
         <div style="max-width: 400px; margin: 20px auto; padding: 20px; border: 2px solid #4CAF50; border-radius: 10px; background-color: #f9fff9; font-family: Arial, sans-serif; text-align: center;">
   <h2 style="color: #4CAF50; margin-bottom: 10px;">Your OTP Code</h2>
   <p style="font-size: 16px; color: #333;">
@@ -233,81 +239,84 @@ const sendRegisterOTP = async (user_name, email, password, phone, address) => {
   <p style="margin-top: 15px; color: #666;">This code will expire in <strong>10 minutes</strong>.</p>
 </div>
 `,
-    });
+  });
 
-    return { status: "OK", message: "OTP đã được gửi đến email" };
+  return { status: "OK", message: "The OTP has been sent to your email." };
 };
-
 
 const confirmRegisterOTP = async (email, otp) => {
-    // Tìm OTP theo email + otp
-    const tempRecord = await TempOTPModel.findOne({ email, otp });
+  // Tìm OTP theo email + otp
+  const tempRecord = await TempOTPModel.findOne({ email, otp });
 
-    if (!tempRecord) {
-        return { status: "ERR", message: "Email hoặc OTP không đúng" };
-    }
+  if (!tempRecord) {
+    return { status: "ERR", message: "Incorrect email or OTP" };
+  }
 
-    if (tempRecord.expiresAt < Date.now()) {
-        return { status: "ERR", message: "OTP đã hết hạn" };
-    }
+  if (tempRecord.expiresAt < Date.now()) {
+    return { status: "ERR", message: "The OTP has expired." };
+  }
 
-    // Check email đã tồn tại trong bảng User chưa
-    const existingUser = await UserModel.findOne({ email });
-    if (existingUser) {
-        return { status: "ERR", message: "Email đã được đăng ký" };
-    }
+  // Check email đã tồn tại trong bảng User chưa
+  const existingUser = await UserModel.findOne({ email });
+  if (existingUser) {
+    return { status: "ERR", message: "Email has been registered" };
+  }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(tempRecord.password, 10);
-    const customerRole = await RoleModel.findOne({ name: "customer" });
+  // Hash password
+  const hashedPassword = await bcrypt.hash(tempRecord.password, 10);
+  const customerRole = await RoleModel.findOne({ name: "customer" });
 
-    // Kiểm tra role "customer" có tồn tại không
-    if (!customerRole) {
-        return {
-            status: "ERR",
-            message: "Role 'customer' không tồn tại trong hệ thống. Vui lòng liên hệ quản trị viên.",
-        };
-    }
+  // Kiểm tra role "customer" có tồn tại không
+  if (!customerRole) {
+    return {
+      status: "ERR",
+      message:
+        "The 'customer' role does not exist in the system",
+    };
+  }
 
-    const newUser = new UserModel({
-        user_name: tempRecord.user_name,
-        email,
-        password: hashedPassword,
-        role_id: customerRole._id,
-        phone: tempRecord.phone,
-        address: tempRecord.address,
-        avatar: "https://res.cloudinary.com/dkbsae4kc/image/upload/v1763021650/avatars/qpajnru8n9zc1unkx9so.png",
-    });
+  const newUser = new UserModel({
+    user_name: tempRecord.user_name,
+    email,
+    password: hashedPassword,
+    role_id: customerRole._id,
+    phone: tempRecord.phone,
+    address: tempRecord.address,
+    birthday: tempRecord.birthday,
+    gender: tempRecord.gender,
+    avatar: "https://res.cloudinary.com/dkbsae4kc/image/upload/v1768096992/avatars/h1nqjlbxgemeymkobhr3.jpg",
+});
 
-    await newUser.save();
-    await TempOTPModel.deleteOne({ email });
 
-    return { status: "OK", message: "Đăng ký thành công" };
+  await newUser.save();
+  await TempOTPModel.deleteOne({ email });
+
+  return { status: "OK", message: "Registration successful" };
 };
 
-
-
 const sendResetPasswordOTP = async (email) => {
-    const user = await UserModel.findOne({ email });
-    if (!user) throw new Error("Email không tồn tại!");
+  const user = await UserModel.findOne({ email });
+  if (!user) throw new Error("The email address doesn't exist");
 
-    // ✅ Không cho reset password với tài khoản Google
-    if (user.isGoogleAccount) {
-        throw new Error("Tài khoản này sử dụng thông tin đăng nhập Google và không thể đặt lại mật khẩu.");
-    }
+  // ✅ Không cho reset password với tài khoản Google
+  if (user.isGoogleAccount) {
+    throw new Error(
+      "This account uses Google login information and the password cannot be reset.",
+    );
+  }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    user.resetPasswordOTP = otp;
-    user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
-    await user.save();
+  user.resetPasswordOTP = otp;
+  user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
+  await user.save();
 
-    try {
-        await transporter.sendMail({
-            from: process.env.SMTP_USER,
-            to: email,
-            subject: "🔒 Reset Password OTP",
-            html: `
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_USER,
+      to: email,
+      subject: "🔒 Reset Password OTP",
+      html: `
       <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 500px; margin: auto; border: 1px solid #ddd; border-radius: 10px;background-color:rgb(174, 216, 48);">
         <h2 style="color: #007bff; text-align: center;">🔐 Reset Your Password</h2>
         <p style="font-size: 16px;">Hello,</p>
@@ -321,49 +330,46 @@ const sendResetPasswordOTP = async (email) => {
         <p style="text-align: center; font-size: 12px; color: #666;">&copy; 2024 Your Company. All rights reserved.</p>
       </div>
     `,
-        });
-    } catch (err) {
-        return {
-            status: "ERR",
-            message: "Không gửi được email. Vui lòng thử lại sau.",
-        };
-    }
+    });
+  } catch (err) {
+    return {
+      status: "ERR",
+      message: "Email could not be sent. Please try again later",
+    };
+  }
 
-    return { status: "OK", message: "Đã gửi OTP tới email thành công." };
+  return { status: "OK", message: "The OTP has been successfully sent to your email" };
 };
-
 
 const resetPassword = async (email, otp, newPassword) => {
-    const user = await UserModel.findOne({ email });
-    if (!user) throw new Error("Tài khoản không tồn tại!");
+  const user = await UserModel.findOne({ email });
+  if (!user) throw new Error("The account does not exist");
 
-    if (user.resetPasswordOTP !== otp) {
-        throw new Error("OTP không hợp lệ");
-    }
+  if (user.resetPasswordOTP !== otp) {
+    throw new Error("Invalid OTP");
+  }
 
-    if (user.resetPasswordExpires < Date.now()) {
-        throw new Error("OTP hết hạn");
-    }
+  if (user.resetPasswordExpires < Date.now()) {
+    throw new Error("OTP has expired.");
+  }
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    user.password = hashedPassword;
-    user.resetPasswordOTP = undefined;
-    user.resetPasswordExpires = undefined;
-    await user.save();
+  user.password = hashedPassword;
+  user.resetPasswordOTP = undefined;
+  user.resetPasswordExpires = undefined;
+  await user.save();
 
-    return { status: "OK", message: "Đặt lại mật khẩu thành công!" };
+  return { status: "OK", message: "Password reset successful" };
 };
 
-
-
 module.exports = {
-    sendResetPasswordOTP,
-    resetPassword,
-    sendRegisterOTP,
-    confirmRegisterOTP,
-    loginWithGoogle,
-    loginUser,
-    refreshAccessToken,
-    logoutUser,
+  sendResetPasswordOTP,
+  resetPassword,
+  sendRegisterOTP,
+  confirmRegisterOTP,
+  loginWithGoogle,
+  loginUser,
+  refreshAccessToken,
+  logoutUser,
 };

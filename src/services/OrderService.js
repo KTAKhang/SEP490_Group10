@@ -8,6 +8,7 @@ const { createVnpayPaymentUrl } = require("../controller/PaymentController");
 const ProductModel = require("../models/ProductModel");
 const StockLockModel = require("../models/StockLockModel");
 const PaymentService = require("../services/PaymentService");
+const ReviewModel = require("../models/ReviewModel");
 
 const { default: mongoose } = require("mongoose");
 const { createVnpayUrl } = require("../utils/createVnpayUrl");
@@ -22,6 +23,11 @@ const normalizeStatusName = (value) => {
 };
 
 const normalizeToken = (value) => (value ? value.toString().trim().toUpperCase() : "");
+
+const isReturnedStatus = (value) => {
+  const normalized = normalizeStatusName(value);
+  return normalized === "RETURNED";
+};
 
 const buildStatusRegex = (value) => {
   const normalized = normalizeStatusName(value);
@@ -322,7 +328,14 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     const nextStatusName = normalizeStatusName(newStatus.name);
     const paymentMethod = normalizeToken(order.payment_method);
 
-    if (!isValidStatusTransition(paymentMethod, currentStatusName, nextStatusName)) {
+    if (isReturnedStatus(nextStatusName)) {
+      if (role !== "admin") {
+        throw new Error("Chỉ admin mới được chuyển đơn sang trạng thái trả hàng");
+      }
+      if (currentStatusName !== "COMPLETED") {
+        throw new Error("Chỉ đơn COMPLETED mới được chuyển sang trả hàng");
+      }
+    } else if (!isValidStatusTransition(paymentMethod, currentStatusName, nextStatusName)) {
       throw new Error("Không hợp lệ theo luồng trạng thái đơn hàng");
     }
 
@@ -445,8 +458,8 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
       order.order_status_id,
     ).session(session);
 
-    if (!["PENDING", "PAID"].includes(status.name))
-      throw new Error("Chỉ được huỷ khi PENDING hoặc PAID");
+    if (status.name !== "PENDING")
+      throw new Error("Chỉ được huỷ khi trạng thái PENDING");
 
     /* =======================
        2️⃣ HOÀN KHO
@@ -471,55 +484,13 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
 
     if (!payment) throw new Error("Không tìm thấy payment của đơn hàng");
 
-    /* ===== COD ===== */
-    if (payment.method === "COD") {
-      payment.status = "FAILED";
-      payment.note = "Đơn bị huỷ";
-      await payment.save({ session });
+    if (payment.method !== "COD") {
+      throw new Error("Chỉ đơn COD mới được huỷ");
     }
 
-    /* ===== VNPAY ===== */
-
-    // 🔹 VNPAY chưa thanh toán
-    if (payment.method === "VNPAY" && payment.status === "PENDING") {
-      payment.status = "CANCELLED";
-      payment.note = "Khách huỷ trước khi thanh toán";
-      await payment.save({ session });
-    }
-
-    // 🔹 VNPAY đã thanh toán → tạo REFUND
-    if (payment.method === "VNPAY" && payment.status === "SUCCESS") {
-      // ✅ CHỐNG TẠO REFUND TRÙNG
-      const existedRefund = await PaymentModel.findOne({
-        order_id,
-        type: "REFUND",
-      }).session(session);
-
-      if (!existedRefund) {
-        await PaymentModel.create(
-          [
-            {
-              order_id,
-              type: "REFUND",
-              method: "VNPAY",
-              amount: payment.amount,
-              status: "PENDING",
-              note: "Khách huỷ đơn – chờ hoàn tiền VNPay",
-
-              // ✅ COPY ĐẦY ĐỦ TỪ PAYMENT
-              provider_txn_id: payment.provider_response.vnp_TransactionNo,
-
-              provider_response: {
-                vnp_TxnRef: payment.provider_response.vnp_TxnRef, // 🔥 BẮT BUỘC
-                vnp_TransactionNo: payment.provider_response.vnp_TransactionNo,
-                vnp_PayDate: payment.provider_response.vnp_PayDate,
-              },
-            },
-          ],
-          { session },
-        );
-      }
-    }
+    payment.status = "FAILED";
+    payment.note = "Đơn bị huỷ";
+    await payment.save({ session });
 
     /* =======================
        4️⃣ UPDATE ORDER STATUS
@@ -741,14 +712,30 @@ const getOrderByUser = async (order_id, user_id) => {
       return { status: "ERR", message: "Đơn hàng không tồn tại" };
     }
 
-    const details = await OrderDetailModel.find({ order_id: order._id }).lean();
+    const [details, reviews] = await Promise.all([
+      OrderDetailModel.find({ order_id: order._id }).lean(),
+      ReviewModel.find({
+        order_id: order._id,
+        user_id: new mongoose.Types.ObjectId(user_id),
+      }).lean(),
+    ]);
+
+    const reviewMap = new Map(
+      reviews.map((review) => [review.product_id?.toString(), review])
+    );
+
+    const detailsWithReview = details.map((detail) => ({
+      ...detail,
+      review: reviewMap.get(detail.product_id?.toString()) || null,
+    }));
 
     return {
       status: "OK",
       message: "Lấy chi tiết đơn hàng thành công",
       data: {
         order,
-        details,
+        details: detailsWithReview,
+        reviews,
       },
     };
   } catch (error) {

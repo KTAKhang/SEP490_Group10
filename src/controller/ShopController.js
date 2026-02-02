@@ -73,6 +73,28 @@ const uploadShopImage = async (req, res) => {
   }
 };
 
+const uploadShopDescriptionImage = async (req, res) => {
+  try {
+    if (!req.uploadedImage) {
+      return res.status(400).json({ 
+        status: "ERR", 
+        message: "Không có ảnh được upload" 
+      });
+    }
+
+    return res.status(200).json({
+      status: "OK",
+      message: "Upload ảnh thành công",
+      data: {
+        url: req.uploadedImage.url,
+        publicId: req.uploadedImage.publicId,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ status: "ERR", message: error.message });
+  }
+};
+
 module.exports = {
   getShopInfo,
   updateShopBasicInfo,
@@ -80,4 +102,5 @@ module.exports = {
   updateWorkingHours,
   updateShopImages,
   uploadShopImage,
+  uploadShopDescriptionImage,
 };

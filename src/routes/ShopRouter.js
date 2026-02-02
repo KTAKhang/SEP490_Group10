@@ -1,7 +1,7 @@
 const express = require("express");
 const ShopController = require("../controller/ShopController");
 const { authAdminMiddleware } = require("../middleware/authMiddleware");
-const { uploadShopImages } = require("../middleware/uploadMiddleware");
+const { uploadShopImages, uploadShopDescriptionImage } = require("../middleware/uploadMiddleware");
 
 const ShopRouter = express.Router();
 
@@ -13,6 +13,9 @@ ShopRouter.put("/basic-info", authAdminMiddleware, ShopController.updateShopBasi
 
 // UC-03: Update Shop Description (BR-05: Only ADMIN)
 ShopRouter.put("/description", authAdminMiddleware, ShopController.updateShopDescription);
+
+// Upload image for shop description (CKEditor)
+ShopRouter.post("/upload-description-image", authAdminMiddleware, uploadShopDescriptionImage, ShopController.uploadShopDescriptionImage);
 
 // UC-04: Update Working Hours (BR-05: Only ADMIN)
 ShopRouter.put("/working-hours", authAdminMiddleware, ShopController.updateWorkingHours);
