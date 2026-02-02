@@ -5,7 +5,9 @@ const sharp = require("sharp");
 const CategoryModel = require("../models/CategoryModel");
 const ProductModel = require("../models/ProductModel");
 const FruitBasketModel = require("../models/FruitBasketModel");
+const FruitTypeModel = require("../models/FruitTypeModel");
 const ReviewModel = require("../models/ReviewModel");
+
 
 // Sử dụng memory storage để nhận file từ multipart/form-data
 const upload = multer({
@@ -114,7 +116,44 @@ const uploadCategoryImage = (req, res, next) => {
     });
 };
 
-module.exports = { uploadCategoryImage };
+// Middleware: Upload ảnh FruitType (pre-order) lên Cloudinary nếu có file 'image'
+const uploadFruitTypeImage = (req, res, next) => {
+    const handler = upload.single("image");
+    handler(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            if (req.file && req.file.buffer) {
+                let oldImagePublicId = null;
+                if (req.params && req.params.id) {
+                    try {
+                        const ft = await FruitTypeModel.findById(req.params.id).select("imagePublicId");
+                        if (ft && ft.imagePublicId) oldImagePublicId = ft.imagePublicId;
+                    } catch (e) {
+                        console.warn("Không thể lấy ảnh cũ FruitType:", e.message);
+                    }
+                }
+                if (!oldImagePublicId) {
+                    oldImagePublicId = req.body.oldImagePublicId || req.body.imagePublicId;
+                }
+                const result = await uploadToCloudinary(req.file.buffer, "fruit-types");
+                req.body.image = result.secure_url;
+                req.body.imagePublicId = result.public_id;
+                if (oldImagePublicId && oldImagePublicId !== result.public_id) {
+                    cloudinary.uploader.destroy(oldImagePublicId).catch((e) =>
+                        console.warn("Không thể xóa ảnh cũ FruitType:", e.message)
+                    );
+                }
+            }
+            return next();
+        } catch (error) {
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports = { uploadCategoryImage, uploadFruitTypeImage };
 
 // Middleware: Upload nhiều ảnh product lên Cloudinary nếu có field 'images'
 const uploadProductImages = (req, res, next) => {
@@ -599,6 +638,47 @@ const uploadNewsContentImage = (req, res, next) => {
 
 module.exports.uploadNewsContentImage = uploadNewsContentImage;
 
+// Middleware: Upload shop description image lên Cloudinary
+const uploadShopDescriptionImage = (req, res, next) => {
+    const handler = upload.single("image"); // Field name for description image
+    handler(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            if (req.file && req.file.buffer) {
+                // Validate file type
+                const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+                if (!allowedMimes.includes(req.file.mimetype)) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Ảnh phải là định dạng jpg, png hoặc webp",
+                    });
+                }
+
+                // Upload với stream + optimization vào folder "shop/description"
+                const result = await uploadToCloudinary(req.file.buffer, "shop/description");
+
+                // Trả về URL và publicId để frontend sử dụng
+                req.uploadedImage = {
+                    url: result.secure_url,
+                    publicId: result.public_id,
+                };
+            } else {
+                return res.status(400).json({
+                    status: "ERR",
+                    message: "Không có file ảnh được upload",
+                });
+            }
+            return next();
+        } catch (error) {
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports.uploadShopDescriptionImage = uploadShopDescriptionImage;
+
 // Middleware: Upload nhiều ảnh shop lên Cloudinary
 const uploadShopImages = (req, res, next) => {
     const handler = upload.array("images", 20); // Allow up to 20 images
@@ -811,3 +891,52 @@ const uploadShopImage = (req, res, next) => {
 };
 
 module.exports.uploadShopImage = uploadShopImage;
+
+// Middleware: Upload homepage asset image lên Cloudinary
+const uploadHomepageAssetImage = (req, res, next) => {
+    const handler = upload.single("image");
+    handler(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            if (req.file && req.file.buffer) {
+                // Validate file type
+                const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+                if (!allowedMimes.includes(req.file.mimetype)) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Ảnh phải là định dạng jpg, png hoặc webp",
+                    });
+                }
+
+                // Check file size (5MB limit)
+                if (req.file.size > 5 * 1024 * 1024) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Kích thước file vượt quá 5MB",
+                    });
+                }
+
+                // Upload với stream + optimization vào folder "homepage"
+                const result = await uploadToCloudinary(req.file.buffer, "homepage");
+
+                // Trả về URL và publicId để frontend sử dụng
+                req.uploadedImage = {
+                    url: result.secure_url,
+                    publicId: result.public_id,
+                };
+            } else {
+                return res.status(400).json({
+                    status: "ERR",
+                    message: "Không có file ảnh được upload",
+                });
+            }
+            return next();
+        } catch (error) {
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports.uploadHomepageAssetImage = uploadHomepageAssetImage;

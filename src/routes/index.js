@@ -12,6 +12,8 @@ const SupplierRouter = require("./SupplierRouter");
 const HarvestBatchRouter = require("./HarvestBatchRouter");
 
 const NewsRouter = require("./NewsRouter");
+const NewsCommentRouter = require("./NewsCommentRouter");
+const HomepageAssetRouter = require("./HomepageAssetRouter");
 const ShopRouter = require("./ShopRouter");
 const ShopPublicRouter = require("./ShopPublicRouter");
 const UploadRouter = require("./UploadRouter");
@@ -29,10 +31,9 @@ const CheckoutRouter = require("./CheckoutRouter");
 const OrderStatusRouter = require("./OrderStatusRouter");
 const OrderRouter = require("./OrderRouter");
 const PaymentRouter = require("./PaymentRouter");
-
+const PreOrderRouter = require("./PreOrderRouter");
+const AdminPreOrderRouter = require("./AdminPreOrderRouter");
 const AdminReviewRouter = require("./AdminReviewRouter");
-  
-
 const ChatRouter = require("./ChatRouter");
 const ShippingRouter = require("./ShippingRouter");
 const StaffRouter = require("./StaffRouter");
@@ -58,31 +59,35 @@ const routes = (app) => {
     app.use("/orderstatus", OrderStatusRouter);
     app.use("/order", OrderRouter);
     app.use("/payment", PaymentRouter);
+    app.use("/preorder", PreOrderRouter);
     app.use("/reviews", ReviewRouter);
     app.use("/admin/reviews", AdminReviewRouter);
-    
     // Admin routes
     app.use("/admin/categories", CategoryRouter);
     app.use("/admin/products", ProductRouter);
     app.use("/admin/fruit-baskets", FruitBasketRouter);
     app.use("/admin/harvest-batch", HarvestBatchRouter);
-
     // Admin routes - Supplier Management
     app.use("/admin/suppliers", SupplierRouter); // ✅ Includes: /harvest-batch
-    // Note: /for-brand trong SupplierRouter dùng authAdminMiddleware (Admin only)
-    
-
+    // Note: /for-brand trong SupplierRouter dùng authAdminMiddleware (Admin only)    
     app.use("/admin/shop", ShopRouter);
+    app.use("/admin/preorder", AdminPreOrderRouter);
+    // Homepage Assets - Admin routes
+    app.use("/api/admin/homepage-assets", (req, res, next) => {
+      console.log(`🔗 HomepageAssetRouter matched: ${req.method} ${req.path}`);
+      next();
+    }, HomepageAssetRouter);
     // Warehouse staff
     app.use("/inventory", InventoryRouter);
     // News
     app.use("/news", NewsRouter);
-
+    // News Comments
+    app.use("/news-comments", NewsCommentRouter);
+    app.use("/api/homepage-assets", HomepageAssetRouter);
     // Public routes (không cần authentication)
     app.use("/products", PublicProductRouter);
     app.use("/categories", PublicCategoryRouter);
     app.use("/fruit-baskets", PublicFruitBasketRouter);
-    
     // Customer routes (chỉ Customer)
     app.use("/favorites", FavoriteRouter);
     // Staff management routes

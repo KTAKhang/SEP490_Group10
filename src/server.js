@@ -72,6 +72,7 @@ mongoose
   .then(() => {
     console.log("✅ Connected to MongoDB");
     require("./jobs/autoDeleteFailedOrders");
+    require("./jobs/preorderFulfillmentJob").run();
   })
   .catch((error) =>
     console.error("❌ MongoDB connection error:", error)

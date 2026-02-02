@@ -73,6 +73,11 @@ const CustomerService = {
 
             const total = await UserModel.countDocuments(filter);
 
+            const [activeCount, inactiveCount] = await Promise.all([
+                UserModel.countDocuments({ ...filter, status: true }),
+                UserModel.countDocuments({ ...filter, status: false }),
+            ]);
+
             const data = customers.map(customer => ({
                 ...customer,
                 role_name: customer.role_id?.name,
@@ -87,7 +92,8 @@ const CustomerService = {
                     limit: Number(limit),
                     total,
                     totalPages: Math.ceil(total / limit)
-                }
+                },
+                statistics: { total, active: activeCount, inactive: inactiveCount },
             };
         } catch (error) {
             return { status: "ERR", message: error.message };
@@ -266,6 +272,11 @@ const CustomerService = {
 
             const total = await UserModel.countDocuments(criteria);
 
+            const [activeCount, inactiveCount] = await Promise.all([
+                UserModel.countDocuments({ ...criteria, status: true }),
+                UserModel.countDocuments({ ...criteria, status: false }),
+            ]);
+
             const data = customers.map(customer => ({
                 ...customer,
                 role_name: customer.role_id?.name,
@@ -280,7 +291,8 @@ const CustomerService = {
                     limit: Number(limit),
                     total,
                     totalPages: Math.ceil(total / limit)
-                }
+                },
+                statistics: { total, active: activeCount, inactive: inactiveCount },
             };
         } catch (error) {
             return { status: "ERR", message: error.message };
@@ -347,6 +359,11 @@ const CustomerService = {
 
             const total = await UserModel.countDocuments(criteria);
 
+            const [activeCount, inactiveCount] = await Promise.all([
+                UserModel.countDocuments({ ...criteria, status: true }),
+                UserModel.countDocuments({ ...criteria, status: false }),
+            ]);
+
             const data = customers.map(customer => ({
                 ...customer,
                 role_name: customer.role_id?.name,
@@ -361,7 +378,8 @@ const CustomerService = {
                     limit: Number(limit),
                     total,
                     totalPages: Math.ceil(total / limit)
-                }
+                },
+                statistics: { total, active: activeCount, inactive: inactiveCount },
             };
         } catch (error) {
             return { status: "ERR", message: error.message };

@@ -268,6 +268,80 @@ Smart Fruit Shop
                 message: `Failed to send email: ${error.message}`
             };
         }
+    },
+
+    /**
+     * Gửi email khi đặt trước đã sẵn sàng giao – nhắc khách thanh toán phần còn lại.
+     * @param {String} customerEmail
+     * @param {String} customerName
+     * @param {String} fruitTypeName - Tên loại trái cây
+     * @param {Number} quantityKg
+     * @param {Number} daysToPay - Số ngày phải thanh toán (mặc định 7)
+     */
+    async sendPreOrderReadyEmail(customerEmail, customerName, fruitTypeName = "sản phẩm đặt trước", quantityKg = 0, daysToPay = 7) {
+        try {
+            const transporter = createTransporter();
+            const fruitLabel = fruitTypeName ? `${fruitTypeName} (${quantityKg} kg)` : `sản phẩm (${quantityKg} kg)`;
+
+            const mailOptions = {
+                from: {
+                    name: "Smart Fruit Shop",
+                    address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn"
+                },
+                to: customerEmail,
+                subject: "Đặt trước sẵn sàng – Vui lòng thanh toán phần còn lại – Smart Fruit Shop",
+                html: `
+                    <!DOCTYPE html>
+                    <html lang="vi">
+                    <head>
+                        <meta charset="UTF-8">
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                        <style>
+                            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+                            .container { background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 8px; padding: 30px; }
+                            .header { background-color: #28a745; color: white; padding: 15px; border-radius: 8px 8px 0 0; text-align: center; margin: -30px -30px 20px -30px; }
+                            .content { margin: 20px 0; }
+                            .highlight { background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 20px 0; }
+                            .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; font-size: 14px; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="header"><h2>Đặt trước sẵn sàng giao</h2></div>
+                            <div class="content">
+                                <p>Xin chào <strong>${customerName || "Quý khách"}</strong>,</p>
+                                <p>Sản phẩm đặt trước của bạn <strong>${fruitLabel}</strong> đã được phân bổ và sẵn sàng để giao.</p>
+                                <div class="highlight">
+                                    <strong>Vui lòng thanh toán phần tiền còn lại trong vòng ${daysToPay} ngày.</strong><br>
+                                    Nếu không thanh toán đủ trong thời hạn trên, đơn đặt trước có thể bị hủy và <strong>tiền cọc đã thanh toán sẽ không được hoàn lại</strong>.
+                                </div>
+                                <p>Vui lòng đăng nhập vào ứng dụng/website và hoàn tất thanh toán để nhận hàng.</p>
+                            </div>
+                            <div class="footer">
+                                <p>Trân trọng,<br><strong>Smart Fruit Shop</strong></p>
+                            </div>
+                        </div>
+                    </body>
+                    </html>
+                `,
+                text: `
+Xin chào ${customerName || "Quý khách"},
+
+Sản phẩm đặt trước của bạn ${fruitLabel} đã sẵn sàng giao.
+
+Vui lòng thanh toán phần tiền còn lại trong vòng ${daysToPay} ngày. Nếu không thanh toán đủ trong thời hạn trên, đơn có thể bị hủy và tiền cọc đã thanh toán sẽ không được hoàn lại.
+
+Trân trọng,
+Smart Fruit Shop
+                `.trim()
+            };
+
+            const info = await transporter.sendMail(mailOptions);
+            return { status: "OK", message: "Email sent successfully", messageId: info.messageId };
+        } catch (error) {
+            console.error("PreOrder ready email error:", error);
+            return { status: "ERR", message: `Failed to send email: ${error.message}` };
+        }
     }
 };
 

@@ -169,11 +169,15 @@ const getDiscountByIdController = async (req, res) => {
 
 /**
  * Get valid discount codes for customer (CUSTOMER)
- * GET /api/discounts/customer/valid
+ * GET /api/discounts/customer/valid?orderValue=123456
+ * - orderValue: lọc mã thỏa đơn tối thiểu (minOrderValue <= orderValue)
+ * - Tự loại mã user đã dùng (theo req.user)
  */
 const getValidDiscountsForCustomerController = async (req, res) => {
     try {
-        const response = await DiscountService.getValidDiscountsForCustomer();
+        const userId = req.user?._id?.toString() || null;
+        const orderValue = req.query.orderValue != null ? Number(req.query.orderValue) : null;
+        const response = await DiscountService.getValidDiscountsForCustomer(userId, orderValue);
         const code = response?.status === "OK" ? 200 : 400;
         return res.status(code).json(response);
     } catch (error) {

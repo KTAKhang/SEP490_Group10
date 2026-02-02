@@ -4,6 +4,9 @@ const OrderModel = require("../models/OrderModel");
 const OrderDetailModel = require("../models/OrderDetailModel");
 const PaymentModel = require("../models/PaymentModel");
 const OrderStatusModel = require("../models/OrderStatusModel");
+const PreOrderPaymentIntentModel = require("../models/PreOrderPaymentIntentModel");
+const PreOrderRemainingPaymentModel = require("../models/PreOrderRemainingPaymentModel");
+const PreOrderService = require("../services/PreOrderService");
 const { createVnpayUrl, refund } = require("../utils/createVnpayUrl");
 const { vnpConfig } = require("../config/vnpayConfig");
 const { default: mongoose } = require("mongoose");
@@ -149,6 +152,35 @@ const vnpayReturn = async (req, res) => {
 
     if (!orderIdStr || !transactionNo) {
       throw new Error("Missing orderId or transactionNo");
+    }
+
+    /* =======================
+       PRE-ORDER: intent id as vnp_TxnRef
+    ======================= */
+    const preOrderIntent = await PreOrderPaymentIntentModel.findById(orderIdStr).session(session);
+    if (preOrderIntent) {
+      if (responseCode === "00") {
+        await PreOrderService.fulfillPaymentIntent(orderIdStr, session);
+        await session.commitTransaction();
+        return res.redirect("http://localhost:5173/customer/preorder-payment-result?status=success");
+      }
+      preOrderIntent.status = "FAILED";
+      await preOrderIntent.save({ session });
+      await session.commitTransaction();
+      return res.redirect("http://localhost:5173/customer/preorder-payment-result?status=failed");
+    }
+
+    const remainingIntent = await PreOrderRemainingPaymentModel.findById(orderIdStr).session(session);
+    if (remainingIntent) {
+      if (responseCode === "00") {
+        await PreOrderService.fulfillRemainingPayment(orderIdStr, session);
+        await session.commitTransaction();
+        return res.redirect("http://localhost:5173/customer/my-pre-orders?remaining=success");
+      }
+      remainingIntent.status = "FAILED";
+      await remainingIntent.save({ session });
+      await session.commitTransaction();
+      return res.redirect("http://localhost:5173/customer/my-pre-orders?remaining=failed");
     }
 
     const orderId = new mongoose.Types.ObjectId(orderIdStr);

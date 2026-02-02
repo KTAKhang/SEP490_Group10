@@ -380,6 +380,7 @@ const confirmCheckoutAndCreateOrder = async ({
       return {
         success: true,
         payment_url: paymentUrl,
+        order_id: order._id,
       };
     }
 

@@ -240,13 +240,23 @@ const StaffService = {
             .lean();
         const total = await UserModel.countDocuments(filter);
 
+        const [activeCount, inactiveCount] = await Promise.all([
+            UserModel.countDocuments({ ...filter, status: true }),
+            UserModel.countDocuments({ ...filter, status: false }),
+        ]);
+
         const data = users.map(u => ({
             ...u,
             role_name: u.role_id?.name,
             role_id: u.role_id?._id || u.role_id,
         }));
 
-        return { status: "OK", data, pagination: { page: Number(page), limit: Number(limit), total } };
+        return {
+            status: "OK",
+            data,
+            pagination: { page: Number(page), limit: Number(limit), total },
+            statistics: { total, active: activeCount, inactive: inactiveCount },
+        };
     },
 
     /**
@@ -326,13 +336,23 @@ const StaffService = {
             .lean();
         const total = await UserModel.countDocuments(criteria);
 
+        const [activeCount, inactiveCount] = await Promise.all([
+            UserModel.countDocuments({ ...criteria, status: true }),
+            UserModel.countDocuments({ ...criteria, status: false }),
+        ]);
+
         const data = users.map(u => ({
             ...u,
             role_name: u.role_id?.name,
             role_id: u.role_id?._id || u.role_id,
         }));
 
-        return { status: "OK", data, pagination: { page: Number(page), limit: Number(limit), total } };
+        return {
+            status: "OK",
+            data,
+            pagination: { page: Number(page), limit: Number(limit), total },
+            statistics: { total, active: activeCount, inactive: inactiveCount },
+        };
     },
 
     /**
@@ -384,13 +404,23 @@ const StaffService = {
             .lean();
         const total = await UserModel.countDocuments(criteria);
 
+        const [activeCount, inactiveCount] = await Promise.all([
+            UserModel.countDocuments({ ...criteria, status: true }),
+            UserModel.countDocuments({ ...criteria, status: false }),
+        ]);
+
         const data = users.map(u => ({
             ...u,
             role_name: u.role_id?.name,
             role_id: u.role_id?._id || u.role_id,
         }));
 
-        return { status: "OK", data, pagination: { page: Number(page), limit: Number(limit), total } };
+        return {
+            status: "OK",
+            data,
+            pagination: { page: Number(page), limit: Number(limit), total },
+            statistics: { total, active: activeCount, inactive: inactiveCount },
+        };
     }
 };
 
