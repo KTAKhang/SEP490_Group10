@@ -3,11 +3,11 @@ const RoleModel = require("../models/RolesModel");
 const cloudinary = require("../config/cloudinaryConfig");
 const bcrypt = require("bcrypt");
 
-const updateProfile = async (id, { user_name, phone, address }, file) => {
+const updateProfile = async (id, { user_name, phone, address, birthday, gender }, file) => {
     try {
         const user = await UserModel.findById(id);
         if (!user) {
-            return { status: "ERR", message: "Người dùng không tồn tại" };
+            return { status: "ERR", message: "The user does not exist." };
         }
 
         // Kiểm tra trùng tên người dùng
@@ -16,13 +16,15 @@ const updateProfile = async (id, { user_name, phone, address }, file) => {
             _id: { $ne: id },
         });
         if (existingUserName) {
-            return { status: "ERR", message: "Tên người dùng đã được sử dụng!" };
+            return { status: "ERR", message: "The username is already in use!" };
         }
 
         const updateFields = {
             user_name: user_name || user.user_name,
             phone: phone || user.phone,
             address: address || user.address,
+            birthday: birthday || user.birthday,
+            gender:  gender || user.gender,
             avatar: user.avatar,
         };
 
@@ -33,7 +35,7 @@ const updateProfile = async (id, { user_name, phone, address }, file) => {
                     const oldImageId = user.avatar.split("/").pop().split(".")[0];
                     await cloudinary.uploader.destroy(`avatars/${oldImageId}`);
                 } catch (err) {
-                    console.warn("Không thể xóa ảnh cũ:", err.message);
+                    console.warn("Unable to delete old photos:", err.message);
                 }
             }
 
@@ -54,7 +56,7 @@ const updateProfile = async (id, { user_name, phone, address }, file) => {
         }).populate("role_id", "name -_id");
 
         if (!updatedUser) {
-            return { status: "ERR", message: "Cập nhật thất bại" };
+            return { status: "ERR", message: "Update failed" };
         }
 
         const dataOutput = {
@@ -66,11 +68,13 @@ const updateProfile = async (id, { user_name, phone, address }, file) => {
             role_name: updatedUser.role_id?.name || null,
             avatar: updatedUser.avatar,
             status: updatedUser.status,
+            birthday: updatedUser.birthday,
+            gender: updatedUser.gender,
             createdAt: updatedUser.createdAt,
             updatedAt: updatedUser.updatedAt,
         };
 
-        return { status: "OK", message: "Cập nhật thông tin thành công!", data: dataOutput };
+        return { status: "OK", message: "Information updated successfully!", data: dataOutput };
     } catch (error) {
         console.error("UpdateProfile Service Error:", error);
         return { status: "ERR", message: error.message };
@@ -100,6 +104,8 @@ const getUserById = (id) => {
                 phone: dataUser.phone,
                 avatar: dataUser.avatar,
                 status: dataUser.status,
+                birthday: dataUser.birthday,
+                gender: dataUser.gender,
                 createdAt: dataUser.createdAt,
                 updatedAt: dataUser.updatedAt,
             };

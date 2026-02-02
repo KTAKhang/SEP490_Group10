@@ -6,7 +6,7 @@ const OrderService = require("../services/OrderService");
 const createOrder = async (req, res) => {
   try {
     const user_id = req.user._id;
-    const { selected_product_ids, receiverInfo,payment_method } = req.body;
+    const { selected_product_ids, receiverInfo, payment_method } = req.body;
 
     if (
       !Array.isArray(selected_product_ids) ||
@@ -29,28 +29,41 @@ const createOrder = async (req, res) => {
         message: "Thiếu thông tin người nhận",
       });
     }
-if (
-      !payment_method
-    ) {
+
+    if (!/^0\d{9}$/.test(receiverInfo.receiver_phone)) {
       return res.status(400).json({
         success: false,
-        message: "Thiếu phương thức thanh toán",
+        message: "Số điện thoại không hợp lệ",
       });
     }
-    const result =
-      await OrderService.confirmCheckoutAndCreateOrder(
-        user_id,
-        selected_product_ids,
-        receiverInfo,
-        payment_method
-      );
+
+    if (!["COD", "VNPAY"].includes(payment_method)) {
+      return res.status(400).json({
+        success: false,
+        message: "Phương thức thanh toán không hợp lệ",
+      });
+    }
+
+    const normalizedReceiver = {
+      receiver_name: receiverInfo.receiver_name.trim(),
+      receiver_phone: receiverInfo.receiver_phone.trim(),
+      receiver_address: receiverInfo.receiver_address.trim(),
+      note: receiverInfo.note?.trim(),
+    };
+
+    const result = await OrderService.confirmCheckoutAndCreateOrder({
+      user_id,
+      selected_product_ids,
+      receiverInfo: normalizedReceiver,
+      payment_method,
+      ip: req.ip,
+    });
 
     if (!result.success) {
       return res.status(400).json(result);
     }
 
     return res.status(201).json(result);
-
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -79,7 +92,7 @@ const updateOrder = async (req, res) => {
       status_name,
       req.user._id,
       req.user.role,
-      note || ""
+      note || "",
     );
 
     return res.status(200).json({
@@ -87,7 +100,6 @@ const updateOrder = async (req, res) => {
       message: "Cập nhật trạng thái đơn hàng thành công",
       ...result,
     });
-
   } catch (error) {
     return res.status(400).json({
       success: false,
@@ -118,7 +130,6 @@ const cancelOrder = async (req, res) => {
       message: "Hủy đơn hàng thành công",
       ...result,
     });
-
   } catch (error) {
     return res.status(400).json({
       success: false,
@@ -127,8 +138,117 @@ const cancelOrder = async (req, res) => {
   }
 };
 
+const retryVnpayPayment = async (req, res) => {
+  try {
+    const user_id = req.user._id;
+    const {order_id} = req.body;
+
+    if (!order_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Thiếu order_id",
+      });
+    }
+    const result = await OrderService.retryVnpayPayment({
+      user_id,
+      order_id,
+      ip: req.ip,
+    });
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    return res.status(201).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Retry Order Fail",
+    });
+  }
+};
+/* =====================================================
+   CUSTOMER ORDER HISTORY
+===================================================== */
+const getMyOrders = async (req, res) => {
+  try {
+    const user_id = req.user._id;
+    const response = await OrderService.getOrdersByUser(user_id, req.query);
+    if (response.status === "ERR") return res.status(400).json(response);
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message || "Lấy lịch sử mua hàng thất bại",
+    });
+  }
+};
+
+const getMyOrderById = async (req, res) => {
+  try {
+    const user_id = req.user._id;
+    const response = await OrderService.getOrderByUser(req.params.id, user_id);
+    if (response.status === "ERR") return res.status(404).json(response);
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message || "Lấy chi tiết đơn hàng thất bại",
+    });
+  }
+};
+
+/* =====================================================
+   ADMIN ORDER MANAGEMENT
+===================================================== */
+const getOrdersAdmin = async (req, res) => {
+  try {
+    const response = await OrderService.getOrdersForAdmin(req.query);
+    if (response.status === "ERR") return res.status(400).json(response);
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message || "Lấy danh sách đơn hàng thất bại",
+    });
+  }
+};
+
+const getOrderDetailAdmin = async (req, res) => {
+  try {
+    const response = await OrderService.getOrderDetailForAdmin(req.params.id);
+    if (response.status === "ERR") return res.status(404).json(response);
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message || "Lấy chi tiết đơn hàng thất bại",
+    });
+  }
+};
+
+const getOrderStatusStatsAdmin = async (req, res) => {
+  try {
+    const response = await OrderService.getOrderStatusCounts();
+    if (response.status === "ERR") return res.status(400).json(response);
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message || "Lấy thống kê đơn hàng thất bại",
+    });
+  }
+};
+
 module.exports = {
   createOrder,
   updateOrder,
   cancelOrder,
+  retryVnpayPayment,
+  getMyOrders,
+  getMyOrderById,
+  getOrdersAdmin,
+  getOrderDetailAdmin,
+  getOrderStatusStatsAdmin,
+
 };

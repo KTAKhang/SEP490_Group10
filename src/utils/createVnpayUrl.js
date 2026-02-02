@@ -35,7 +35,7 @@ const createVnpayUrl = (orderId, amount, ipAddr = "127.0.0.1") => {
     vnp_TxnRef: orderId.toString(),
     vnp_OrderInfo: `Thanh toán cho đơn hàng ${orderId}`,
     vnp_OrderType: "billpayment",
-    vnp_Amount: amount,
+    vnp_Amount: amount*100,
     vnp_ReturnUrl: vnpConfig.returnUrl,
     vnp_IpAddr: normalizedIp,
     vnp_CreateDate: yyyyMMddHHmmss,

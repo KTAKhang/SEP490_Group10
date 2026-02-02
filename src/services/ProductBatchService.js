@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const ProductModel = require("../models/ProductModel");
 const ProductBatchHistoryModel = require("../models/ProductBatchHistoryModel");
 const InventoryTransactionModel = require("../models/InventoryTransactionModel");
+const HarvestBatchModel = require("../models/HarvestBatchModel");
 const { getTodayInVietnam, formatDateVN, compareDates } = require("../utils/dateVN");
 
 /**
@@ -126,9 +127,35 @@ const resetProductForNewBatch = async (productId, completionReason = "SOLD_OUT")
       discardedQuantity = Math.max(0, batchSnapshot.receivedQuantity - soldQuantity);
     }
 
+    // ✅ Tìm harvestBatch liên quan (nếu có)
+    // Tìm harvestBatch đã được nhập kho (receivedQuantity > 0)
+    // Ưu tiên harvestBatch có harvestDate gần với warehouseEntryDate nhất
+    let harvestBatchId = null;
+    if (product.supplier && batchSnapshot.warehouseEntryDateStr) {
+      try {
+        const harvestBatch = await HarvestBatchModel.findOne({
+          product: new mongoose.Types.ObjectId(productId),
+          supplier: product.supplier,
+          status: "APPROVED",
+          receivedQuantity: { $gt: 0 }, // Đã được nhập kho
+        })
+          .sort({ harvestDate: -1 }) // Ưu tiên harvestBatch mới nhất
+          .lean()
+          .session(session);
+
+        if (harvestBatch) {
+          harvestBatchId = harvestBatch._id;
+        }
+      } catch (error) {
+        console.error("Error finding harvestBatch:", error);
+        // Không throw error, chỉ log (không bắt buộc phải có harvestBatch)
+      }
+    }
+
     // ✅ Tạo batch history với dữ liệu snapshot (TRƯỚC KHI reset)
     const batchHistory = new ProductBatchHistoryModel({
       product: new mongoose.Types.ObjectId(productId),
+      harvestBatch: harvestBatchId, // ✅ Liên kết với harvestBatch nếu có
       batchNumber: batchSnapshot.batchNumber,
       plannedQuantity: batchSnapshot.plannedQuantity,
       receivedQuantity: batchSnapshot.receivedQuantity,
@@ -181,112 +208,114 @@ const resetProductForNewBatch = async (productId, completionReason = "SOLD_OUT")
 };
 
 /**
- * Đánh dấu products hết hạn cần reset (chạy bởi scheduled job)
+ * Tự động reset products hết hạn (chạy bởi scheduled job)
  * Tìm tất cả products có expiryDateStr < today và onHandQuantity > 0
- * Chỉ đánh dấu, không tự động reset (cần admin xác nhận)
- * @returns {Promise<Object>} { status, message, data: { markedCount, markedProducts } }
+ * Tự động reset và lưu vào ProductBatchHistoryModel
+ * @returns {Promise<Object>} { status, message, data: { resetCount, resetProducts } }
  */
-const markExpiredProductsForReset = async () => {
+const autoResetExpiredProducts = async () => {
   try {
     const today = getTodayInVietnam();
     const todayStr = formatDateVN(today);
 
-    // Tìm products hết hạn và còn tồn kho, chưa được đánh dấu
+    // Tìm products hết hạn và còn tồn kho
     const expiredProducts = await ProductModel.find({
       expiryDateStr: { $lt: todayStr },
       onHandQuantity: { $gt: 0 },
       warehouseEntryDateStr: { $ne: null }, // Đã nhập kho
-      pendingBatchReset: { $ne: true }, // Chưa được đánh dấu
     });
 
     if (expiredProducts.length === 0) {
       return {
         status: "OK",
-        message: "Không có sản phẩm nào hết hạn cần đánh dấu",
+        message: "Không có sản phẩm nào hết hạn cần reset",
         data: {
-          markedCount: 0,
-          markedProducts: [],
+          resetCount: 0,
+          resetProducts: [],
         },
       };
     }
 
-    const markedResults = [];
+    const resetResults = [];
 
-    // Đánh dấu từng product
+    // Tự động reset từng product
     for (const product of expiredProducts) {
       try {
-        product.pendingBatchReset = true;
-        product.resetReason = "EXPIRED";
-        await product.save();
-
-        markedResults.push({
-          productId: product._id.toString(),
-          productName: product.name,
-          batchNumber: product.batchNumber || 1,
-          onHandQuantity: product.onHandQuantity,
-          expiryDateStr: product.expiryDateStr,
-        });
+        const result = await resetProductForNewBatch(product._id.toString(), "EXPIRED");
+        
+        if (result.status === "OK") {
+          resetResults.push({
+            productId: product._id.toString(),
+            productName: product.name,
+            batchNumber: result.data.batchHistory.batchNumber,
+            onHandQuantity: product.onHandQuantity,
+            expiryDateStr: product.expiryDateStr,
+          });
+        } else {
+          console.error(`Error resetting product ${product._id}:`, result.message);
+        }
       } catch (error) {
-        console.error(`Error marking product ${product._id}:`, error);
+        console.error(`Error resetting product ${product._id}:`, error);
       }
     }
 
     return {
       status: "OK",
-      message: `Đã đánh dấu ${markedResults.length} sản phẩm hết hạn cần reset`,
+      message: `Đã tự động reset ${resetResults.length} sản phẩm hết hạn`,
       data: {
-        markedCount: markedResults.length,
-        markedProducts: markedResults,
+        resetCount: resetResults.length,
+        resetProducts: resetResults,
       },
     };
   } catch (error) {
-    console.error("Error in markExpiredProductsForReset:", error);
+    console.error("Error in autoResetExpiredProducts:", error);
     return { status: "ERR", message: error.message };
   }
 };
 
 /**
- * Đánh dấu product khi bán hết (onHandQuantity = 0 sau khi ISSUE)
+ * Tự động reset product khi bán hết (onHandQuantity = 0 sau khi ISSUE)
  * Được gọi từ InventoryTransactionService sau khi tạo ISSUE transaction
- * Chỉ đánh dấu, không tự động reset (cần admin xác nhận)
+ * Tự động reset và lưu vào ProductBatchHistoryModel
  * @param {String} productId - Product ID
  * @returns {Promise<Object>} { status, message, data }
  */
-const markSoldOutProductForReset = async (productId) => {
+const autoResetSoldOutProduct = async (productId) => {
   try {
     const product = await ProductModel.findById(productId);
     if (!product) {
       return { status: "ERR", message: "Sản phẩm không tồn tại" };
     }
 
-    // Chỉ đánh dấu nếu onHandQuantity = 0, đã có warehouseEntryDate, và chưa được đánh dấu
+    // Tự động reset nếu onHandQuantity = 0 và đã có warehouseEntryDate
     if (
       product.onHandQuantity === 0 &&
-      (product.warehouseEntryDate || product.warehouseEntryDateStr) &&
-      !product.pendingBatchReset
+      (product.warehouseEntryDate || product.warehouseEntryDateStr)
     ) {
-      product.pendingBatchReset = true;
-      product.resetReason = "SOLD_OUT";
-      await product.save();
-
-      return {
-        status: "OK",
-        message: "Đã đánh dấu sản phẩm cần reset (bán hết)",
-        data: {
-          productId: product._id.toString(),
-          productName: product.name,
-          batchNumber: product.batchNumber || 1,
-        },
-      };
+      const result = await resetProductForNewBatch(productId, "SOLD_OUT");
+      
+      if (result.status === "OK") {
+        return {
+          status: "OK",
+          message: "Đã tự động reset sản phẩm (bán hết)",
+          data: {
+            productId: product._id.toString(),
+            productName: product.name,
+            batchNumber: result.data.batchHistory.batchNumber,
+          },
+        };
+      }
+      
+      return result;
     }
 
     return {
       status: "OK",
-      message: "Sản phẩm chưa đủ điều kiện để đánh dấu reset",
+      message: "Sản phẩm chưa đủ điều kiện để reset",
       data: null,
     };
   } catch (error) {
-    console.error("Error in markSoldOutProductForReset:", error);
+    console.error("Error in autoResetSoldOutProduct:", error);
     return { status: "ERR", message: error.message };
   }
 };
@@ -336,6 +365,7 @@ const getProductBatchHistory = async (productId, filters = {}) => {
 
     const [data, total] = await Promise.all([
       ProductBatchHistoryModel.find(query)
+        .populate("harvestBatch", "batchCode batchNumber harvestDate quantity receivedQuantity") // ✅ Populate harvestBatch
         .sort(sortObj)
         .skip(skip)
         .limit(limitNum)
@@ -359,115 +389,11 @@ const getProductBatchHistory = async (productId, filters = {}) => {
   }
 };
 
-/**
- * Lấy danh sách sản phẩm cần reset (chờ admin xác nhận) - có search, sort, filter, pagination
- * @param {Object} filters - { page, limit, search, resetReason, sortBy, sortOrder }
- * @returns {Promise<Object>} { status, message, data, pagination }
- */
-const getPendingResetProducts = async (filters = {}) => {
-  try {
-    const { page = 1, limit = 20, search = "", resetReason, sortBy = "updatedAt", sortOrder = "desc" } = filters;
-    const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
-    const skip = (pageNum - 1) * limitNum;
-
-    const query = {
-      pendingBatchReset: true,
-    };
-
-    // Filter theo resetReason
-    if (resetReason && ["SOLD_OUT", "EXPIRED"].includes(resetReason)) {
-      query.resetReason = resetReason;
-    }
-
-    // Search theo tên sản phẩm hoặc brand
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { brand: { $regex: search, $options: "i" } },
-      ];
-    }
-
-    // Sort options
-    const allowedSortFields = ["name", "brand", "batchNumber", "updatedAt", "createdAt", "onHandQuantity", "receivedQuantity"];
-    const sortField = allowedSortFields.includes(sortBy) ? sortBy : "updatedAt";
-    const sortDirection = sortOrder === "asc" ? 1 : -1;
-    const sortObj = { [sortField]: sortDirection };
-
-    const [data, total] = await Promise.all([
-      ProductModel.find(query)
-        .populate("category", "name status")
-        .select("name brand plannedQuantity receivedQuantity onHandQuantity batchNumber warehouseEntryDate warehouseEntryDateStr expiryDate expiryDateStr resetReason createdAt updatedAt")
-        .sort(sortObj)
-        .skip(skip)
-        .limit(limitNum)
-        .lean(),
-      ProductModel.countDocuments(query),
-    ]);
-
-    return {
-      status: "OK",
-      message: "Lấy danh sách sản phẩm cần reset thành công",
-      data,
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total,
-        totalPages: Math.ceil(total / limitNum),
-      },
-    };
-  } catch (error) {
-    return { status: "ERR", message: error.message };
-  }
-};
-
-/**
- * Admin xác nhận reset sản phẩm (tạo batch history + reset fields)
- * @param {String} productId - Product ID
- * @returns {Promise<Object>} { status, message, data }
- */
-const confirmResetProduct = async (productId) => {
-  try {
-    const product = await ProductModel.findById(productId);
-    if (!product) {
-      return { status: "ERR", message: "Sản phẩm không tồn tại" };
-    }
-
-    if (!product.pendingBatchReset) {
-      return { status: "ERR", message: "Sản phẩm không có trong danh sách cần reset" };
-    }
-
-    const resetReason = product.resetReason || "SOLD_OUT";
-
-    // Reset product (tạo batch history + reset fields)
-    const result = await resetProductForNewBatch(productId, resetReason);
-
-    if (result.status === "OK") {
-      // Clear pending flag (đã được reset)
-      product.pendingBatchReset = false;
-      product.resetReason = null;
-      await product.save();
-
-      return {
-        status: "OK",
-        message: `Đã xác nhận reset sản phẩm. Đã lưu lịch sử lô hàng batch #${result.data.batchHistory.batchNumber}`,
-        data: result.data,
-      };
-    }
-
-    return result;
-  } catch (error) {
-    console.error("Error in confirmResetProduct:", error);
-    return { status: "ERR", message: error.message };
-  }
-};
 
 module.exports = {
   calculateSoldQuantity,
   resetProductForNewBatch,
-  markExpiredProductsForReset,
-  markSoldOutProductForReset,
+  autoResetExpiredProducts,
+  autoResetSoldOutProduct,
   getProductBatchHistory,
-  getPendingResetProducts,
-  confirmResetProduct,
 };

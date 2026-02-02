@@ -22,7 +22,14 @@ const productSchema = new mongoose.Schema(
       maxlength: [200, "short_desc must be at most 200 characters"],
     },
 
-    price: { type: Number, required: true, min: 0 },
+    price: { type: Number, required: true, min: 0 }, // Giá bán
+
+    // ✅ Giá nhập hàng (từ supplier) - tự động sync từ Supplier.purchaseCosts
+    purchasePrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
 
     // Admin set lúc tạo
     plannedQuantity: {
@@ -108,7 +115,26 @@ const productSchema = new mongoose.Schema(
       },
     },
 
-    brand: { type: String, required: true, trim: true }, // ✅ Bắt buộc phải có brand
+    // Đánh giá sản phẩm
+    avgRating: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 5,
+    },
+    reviewCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    brand: { type: String, required: true, trim: true }, // ✅ Bắt buộc phải có brand (tên nhà cung cấp)
+    // ✅ Liên kết đến Supplier (tự động set khi admin chọn brand)
+    supplier: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "suppliers",
+      index: true,
+    },
 
     // Số lô (tăng dần mỗi lần reset để nhập lô mới)
     batchNumber: {
@@ -152,21 +178,12 @@ const productSchema = new mongoose.Schema(
       match: [/^\d{4}-\d{2}-\d{2}$/, "expiryDateStr phải có format YYYY-MM-DD"],
     },
 
-    // ✅ Đánh dấu sản phẩm cần reset (chờ admin xác nhận)
-    pendingBatchReset: {
-      type: Boolean,
-      default: false,
-      index: true,
-    },
-
-    // ✅ Lý do cần reset: "SOLD_OUT" | "EXPIRED"
-    resetReason: {
-      type: String,
-      enum: ["SOLD_OUT", "EXPIRED"],
-      default: null,
-    },
   },
-  { timestamps: true }
+  { 
+    timestamps: true,
+    toJSON: { virtuals: true }, // ✅ Enable virtuals khi convert sang JSON
+    toObject: { virtuals: true }, // ✅ Enable virtuals khi convert sang Object
+  }
 );
 
 // ✅ Unique constraint: không cho phép trùng (name + brand)
@@ -175,6 +192,19 @@ productSchema.index({ name: 1, brand: 1 }, { unique: true });
 // Virtual: available = onHand - reserved
 productSchema.virtual("availableQuantity").get(function () {
   return Math.max(0, (this.onHandQuantity || 0) - (this.reservedQuantity || 0));
+});
+
+// Virtual: profit = price - purchasePrice
+productSchema.virtual("profit").get(function () {
+  return Math.max(0, (this.price || 0) - (this.purchasePrice || 0));
+});
+
+// Virtual: profitMargin = (price - purchasePrice) / price * 100 (%)
+productSchema.virtual("profitMargin").get(function () {
+  const price = this.price || 0;
+  const purchasePrice = this.purchasePrice || 0;
+  if (price === 0) return 0;
+  return Math.round(((price - purchasePrice) / price) * 100 * 100) / 100; // Làm tròn 2 chữ số thập phân
 });
 
 

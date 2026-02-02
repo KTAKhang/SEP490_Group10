@@ -15,7 +15,7 @@ const MAX_HOLD_PER_DAY = 3;
 const checkoutHold = async (
   user_id,
   selected_product_ids,
-  checkout_session_id
+  checkout_session_id,
 ) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -24,29 +24,24 @@ const checkoutHold = async (
     /* =======================
        0️⃣ LOAD CART
     ======================= */
-    const cart = await CartModel
-      .findOne({ user_id })
-      .session(session);
+    const cart = await CartModel.findOne({ user_id }).session(session);
 
     if (!cart) throw new Error("Giỏ hàng trống");
 
-    const cartItems = await CartDetailModel
-      .find({
-        cart_id: cart._id,
-        product_id: { $in: selected_product_ids }
-      })
-      .session(session);
+    const cartItems = await CartDetailModel.find({
+      cart_id: cart._id,
+      product_id: { $in: selected_product_ids },
+    }).session(session);
 
-    if (!cartItems.length)
-      throw new Error("Không có sản phẩm được chọn");
+    if (!cartItems.length) throw new Error("Không có sản phẩm được chọn");
 
     /* =======================
        LOOP ITEMS
     ======================= */
     for (const item of cartItems) {
-      const product = await ProductModel
-        .findById(item.product_id)
-        .session(session);
+      const product = await ProductModel.findById(item.product_id).session(
+        session,
+      );
 
       if (!product || !product.status)
         throw new Error(`Sản phẩm ${product?.name || ""} không khả dụng`);
@@ -60,34 +55,27 @@ const checkoutHold = async (
       /* =======================
          2️⃣ RESUME CHECKOUT CŨ
       ======================= */
-      const existingLock = await StockLockModel
-        .findOne({
-          user_id,
-          product_id: product._id,
-          checkout_session_id,
-          expiresAt: { $gt: new Date() }
-        })
-        .session(session);
+      const existingLock = await StockLockModel.findOne({
+        user_id,
+        product_id: product._id,
+        checkout_session_id,
+        expiresAt: { $gt: new Date() },
+      }).session(session);
 
-      if (existingLock) {
-        // 👉 User reload / mở lại web → giữ nguyên lock
-        continue;
-      }
+      if (existingLock) continue;
 
       /* =======================
          3️⃣ CHECK COOLDOWN
       ======================= */
-      const cooldown = await StockLockModel
-        .findOne({
-          user_id,
-          product_id: product._id,
-          cooldownUntil: { $gt: new Date() }
-        })
-        .session(session);
+      const cooldown = await StockLockModel.findOne({
+        user_id,
+        product_id: product._id,
+        cooldownUntil: { $gt: new Date() },
+      }).session(session);
 
       if (cooldown)
         throw new Error(
-          `Bạn vừa giữ sản phẩm ${product.name}, vui lòng thử lại sau`
+          `Bạn vừa giữ sản phẩm ${product.name}, vui lòng thử lại sau`,
         );
 
       /* =======================
@@ -96,47 +84,44 @@ const checkoutHold = async (
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
 
-      const todayCount = await StockLockModel
-        .countDocuments({
-          user_id,
-          product_id: product._id,
-          createdAt: { $gte: startOfDay }
-        })
-        .session(session);
+      const todayCount = await StockLockModel.countDocuments({
+        user_id,
+        product_id: product._id,
+        createdAt: { $gte: startOfDay },
+      }).session(session);
 
       if (todayCount >= MAX_HOLD_PER_DAY)
         throw new Error(
-          `Bạn đã giữ sản phẩm ${product.name} quá nhiều lần hôm nay`
+          `Bạn đã giữ sản phẩm ${product.name} quá nhiều lần hôm nay`,
         );
 
       /* =======================
          5️⃣ CHECK % KHO (LOCK CHƯA HẾT HẠN)
       ======================= */
-      const lockedAgg = await StockLockModel
-        .aggregate([
-          {
-            $match: {
-              product_id: product._id,
-              expiresAt: { $gt: new Date() }
-            }
+      const lockedAgg = await StockLockModel.aggregate([
+        {
+          $match: {
+            product_id: product._id,
+            expiresAt: { $gt: new Date() },
           },
-          {
-            $group: {
-              _id: null,
-              total: { $sum: "$quantity" }
-            }
-          }
-        ])
-        .session(session);
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: "$quantity" },
+          },
+        },
+      ]).session(session);
 
       const lockedQty = lockedAgg[0]?.total || 0;
-      const maxLock = Math.floor(
-        product.onHandQuantity * MAX_HOLD_PERCENT
+      const maxLock = Math.max(
+        1,
+        Math.floor(product.onHandQuantity * MAX_HOLD_PERCENT),
       );
 
       if (lockedQty + item.quantity > maxLock)
         throw new Error(
-          `Sản phẩm ${product.name} đang được nhiều người thanh toán, vui lòng giảm số lượng`
+          `Sản phẩm ${product.name} đang được nhiều người thanh toán`,
         );
 
       /* =======================
@@ -146,9 +131,9 @@ const checkoutHold = async (
         {
           user_id,
           product_id: product._id,
-          checkout_session_id: { $ne: checkout_session_id }
+          checkout_session_id: { $ne: checkout_session_id },
         },
-        { session }
+        { session },
       );
 
       /* =======================
@@ -161,36 +146,61 @@ const checkoutHold = async (
             product_id: product._id,
             quantity: item.quantity,
             checkout_session_id,
-            expiresAt: new Date(
-              Date.now() + HOLD_MINUTES * 60 * 1000
-            ),
-            cooldownUntil: new Date(
-              Date.now() + COOLDOWN_MINUTES * 60 * 1000
-            )
-          }
+            expiresAt: new Date(Date.now() + HOLD_MINUTES * 60 * 1000),
+            cooldownUntil: new Date(Date.now() + COOLDOWN_MINUTES * 60 * 1000),
+          },
         ],
-        { session }
+        { session },
       );
     }
 
     /* =======================
-       COMMIT
+       COMMIT TRANSACTION
     ======================= */
     await session.commitTransaction();
     session.endSession();
 
+    /* =======================
+       🔥 RETURN CHỈ ITEM ĐƯỢC SELECT
+    ======================= */
+    const checkoutItems = await CartDetailModel.find({
+      cart_id: cart._id,
+      product_id: { $in: selected_product_ids },
+    }).populate("product_id", "name images price onHandQuantity status");
+
+    const formattedItems = checkoutItems.map((item) => ({
+      product_id: item.product_id._id,
+      name: item.product_id.name,
+      image: item.product_id.images?.[0],
+      price: item.price,
+      quantity: item.quantity,
+      in_stock: item.product_id.onHandQuantity,
+      status: item.product_id.status,
+      warning: !item.product_id.status
+        ? "Sản phẩm đã ngừng bán"
+        : item.product_id.onHandQuantity <= 0
+          ? "Sản phẩm tạm hết hàng"
+          : "Còn hàng",
+      subtotal: item.quantity * item.price,
+    }));
+
     return {
       status: "OK",
-      message: "Đã giữ hàng, vui lòng thanh toán trong 15 phút"
+      message: "Đã giữ hàng, vui lòng thanh toán trong 15 phút",
+      checkout_session_id,
+      item_count: formattedItems.length,
+      items: formattedItems,
     };
-
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
 
     return {
       status: "ERR",
-      message: error.message || "Checkout hold thất bại"
+      message: error.message || "Checkout hold thất bại",
+      checkout_session_id,
+      item_count: 0,
+      items: [],
     };
   }
 };
@@ -202,15 +212,15 @@ const cancelCheckout = async (user_id, checkout_session_id) => {
 
   await StockLockModel.deleteMany({
     user_id,
-    checkout_session_id
+    checkout_session_id,
   });
 
   return {
     status: "OK",
-    message: "Đã huỷ checkout, hàng đã được trả lại kho"
+    message: "Đã huỷ checkout, hàng đã được trả lại kho",
   };
 };
 module.exports = {
-    checkoutHold,
-    cancelCheckout
+  checkoutHold,
+  cancelCheckout,
 };

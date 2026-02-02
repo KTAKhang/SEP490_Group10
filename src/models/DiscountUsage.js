@@ -31,6 +31,18 @@ const discountUsageSchema = new mongoose.Schema(
             min: 0
         },
 
+        orderId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "orders",
+            default: null
+        },
+
+        orderValue: {
+            type: Number,
+            default: 0,
+            min: 0
+        },
+
         usedAt: {
             type: Date,
             default: Date.now

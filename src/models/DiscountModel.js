@@ -97,6 +97,9 @@ const discountSchema = new mongoose.Schema(
     }
 );
 
+
+// discountSchema.index({ code: 1 });
+
 discountSchema.index({ status: 1, isActive: 1 });
 discountSchema.index({ startDate: 1, endDate: 1 });
 

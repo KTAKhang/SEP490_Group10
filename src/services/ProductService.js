@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const ProductModel = require("../models/ProductModel");
 const CategoryModel = require("../models/CategoryModel");
+const SupplierModel = require("../models/SupplierModel");
 const cloudinary = require("../config/cloudinaryConfig");
 const { getTodayInVietnam, formatDateVN, calculateDaysBetween } = require("../utils/dateVN");
 
@@ -31,9 +32,35 @@ const createProduct = async (payload = {}) => {
       return { status: "ERR", message: "Không thể chọn category đã bị ẩn" };
     }
 
+    // ✅ Validate brand phải là một supplier name tồn tại và đang hoạt động
+    const normalizedBrand = brand.toString().trim();
+    const supplierDoc = await SupplierModel.findOne({
+      name: normalizedBrand,
+      status: true,
+      cooperationStatus: "ACTIVE",
+    });
+    
+    if (!supplierDoc) {
+      return {
+        status: "ERR",
+        message: `Brand "${normalizedBrand}" không tồn tại hoặc không đang hoạt động. Vui lòng chọn một nhà cung cấp hợp lệ.`,
+      };
+    }
+
+    // ✅ Lấy giá nhập từ Supplier.purchaseCosts nếu có (hoặc từ payload nếu được cung cấp)
+    let purchasePrice = 0;
+    if (payload.purchasePrice !== undefined) {
+      purchasePrice = Number(payload.purchasePrice) || 0;
+      if (purchasePrice < 0) {
+        return { status: "ERR", message: "Giá nhập hàng phải >= 0" };
+      }
+    } else {
+      // Nếu không có trong payload, thử lấy từ Supplier.purchaseCosts (sẽ được set sau khi tạo product)
+      // Hoặc có thể để mặc định 0, QC Staff sẽ update sau
+    }
+
     // ✅ Check unique constraint: không cho phép trùng (name + brand)
     const normalizedName = name.toString().trim();
-    const normalizedBrand = brand.toString().trim();
     const existingProduct = await ProductModel.findOne({
       name: normalizedName,
       brand: normalizedBrand,
@@ -63,18 +90,35 @@ const createProduct = async (payload = {}) => {
       name: name.toString().trim(),
       short_desc: (short_desc ?? "").toString(),
       price: Number(price),
+      purchasePrice: purchasePrice, // ✅ Giá nhập hàng
       plannedQuantity: Number(plannedQuantity),
       category: new mongoose.Types.ObjectId(category),
       images: newImages,
       imagePublicIds: newImagePublicIds,
       brand: normalizedBrand,
+      supplier: supplierDoc._id, // ✅ Liên kết đến Supplier
       detail_desc: (detail_desc ?? "").toString(),
       status: status ?? true,
     });
 
     await product.save();
 
-    const populated = await ProductModel.findById(product._id).populate("category", "name");
+    // ✅ Nếu có purchasePrice, sync vào Supplier.purchaseCosts
+    if (purchasePrice > 0) {
+      if (!supplierDoc.purchaseCosts) {
+        supplierDoc.purchaseCosts = new Map();
+      }
+      supplierDoc.purchaseCosts.set(product._id.toString(), purchasePrice);
+      await supplierDoc.save();
+    }
+
+    // ✅ Cập nhật totalProductsSupplied của supplier
+    supplierDoc.totalProductsSupplied = (supplierDoc.totalProductsSupplied || 0) + 1;
+    await supplierDoc.save();
+
+    const populated = await ProductModel.findById(product._id)
+      .populate("category", "name")
+      .populate("supplier", "name type cooperationStatus");
 
     return { status: "OK", message: "Tạo sản phẩm thành công", data: populated };
   } catch (error) {
@@ -114,7 +158,12 @@ const getProducts = async (filters = {}) => {
     const sortObj = { [sortField]: sortDirection };
 
     const [data, total] = await Promise.all([
-      ProductModel.find(query).populate("category", "name").sort(sortObj).skip(skip).limit(limitNum),
+      ProductModel.find(query)
+        .populate("category", "name")
+        .populate("supplier", "name type cooperationStatus")
+        .sort(sortObj)
+        .skip(skip)
+        .limit(limitNum),
       ProductModel.countDocuments(query),
     ]);
 
@@ -180,6 +229,27 @@ const updateProductAdmin = async (id, payload = {}) => {
       product.price = p;
     }
 
+    // ✅ Xử lý purchasePrice
+    if (payload.purchasePrice !== undefined) {
+      const purchasePrice = Number(payload.purchasePrice);
+      if (Number.isNaN(purchasePrice) || purchasePrice < 0) {
+        return { status: "ERR", message: "Giá nhập hàng phải >= 0" };
+      }
+      product.purchasePrice = purchasePrice;
+
+      // ✅ Sync purchasePrice vào Supplier.purchaseCosts
+      if (product.supplier) {
+        const supplier = await SupplierModel.findById(product.supplier);
+        if (supplier) {
+          if (!supplier.purchaseCosts) {
+            supplier.purchaseCosts = new Map();
+          }
+          supplier.purchaseCosts.set(product._id.toString(), purchasePrice);
+          await supplier.save();
+        }
+      }
+    }
+
     if (payload.plannedQuantity !== undefined) {
       const planned = Number(payload.plannedQuantity);
       if (Number.isNaN(planned) || planned < 0) return { status: "ERR", message: "plannedQuantity không hợp lệ" };
@@ -200,6 +270,65 @@ const updateProductAdmin = async (id, payload = {}) => {
       }
       
       product.category = new mongoose.Types.ObjectId(payload.category);
+    }
+
+    // ✅ Xử lý brand và supplier liên kết
+    if (payload.brand !== undefined) {
+      const newBrand = payload.brand.toString().trim();
+      if (!newBrand) {
+        return { status: "ERR", message: "Brand là bắt buộc" };
+      }
+
+      // Validate brand phải là một supplier name tồn tại và đang hoạt động
+      const supplierDoc = await SupplierModel.findOne({
+        name: newBrand,
+        status: true,
+        cooperationStatus: "ACTIVE",
+      });
+
+      if (!supplierDoc) {
+        return {
+          status: "ERR",
+          message: `Brand "${newBrand}" không tồn tại hoặc không đang hoạt động. Vui lòng chọn một nhà cung cấp hợp lệ.`,
+        };
+      }
+
+      // Kiểm tra unique constraint nếu brand thay đổi
+      if (product.brand !== newBrand) {
+        const existingProduct = await ProductModel.findOne({
+          _id: { $ne: id },
+          name: product.name,
+          brand: newBrand,
+        });
+        if (existingProduct) {
+          return {
+            status: "ERR",
+            message: `Sản phẩm "${product.name}" với brand "${newBrand}" đã tồn tại. Vui lòng chọn brand khác.`,
+          };
+        }
+      }
+
+      // ✅ Cập nhật totalProductsSupplied của supplier khi brand thay đổi
+      const oldSupplierId = product.supplier ? product.supplier.toString() : null;
+      const newSupplierId = supplierDoc._id.toString();
+      
+      // Nếu supplier thay đổi, cập nhật thống kê
+      if (oldSupplierId !== newSupplierId) {
+        // Giảm số lượng của supplier cũ (nếu có)
+        if (oldSupplierId) {
+          const oldSupplier = await SupplierModel.findById(oldSupplierId);
+          if (oldSupplier && oldSupplier.totalProductsSupplied > 0) {
+            oldSupplier.totalProductsSupplied = Math.max(0, (oldSupplier.totalProductsSupplied || 0) - 1);
+            await oldSupplier.save();
+          }
+        }
+        // Tăng số lượng của supplier mới
+        supplierDoc.totalProductsSupplied = (supplierDoc.totalProductsSupplied || 0) + 1;
+        await supplierDoc.save();
+      }
+
+      product.brand = newBrand;
+      product.supplier = supplierDoc._id; // ✅ Cập nhật supplier reference
     }
 
     // Xử lý ảnh: validate trước, set vào product, save, rồi mới xóa Cloudinary
@@ -229,7 +358,7 @@ const updateProductAdmin = async (id, payload = {}) => {
       product.imagePublicIds = newImagePublicIds;
     }
     
-    if (payload.brand !== undefined) product.brand = (payload.brand ?? "").toString();
+    // Brand đã được xử lý ở trên với supplier validation
     if (payload.detail_desc !== undefined) product.detail_desc = (payload.detail_desc ?? "").toString();
     if (payload.status !== undefined) product.status = payload.status;
 
@@ -247,7 +376,9 @@ const updateProductAdmin = async (id, payload = {}) => {
       }
     }
 
-    const populated = await ProductModel.findById(product._id).populate("category", "name");
+    const populated = await ProductModel.findById(product._id)
+      .populate("category", "name")
+      .populate("supplier", "name type cooperationStatus");
     return { status: "OK", message: "Cập nhật sản phẩm thành công", data: populated };
   } catch (error) {
     return { status: "ERR", message: error.message };
