@@ -6,7 +6,7 @@ const OrderService = require("../services/OrderService");
 const createOrder = async (req, res) => {
   try {
     const user_id = req.user._id;
-    const { selected_product_ids, receiverInfo, payment_method } = req.body;
+    const { selected_product_ids, receiverInfo, payment_method,city } = req.body;
 
     if (
       !Array.isArray(selected_product_ids) ||
@@ -14,7 +14,7 @@ const createOrder = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "Vui lòng chọn ít nhất một sản phẩm",
+        message: "Please select at least one product",
       });
     }
 
@@ -26,21 +26,29 @@ const createOrder = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "Thiếu thông tin người nhận",
+        message: "Recipient information is missing",
+      });
+    }
+    if (
+      !city
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing provinces/cities",
       });
     }
 
     if (!/^0\d{9}$/.test(receiverInfo.receiver_phone)) {
       return res.status(400).json({
         success: false,
-        message: "Số điện thoại không hợp lệ",
+        message: "Invalid phone number",
       });
     }
 
     if (!["COD", "VNPAY"].includes(payment_method)) {
       return res.status(400).json({
         success: false,
-        message: "Phương thức thanh toán không hợp lệ",
+        message: "Invalid payment method",
       });
     }
 
@@ -57,6 +65,7 @@ const createOrder = async (req, res) => {
       receiverInfo: normalizedReceiver,
       payment_method,
       ip: req.ip,
+      city
     });
 
     if (!result.success) {
@@ -67,7 +76,7 @@ const createOrder = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: error.message || "Tạo đơn hàng thất bại",
+      message: error.message || "Order creation failed",
     });
   }
 };

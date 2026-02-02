@@ -12,7 +12,7 @@ const addItemToCart = async (user_id, product_id, quantity) => {
        1️⃣ VALIDATE INPUT
     ======================= */
     if (!quantity || quantity < 1) {
-      throw new Error("Số lượng phải >= 1");
+      throw new Error("The quantity must be >= 1");
     }
 
     /* =======================
@@ -23,7 +23,7 @@ const addItemToCart = async (user_id, product_id, quantity) => {
       .session(session);
 
     if (!product || !product.status) {
-      throw new Error("Sản phẩm không tồn tại hoặc đã ngừng bán");
+      throw new Error("The product does not exist or has been discontinued.");
     }
 
     /* =======================
@@ -57,7 +57,7 @@ const addItemToCart = async (user_id, product_id, quantity) => {
     ======================= */
     if (product.onHandQuantity < newQty) {
       throw new Error(
-        `Không đủ hàng cho sản phẩm ${product.name}. Còn ${product.onHandQuantity}`
+        `Insufficient stock for the product ${product.name}. Still ${product.onHandQuantity}`
       );
     }
 
@@ -97,7 +97,7 @@ const addItemToCart = async (user_id, product_id, quantity) => {
 
     return {
       status: "OK",
-      message: "Thêm sản phẩm vào giỏ hàng thành công",
+      message: "Product added to cart successfully.",
     };
   } catch (error) {
     await session.abortTransaction();
@@ -111,15 +111,15 @@ const addItemToCart = async (user_id, product_id, quantity) => {
 const updateItemInCart = async (user_id, product_id, newQuantity) => {
   const product = await ProductModel.findById(product_id);
   if (!product || !product.status) {
-    throw new Error("Sản phẩm không tồn tại hoặc đã ngừng bán");
+    throw new Error("The product does not exist or has been discontinued.");
   }
 
   if (newQuantity > product.onHandQuantity) {
-    throw new Error(`Chỉ còn ${product.onHandQuantity} sản phẩm trong kho`);
+    throw new Error(`Only one left ${product.onHandQuantity} products in stock`);
   }
 
   const cart = await CartModel.findOne({ user_id });
-  if (!cart) throw new Error("Không tìm thấy giỏ hàng");
+  if (!cart) throw new Error("Shopping cart not found");
 
   const cartDetail = await CartDetailModel.findOne({
     cart_id: cart._id,
@@ -127,7 +127,7 @@ const updateItemInCart = async (user_id, product_id, newQuantity) => {
   });
 
   if (!cartDetail) {
-    throw new Error("Sản phẩm không có trong giỏ hàng");
+    throw new Error("The product is not in the shopping cart.");
   }
 
   if (newQuantity <= 0) {
@@ -147,7 +147,7 @@ const updateItemInCart = async (user_id, product_id, newQuantity) => {
   await cart.save();
 
   return {
-    message: "Cập nhật giỏ hàng thành công",
+    message: "Shopping cart updated successfully",
     total_price: newSum,
     total_items: allItems.length,
   };
@@ -162,7 +162,7 @@ const removeItemFromCart = async (user_id, product_ids) => {
       .findOne({ user_id })
       .session(session);
 
-    if (!cart) throw new Error("Không tìm thấy giỏ hàng");
+    if (!cart) throw new Error("Shopping cart not found");
 
     // Luôn ép về mảng
     const ids = Array.isArray(product_ids)
@@ -180,7 +180,7 @@ const removeItemFromCart = async (user_id, product_ids) => {
       .session(session);
 
     if (itemsToDelete.length === 0) {
-      throw new Error("Không có sản phẩm hợp lệ để xóa");
+      throw new Error("No valid products to delete");
     }
 
     /* ==========================
@@ -213,7 +213,7 @@ const removeItemFromCart = async (user_id, product_ids) => {
 
     return {
       status: "OK",
-      message: "Đã xóa sản phẩm khỏi giỏ hàng",
+      message: "The product has been removed from the shopping cart",
       removed_items: itemsToDelete.length,
       sum: cart.sum, // tổng quantity còn lại
     };
@@ -248,10 +248,10 @@ const getCartItems = async (user_id) => {
     in_stock: item.product_id.onHandQuantity,
     status: item.product_id.status,
     warning: !item.product_id.status
-      ? "Sản phẩm đã ngừng bán"
+      ? "The product has been discontinued"
       : item.product_id.onHandQuantity <= 0
-      ? "Sản phẩm tạm hết hàng"
-      : "Còn hàng",
+      ? "The product is temporarily out of stock"
+      : "In stock",
     subtotal: item.quantity * item.price,
   }));
 

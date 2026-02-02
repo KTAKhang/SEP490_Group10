@@ -8,6 +8,10 @@ const { createVnpayPaymentUrl } = require("../controller/PaymentController");
 const ProductModel = require("../models/ProductModel");
 const StockLockModel = require("../models/StockLockModel");
 const PaymentService = require("../services/PaymentService");
+const ShippingService = require("../services/ShippingService");
+const NotificationService = require("../services/NotificationService");
+const CustomerEmailService = require("./CustomerEmailService");
+const UserModel = require("../models/UserModel");
 const ReviewModel = require("../models/ReviewModel");
 
 const { default: mongoose } = require("mongoose");
@@ -22,7 +26,8 @@ const normalizeStatusName = (value) => {
     .replace(/[_\s]+/g, "-");
 };
 
-const normalizeToken = (value) => (value ? value.toString().trim().toUpperCase() : "");
+const normalizeToken = (value) =>
+  value ? value.toString().trim().toUpperCase() : "";
 
 const isReturnedStatus = (value) => {
   const normalized = normalizeStatusName(value);
@@ -40,12 +45,16 @@ const buildStatusRegex = (value) => {
 const findStatusByName = async (name, session) => {
   const regex = buildStatusRegex(name);
   if (!regex) return null;
-  return OrderStatusModel.findOne({ name: { $regex: regex } }).session(session || null);
+  return OrderStatusModel.findOne({ name: { $regex: regex } }).session(
+    session || null,
+  );
 };
 
 const getOrderStatusName = async (statusId, session) => {
   if (!statusId) return "";
-  const statusDoc = await OrderStatusModel.findById(statusId).session(session || null);
+  const statusDoc = await OrderStatusModel.findById(statusId).session(
+    session || null,
+  );
   return normalizeStatusName(statusDoc?.name || "");
 };
 
@@ -104,23 +113,40 @@ const confirmCheckoutAndCreateOrder = async ({
   receiverInfo,
   payment_method,
   ip,
+  city,
 }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+
+  // 🚫 CHECK USER SPAM TIMEOUT ORDER (24H)
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const timeoutOrdersCount = await PaymentModel.countDocuments({
+    user_id,
+    method: "VNPAY",
+    status: "TIMEOUT",
+    createdAt: { $gte: since },
+  });
+
+  if (timeoutOrdersCount >= 5) {
+    throw new Error(
+      "Bạn tạo quá nhiều đơn thanh toán không thành công. Vui lòng thử lại sau 24 giờ",
+    );
+  }
 
   try {
     /* =======================
        1️⃣ LOAD CART
     ======================= */
     const cart = await CartModel.findOne({ user_id }).session(session);
-    if (!cart) throw new Error("Không tìm thấy giỏ hàng");
+    if (!cart) throw new Error("Shopping cart not found");
 
     const cartItems = await CartDetailModel.find({
       cart_id: cart._id,
       product_id: { $in: selected_product_ids },
     }).session(session);
 
-    if (!cartItems.length) throw new Error("Không có sản phẩm được chọn");
+    if (!cartItems.length) throw new Error("No products were selected");
 
     /* =======================
        2️⃣ LOAD & VALIDATE STOCK LOCK
@@ -141,17 +167,16 @@ const confirmCheckoutAndCreateOrder = async ({
     for (const item of cartItems) {
       const lock = lockMap.get(item.product_id.toString());
       if (!lock || lock.quantity < item.quantity)
-        throw new Error("Hết thời gian giữ hàng");
+        throw new Error("The holding period has expired");
 
       const product = await ProductModel.findById(item.product_id)
         .populate("category", "name")
         .session(session);
 
       if (!product || !product.status)
-        throw new Error("Sản phẩm không khả dụng");
+        throw new Error("The product is unavailable");
 
       totalPrice += item.quantity * item.price;
-
       orderDetails.push({
         product_id: product._id,
         quantity: item.quantity,
@@ -167,19 +192,35 @@ const confirmCheckoutAndCreateOrder = async ({
     }
 
     /* =======================
+   3️⃣.5 CALCULATE SHIPPING
+======================= */
+    const { shippingFee, shippingType, shippingWeight } =
+      await ShippingService.calculateShippingForCheckout({
+        user_id,
+        selected_product_ids,
+        city,
+        session,
+      });
+
+    const finalTotalPrice = totalPrice + shippingFee;
+
+    /* =======================
        4️⃣ CREATE ORDER
     ======================= */
     const pendingStatus = await OrderStatusModel.findOne({
       name: "PENDING",
     }).session(session);
 
-    if (!pendingStatus) throw new Error("Thiếu trạng thái đơn hàng");
+    if (!pendingStatus) throw new Error("Missing order status");
 
     const [order] = await OrderModel.create(
       [
         {
           user_id,
-          total_price: totalPrice,
+          total_price: finalTotalPrice,
+          shipping_fee: shippingFee,
+          shipping_type: shippingType,
+          shipping_weight: shippingWeight,
           receiver_name: receiverInfo.receiver_name,
           receiver_phone: receiverInfo.receiver_phone,
           receiver_address: receiverInfo.receiver_address,
@@ -223,7 +264,7 @@ const confirmCheckoutAndCreateOrder = async ({
       );
 
       if (result.modifiedCount === 0) {
-        throw new Error("Không đủ tồn kho để hoàn tất đơn hàng");
+        throw new Error("Insufficient inventory to fulfill the order.");
       }
     }
 
@@ -265,8 +306,35 @@ const confirmCheckoutAndCreateOrder = async ({
     if (payment_method === "COD") {
       await PaymentService.createCODPayment({
         order_id: order._id,
-        amount: totalPrice,
+        amount: finalTotalPrice,
         session,
+      });
+
+      try {
+        const user = await UserModel.findById(user_id)
+          .select("email user_name")
+          .lean();
+        if (user && user.email) {
+          await CustomerEmailService.sendOrderConfirmationEmail(
+            user.email,
+            user.user_name || "Client",
+            order._id.toString(),
+            finalTotalPrice,
+            "COD",
+          );
+        }
+      } catch (emailErr) {
+        console.error("Failed to send COD order email:", emailErr);
+      }
+
+      await NotificationService.sendToUser(user_id, {
+        title: "Order placed successfully - Awaiting confirmation",
+        body: `Order ${order._id.toString()} has been created. Please complete payment upon delivery`,
+        data: {
+          type: "order",
+          orderId: order._id.toString(),
+          action: "pay_order_COD",
+        },
       });
 
       await session.commitTransaction();
@@ -282,7 +350,7 @@ const confirmCheckoutAndCreateOrder = async ({
     if (payment_method === "VNPAY") {
       await PaymentService.createOnlinePendingPayment({
         order_id: order._id,
-        amount: totalPrice,
+        amount: finalTotalPrice,
         session,
       });
 
@@ -293,6 +361,21 @@ const confirmCheckoutAndCreateOrder = async ({
         session,
       });
 
+      try {
+        await NotificationService.sendToUser(user_id, {
+          title: "Order placed successfully - Awaiting payment",
+          body: `Order ${order._id.toString()} as been created. Please complete the payment`,
+          data: {
+            type: "order",
+            orderId: order._id.toString(),
+            action: "pay_order_VNPay",
+            payment_url: paymentUrl,
+          },
+        });
+      } catch (notifErr) {
+        console.error("Failed to send order notification:", notifErr);
+      }
+
       await session.commitTransaction();
       return {
         success: true,
@@ -301,7 +384,7 @@ const confirmCheckoutAndCreateOrder = async ({
       };
     }
 
-    throw new Error("Phương thức thanh toán không hợp lệ");
+    throw new Error("Invalid payment method");
   } catch (err) {
     return { success: false, message: err.message };
   } finally {
@@ -324,18 +407,25 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
 
     if (!newStatus) throw new Error("Trạng thái không hợp lệ");
 
-    const currentStatusName = await getOrderStatusName(order.order_status_id, session);
+    const currentStatusName = await getOrderStatusName(
+      order.order_status_id,
+      session,
+    );
     const nextStatusName = normalizeStatusName(newStatus.name);
     const paymentMethod = normalizeToken(order.payment_method);
 
     if (isReturnedStatus(nextStatusName)) {
       if (role !== "admin") {
-        throw new Error("Chỉ admin mới được chuyển đơn sang trạng thái trả hàng");
+        throw new Error(
+          "Chỉ admin mới được chuyển đơn sang trạng thái trả hàng",
+        );
       }
       if (currentStatusName !== "COMPLETED") {
         throw new Error("Chỉ đơn COMPLETED mới được chuyển sang trả hàng");
       }
-    } else if (!isValidStatusTransition(paymentMethod, currentStatusName, nextStatusName)) {
+    } else if (
+      !isValidStatusTransition(paymentMethod, currentStatusName, nextStatusName)
+    ) {
       throw new Error("Không hợp lệ theo luồng trạng thái đơn hàng");
     }
 
@@ -499,6 +589,20 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
       name: "CANCELLED",
     }).session(session);
 
+    try {
+      await NotificationService.sendToUser(user_id, {
+        title: "Đặt hàng thành công - Chờ thanh toán",
+        body: `Đơn hàng ${order._id.toString()} đã được tạo. Vui lòng hoàn tất thanh toán.`,
+        data: {
+          type: "order",
+          orderId: order._id.toString(),
+          action: "pay_order",
+          payment_url: paymentUrl,
+        },
+      });
+    } catch (notifErr) {
+      console.error("Failed to send order notification:", notifErr);
+    }
     order.order_status_id = cancelled._id;
     await order.save({ session });
 
@@ -537,14 +641,6 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
       throw new Error("Không có quyền thanh toán đơn này");
     }
 
-    /* ===== CHECK RETRY WINDOW ===== */
-    if (!order.allow_retry) {
-      throw new Error("Đơn hàng không cho phép thanh toán lại");
-    }
-
-    if (!order.retry_expired_at || order.retry_expired_at < new Date()) {
-      throw new Error("Đơn hàng đã quá thời gian thanh toán lại");
-    }
     /* =======================
        2️⃣ CHECK ORDER STATUS
     ======================= */
@@ -557,10 +653,6 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
     if (!order.order_status_id.equals(failedStatus._id)) {
       throw new Error("Trạng thái đơn hàng không hợp lệ để thanh toán lại");
     }
-
-    /* =======================
-       3️⃣ LOAD PAYMENT FAILED
-    ======================= */
     const payment = await PaymentModel.findOne({
       order_id,
       method: "VNPAY",
@@ -571,13 +663,32 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
       throw new Error("Không tìm thấy thông tin thanh toán");
     }
 
-    if (payment.status !== "FAILED") {
-      throw new Error("Chỉ có thể thanh toán lại khi đơn thất bại");
+    // TIMEOUT → KHÔNG check retry_expired_at
+    if (!["FAILED", "TIMEOUT"].includes(payment.status)) {
+      throw new Error("Trạng thái thanh toán không hợp lệ để retry");
     }
 
-    /* ===== LOCK ORDER BEFORE RETRY ===== */
-    order.allow_retry = false;
-    order.auto_delete = false;
+    if (payment.status === "TIMEOUT") {
+      // ❌ BLOCK RETRY NẾU QUÁ SỐ LẦN
+      if (order.retry_count >= 3) {
+        throw new Error("Đơn hàng đã vượt quá số lần thanh toán cho phép");
+      }
+      order.retry_count += 1;
+    }
+
+    // FAILED → có retry window
+    if (payment.status === "FAILED") {
+      /* ===== CHECK RETRY PER PAYMENT STATUS ===== */
+      if (!order.allow_retry) {
+        throw new Error("Đơn hàng không cho phép thanh toán lại");
+      }
+      if (!order.retry_expired_at || order.retry_expired_at < new Date()) {
+        throw new Error("Đơn hàng đã quá thời gian thanh toán lại");
+      }
+      order.allow_retry = false;
+      order.auto_delete = false;
+    }
+
     await order.save({ session });
 
     /* =======================
@@ -615,7 +726,9 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
 const parseStatusNames = (value) => {
   if (!value) return [];
   if (Array.isArray(value)) {
-    return value.map((item) => item.toString().trim().toUpperCase()).filter(Boolean);
+    return value
+      .map((item) => item.toString().trim().toUpperCase())
+      .filter(Boolean);
   }
   if (typeof value === "string") {
     return value
@@ -653,7 +766,10 @@ const getOrdersByUser = async (user_id, filters = {}) => {
         name: { $in: normalizedStatusNames },
       });
       if (statusDocs.length !== normalizedStatusNames.length) {
-        return { status: "ERR", message: "Một hoặc nhiều trạng thái đơn hàng không hợp lệ" };
+        return {
+          status: "ERR",
+          message: "Một hoặc nhiều trạng thái đơn hàng không hợp lệ",
+        };
       }
       query.order_status_id = { $in: statusDocs.map((doc) => doc._id) };
     }
@@ -721,7 +837,7 @@ const getOrderByUser = async (order_id, user_id) => {
     ]);
 
     const reviewMap = new Map(
-      reviews.map((review) => [review.product_id?.toString(), review])
+      reviews.map((review) => [review.product_id?.toString(), review]),
     );
 
     const detailsWithReview = details.map((detail) => ({
@@ -766,21 +882,28 @@ const getOrdersForAdmin = async (filters = {}) => {
     const query = {};
 
     if (search) {
-      const escaped = search.toString().trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const escaped = search
+        .toString()
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const regex = new RegExp(escaped, "i");
-      query.$or = [
-        { receiver_name: regex },
-        { receiver_phone: regex },
-      ];
+      query.$or = [{ receiver_name: regex }, { receiver_phone: regex }];
     }
 
     const normalizedStatusNames = parseStatusNames(status_names);
     if (normalizedStatusNames.length > 0) {
       const statusDocs = await OrderStatusModel.find({
-        name: { $in: normalizedStatusNames.map((name) => buildStatusRegex(name)).filter(Boolean) },
+        name: {
+          $in: normalizedStatusNames
+            .map((name) => buildStatusRegex(name))
+            .filter(Boolean),
+        },
       });
       if (statusDocs.length !== normalizedStatusNames.length) {
-        return { status: "ERR", message: "Một hoặc nhiều trạng thái đơn hàng không hợp lệ" };
+        return {
+          status: "ERR",
+          message: "Một hoặc nhiều trạng thái đơn hàng không hợp lệ",
+        };
       }
       query.order_status_id = { $in: statusDocs.map((doc) => doc._id) };
     }
@@ -814,7 +937,9 @@ const getOrdersForAdmin = async (filters = {}) => {
     }
 
     const payments = await PaymentModel.find(paymentQuery).lean();
-    const paymentMap = new Map(payments.map((payment) => [payment.order_id.toString(), payment]));
+    const paymentMap = new Map(
+      payments.map((payment) => [payment.order_id.toString(), payment]),
+    );
 
     const data = orders
       .map((order) => ({
@@ -891,7 +1016,9 @@ const getOrderStatusCounts = async () => {
       },
     ]);
 
-    const countMap = new Map(counts.map((item) => [item._id?.toString(), item.total]));
+    const countMap = new Map(
+      counts.map((item) => [item._id?.toString(), item.total]),
+    );
     const data = statuses.map((status) => ({
       status_id: status._id,
       status_name: status.name,

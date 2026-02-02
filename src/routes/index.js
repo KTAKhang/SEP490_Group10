@@ -35,6 +35,7 @@ const PreOrderRouter = require("./PreOrderRouter");
 const AdminPreOrderRouter = require("./AdminPreOrderRouter");
 const AdminReviewRouter = require("./AdminReviewRouter");
 const ChatRouter = require("./ChatRouter");
+const ShippingRouter = require("./ShippingRouter");
 const StaffRouter = require("./StaffRouter");
 const CustomerRouter = require("./CustomerRouter");
 const DiscountRouter = require("./DiscountRouter");
@@ -45,6 +46,7 @@ const routes = (app) => {
     app.use("/auth", AuthRouter);
     app.use("/profile", ProfileRouter);
     app.use("/chat", ChatRouter);
+    app.use("/shipping", ShippingRouter);
 
    app.use("/contacts", ContactRouter);
     // Public shop info (for customer - no auth required)

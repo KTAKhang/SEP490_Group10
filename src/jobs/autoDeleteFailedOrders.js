@@ -6,6 +6,7 @@ const OrderDetailModel = require("../models/OrderDetailModel");
 const OrderStatusModel = require("../models/OrderStatusModel");
 const PaymentModel = require("../models/PaymentModel");
 const ProductModel = require("../models/ProductModel");
+const NotificationService = require("../services/NotificationService");
 
 /**
  * ⏱️ Chạy mỗi 1 phút
@@ -35,41 +36,44 @@ cron.schedule("*/1 * * * *", async () => {
       /* =========================
          🔄 ROLLBACK STOCK
       ========================= */
-      const orderDetails = await OrderDetailModel.find(
-        { order_id: order._id }
-      ).session(session);
+      const orderDetails = await OrderDetailModel.find({
+        order_id: order._id,
+      }).session(session);
 
       for (const item of orderDetails) {
         await ProductModel.updateOne(
           { _id: item.product_id },
           { $inc: { onHandQuantity: item.quantity } },
-          { session }
+          { session },
         );
       }
 
       /* =========================
          🧹 DELETE ORDER DETAILS
       ========================= */
-      await OrderDetailModel.deleteMany(
-        { order_id: order._id },
-        { session }
-      );
+      await OrderDetailModel.deleteMany({ order_id: order._id }, { session });
 
       /* =========================
          💳 DELETE PAYMENTS
       ========================= */
-      await PaymentModel.deleteMany(
-        { order_id: order._id },
-        { session }
-      );
+      await PaymentModel.deleteMany({ order_id: order._id }, { session });
 
       /* =========================
          🗑️ DELETE ORDER
       ========================= */
       await order.deleteOne({ session });
+      await NotificationService.sendToUser(order.user_id, {
+        title: "Order Removed",
+        body: `Your order ${order._id.toString()} was automatically removed because the payment was not completed within 10 minutes.`,
+        data: {
+          type: "order",
+          orderId: order._id.toString(),
+          action: "order_removed",
+        },
+      });
 
       console.log(
-        `🗑️ Auto deleted order ${order._id.toString()} + rollback stock`
+        `🗑️ Auto deleted order ${order._id.toString()} + rollback stock`,
       );
     }
 
@@ -83,49 +87,29 @@ cron.schedule("*/1 * * * *", async () => {
 });
 console.log("🟢 Auto delete pending order cron loaded");
 
-cron.schedule("*/1 * * * * *", async () => {
-  
-
+cron.schedule("*/1 * * * *", async () => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    /* =========================
-       🔍 GET PENDING ORDER STATUS
-    ========================= */
-    const pendingStatus = await OrderStatusModel.findOne({ name: "PENDING" });
-    if (!pendingStatus) {
-      await session.abortTransaction();
-      return;
-    }
-
-    const expiredTime = new Date(Date.now() - 15 * 60 * 1000); // ⏱️ 15 minutes ago
+    const expiredTime = new Date(Date.now() - 1 * 60 * 1000); // 15 phút
 
     /* =========================
-       🔍 FIND PENDING VNPAY ORDERS
-       (KHÔNG CHECK createdAt của order)
+       🔍 FIND EXPIRED VNPAY PAYMENTS
     ========================= */
-    const pendingOrders = await OrderModel.find({
-      order_status_id: pendingStatus._id,
-      payment_method: "VNPAY",
-      auto_delete: true,
+    const expiredPayments = await PaymentModel.find({
+      type: "PAYMENT",
+      method: "VNPAY",
+      status: "PENDING",
+      createdAt: { $lt: expiredTime },
     }).session(session);
 
-    for (const order of pendingOrders) {
-      /* =========================
-         🔍 CHECK PAYMENT EXPIRED
-         (DÙNG payment.createdAt)
-      ========================= */
-      const payment = await PaymentModel.findOne({
-        order_id: order._id,
-        status: "PENDING",
-        createdAt: { $lt: expiredTime },
-      }).session(session);
-
-      if (!payment) continue; // chưa quá 15 phút hoặc đã xử lý
+    for (const payment of expiredPayments) {
+      const order = await OrderModel.findById(payment.order_id).session(session);
+      if (!order) continue;
 
       /* =========================
-         🔄 ROLLBACK STOCK
+         🔄 RELEASE RESERVED STOCK
       ========================= */
       const orderDetails = await OrderDetailModel.find({
         order_id: order._id,
@@ -135,43 +119,44 @@ cron.schedule("*/1 * * * * *", async () => {
         await ProductModel.updateOne(
           { _id: item.product_id },
           { $inc: { onHandQuantity: item.quantity } },
-          { session }
+          { session },
         );
       }
 
       /* =========================
-         🧹 DELETE ORDER DETAILS
+         ⏰ MARK PAYMENT TIMEOUT
       ========================= */
-      await OrderDetailModel.deleteMany(
-        { order_id: order._id },
-        { session }
-      );
+      payment.status = "TIMEOUT";
+      payment.note = "Payment timeout after 15 minutes";
+
+      await payment.save({ session });
 
       /* =========================
-         💳 DELETE PAYMENT
+         🔔 NOTIFY USER
       ========================= */
-      await PaymentModel.deleteMany(
-        { order_id: order._id },
-        { session }
-      );
-
-      /* =========================
-         🗑️ DELETE ORDER
-      ========================= */
-      await order.deleteOne({ session });
+      // await NotificationService.sendToUser(order.user_id, {
+      //   title: "Payment timeout",
+      //   body: `Payment for order ${order._id.toString()} has expired after 15 minutes. Products were released back to stock.`,
+      //   data: {
+      //     type: "payment",
+      //     orderId: order._id.toString(),
+      //     action: "payment_timeout",
+      //   },
+      // });
 
       console.log(
-        `🗑️ Auto deleted order ${order._id.toString()} (payment pending > 15 minutes)`
+        `⏰ Payment ${payment._id.toString()} marked TIMEOUT`,
       );
     }
 
     await session.commitTransaction();
   } catch (error) {
     await session.abortTransaction();
-    console.error("❌ Auto delete pending order job error:", error.message);
+    console.error("❌ Payment timeout cron error:", error.message);
   } finally {
     session.endSession();
   }
 });
+
 
 module.exports = {};

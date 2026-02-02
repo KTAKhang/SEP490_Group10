@@ -44,7 +44,7 @@ const removeItemFromCart = async (req, res) => {
     if (!product_ids) {
       return res.status(400).json({
         status: "ERR",
-        message: "Thiếu product_id",
+        message: "Missing product_id",
       });
     }
 
@@ -69,7 +69,7 @@ const getCartItems = async (req, res) => {
 
         return res.status(200).json({
             status: "OK",
-            message: "Lấy giỏ hàng thành công",
+            message: "Shopping cart successfully retrieved",
             data: response
         });
     } catch (error) {

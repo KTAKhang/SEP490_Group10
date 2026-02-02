@@ -43,10 +43,31 @@ const orderSchema = new mongoose.Schema(
       required: [true, "Tổng giá trị đơn hàng là bắt buộc"],
       min: [0, "Tổng giá trị đơn hàng không được âm"],
     },
+    // thêm vào orderSchema
+    shipping_fee: {
+      type: Number,
+      required: true,
+      min: [0, "Tiền ship không được âm"],
+    },
+
+    shipping_type: {
+      type: String,
+      enum: ["IN_PROVINCE", "OUT_PROVINCE"],
+      required: true,
+    },
+
+    shipping_weight: {
+      type: Number, // kg
+      required: true,
+    },
     note: {
       type: String,
       trim: true,
       maxlength: [500, "Ghi chú không được vượt quá 500 ký tự"],
+    },
+    retry_count: {
+      type: Number,
+      default: 0,
     },
     receiver_address: {
       type: String,
@@ -78,7 +99,7 @@ const orderSchema = new mongoose.Schema(
       default: false,
     },
     expected_ship_date: {
-      type: Date, 
+      type: Date,
     },
     payment_method: {
       type: String,
@@ -86,7 +107,7 @@ const orderSchema = new mongoose.Schema(
       required: true,
     },
 
-     /* =========================
+    /* =========================
        🔁 RETRY + AUTO DELETE
     ========================= */
     allow_retry: {
@@ -111,7 +132,7 @@ const orderSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 const OrderModel = mongoose.model("orders", orderSchema);

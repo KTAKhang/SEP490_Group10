@@ -32,7 +32,7 @@ const paymentSchema = new mongoose.Schema(
     // trạng thái giao dịch tiền
     status: {
       type: String,
-      enum: ["PENDING", "SUCCESS", "FAILED", "CANCELLED", "UNPAID"],
+      enum: ["PENDING", "SUCCESS", "FAILED", "CANCELLED", "UNPAID","TIMEOUT"],
       default: "PENDING",
     },
 
