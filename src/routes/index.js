@@ -31,12 +31,10 @@ const CheckoutRouter = require("./CheckoutRouter");
 const OrderStatusRouter = require("./OrderStatusRouter");
 const OrderRouter = require("./OrderRouter");
 const PaymentRouter = require("./PaymentRouter");
-
+const PreOrderRouter = require("./PreOrderRouter");
+const AdminPreOrderRouter = require("./AdminPreOrderRouter");
 const AdminReviewRouter = require("./AdminReviewRouter");
-  
-
 const ChatRouter = require("./ChatRouter");
-
 const StaffRouter = require("./StaffRouter");
 const CustomerRouter = require("./CustomerRouter");
 const DiscountRouter = require("./DiscountRouter");
@@ -59,21 +57,19 @@ const routes = (app) => {
     app.use("/orderstatus", OrderStatusRouter);
     app.use("/order", OrderRouter);
     app.use("/payment", PaymentRouter);
+    app.use("/preorder", PreOrderRouter);
     app.use("/reviews", ReviewRouter);
     app.use("/admin/reviews", AdminReviewRouter);
-    
     // Admin routes
     app.use("/admin/categories", CategoryRouter);
     app.use("/admin/products", ProductRouter);
     app.use("/admin/fruit-baskets", FruitBasketRouter);
     app.use("/admin/harvest-batch", HarvestBatchRouter);
-
     // Admin routes - Supplier Management
     app.use("/admin/suppliers", SupplierRouter); // ✅ Includes: /harvest-batch
-    // Note: /for-brand trong SupplierRouter dùng authAdminMiddleware (Admin only)
-    
-
+    // Note: /for-brand trong SupplierRouter dùng authAdminMiddleware (Admin only)    
     app.use("/admin/shop", ShopRouter);
+    app.use("/admin/preorder", AdminPreOrderRouter);
     // Homepage Assets - Admin routes
     app.use("/api/admin/homepage-assets", (req, res, next) => {
       console.log(`🔗 HomepageAssetRouter matched: ${req.method} ${req.path}`);

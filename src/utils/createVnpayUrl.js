@@ -72,6 +72,60 @@ const createVnpayUrl = (orderId, amount, ipAddr = "127.0.0.1") => {
   return `${vnpConfig.url}?${qs.stringify(finalParams, { encode: false })}`;
 };
 
+/**
+ * Pre-order VNPay URL. Uses intentId as vnp_TxnRef.
+ * Same return URL; backend return handler distinguishes by PreOrderPaymentIntent lookup.
+ */
+const createPreOrderVnpayUrl = (intentId, amount, ipAddr = "127.0.0.1") => {
+  const dt = new Date();
+  const yyyyMMddHHmmss =
+    `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}` +
+    `${pad(dt.getHours())}${pad(dt.getMinutes())}${pad(dt.getSeconds())}`;
+
+  const normalizedIp =
+    (ipAddr || "127.0.0.1").includes("::") ? "127.0.0.1" : ipAddr;
+
+  const baseParams = {
+    vnp_Version: "2.1.0",
+    vnp_Command: "pay",
+    vnp_TmnCode: vnpConfig.tmnCode,
+    vnp_Locale: "vn",
+    vnp_CurrCode: "VND",
+    vnp_TxnRef: intentId.toString(),
+    vnp_OrderInfo: `Pre-order ${intentId}`,
+    vnp_OrderType: "billpayment",
+    vnp_Amount: amount * 100,
+    vnp_ReturnUrl: vnpConfig.returnUrl,
+    vnp_IpAddr: normalizedIp,
+    vnp_CreateDate: yyyyMMddHHmmss,
+  };
+
+  const encodeParams = (obj) => {
+    const encoded = {};
+    Object.keys(obj).forEach((k) => {
+      encoded[k] = encodeURIComponent(obj[k]).replace(/%20/g, "+");
+    });
+    return encoded;
+  };
+
+  const paramsForSign = encodeParams(baseParams);
+  const sortedParams = {};
+  Object.keys(paramsForSign)
+    .sort()
+    .forEach((k) => (sortedParams[k] = paramsForSign[k]));
+  const signData = qs.stringify(sortedParams, { encode: false });
+  const secureHash = crypto
+    .createHmac("sha512", vnpConfig.hashSecret)
+    .update(signData, "utf-8")
+    .digest("hex");
+  const finalParams = {
+    ...paramsForSign,
+    vnp_SecureHashType: "HmacSHA512",
+    vnp_SecureHash: secureHash,
+  };
+  return `${vnpConfig.url}?${qs.stringify(finalParams, { encode: false })}`;
+};
+
 const refund = async ({ payment, refund }) => {
   if (!payment?.provider_response) {
     throw new Error("Missing payment.provider_response");
@@ -126,4 +180,4 @@ const refund = async ({ payment, refund }) => {
 };
 
 
-module.exports = { createVnpayUrl,refund };
+module.exports = { createVnpayUrl, createPreOrderVnpayUrl, refund };
