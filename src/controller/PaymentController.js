@@ -1,11 +1,16 @@
 const qs = require("qs");
 const crypto = require("crypto");
 const OrderModel = require("../models/OrderModel");
+const OrderDetailModel = require("../models/OrderDetailModel");
 const PaymentModel = require("../models/PaymentModel");
 const OrderStatusModel = require("../models/OrderStatusModel");
 const { createVnpayUrl, refund } = require("../utils/createVnpayUrl");
 const { vnpConfig } = require("../config/vnpayConfig");
 const { default: mongoose } = require("mongoose");
+const NotificationService = require("../services/NotificationService");
+const CustomerEmailService = require("../services/CustomerEmailService");
+const UserModel = require("../models/UserModel");
+const ProductModel = require("../models/ProductModel");
 
 /* =============================
    CREATE VNPAY URL
@@ -16,7 +21,7 @@ const createVnpayPaymentUrl = async (req, res) => {
     const user_id = req.user._id;
 
     const order = await OrderModel.findById(order_id);
-    if (!order) throw new Error("Không tìm thấy đơn hàng");
+    if (!order) throw new Error("No order found");
 
     if (order.user_id.toString() !== user_id.toString())
       throw new Error("Không có quyền");
@@ -37,6 +42,49 @@ const createVnpayPaymentUrl = async (req, res) => {
     res.status(400).json({ success: false, message: err.message });
   }
 };
+
+async function isOrderOutOfStock(orderId, session) {
+  const orderDetails = await OrderDetailModel.find({
+    order_id: orderId,
+  }).session(session);
+
+  for (const item of orderDetails) {
+    const product = await ProductModel.findById(item.product_id).session(
+      session,
+    );
+    console.log("product", product.onHandQuantity);
+    console.log("item", item.quantity);
+
+    if (!product || product.onHandQuantity < item.quantity) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function deductStock(orderId, session) {
+  const orderDetails = await OrderDetailModel.find({
+    order_id: orderId,
+  }).session(session);
+
+  for (const item of orderDetails) {
+    const result = await ProductModel.updateOne(
+      {
+        _id: item.product_id,
+        onHandQuantity: { $gte: item.quantity },
+      },
+      {
+        $inc: { onHandQuantity: -item.quantity },
+      },
+      { session },
+    );
+
+    if (result.modifiedCount === 0) {
+      throw new Error("Insufficient inventory when deducting");
+    }
+  }
+}
 
 /* =============================
    VNPAY RETURN URL
@@ -159,6 +207,14 @@ const vnpayReturn = async (req, res) => {
       throw new Error("PAID status not found");
     }
 
+    const paidNoStockStatus = await OrderStatusModel.findOne({
+      name: "PAID_NO_STOCK",
+    }).session(session);
+
+    if (!paidNoStockStatus) {
+      throw new Error("PAID_NO_STOCK status not found");
+    }
+
     /* =======================
        🔒 ANTI-REPLAY #3
        ORDER PAID
@@ -173,8 +229,61 @@ const vnpayReturn = async (req, res) => {
     /* =======================
        8️⃣ HANDLE RESULT
     ======================= */
+    // responseCode từ VNPay
     if (responseCode === "00") {
-      /* ===== PAYMENT SUCCESS ===== */
+      /* =====================
+     PAYMENT SUCCESS
+  ===================== */
+
+      if (payment.status === "TIMEOUT") {
+        const isOutOfStock = await isOrderOutOfStock(order._id, session);
+
+        if (isOutOfStock) {
+          // ❌ PAID BUT NO STOCK
+          payment.status = "TIMEOUT"; // tiền vẫn đã thanh toán
+          await payment.save({ session });
+
+          order.status_history.push({
+            from_status: order.order_status_id,
+            to_status: paidNoStockStatus._id,
+            changed_by: order.user_id,
+            changed_by_role: "customer",
+            note: "Payment successful, but the product is out of stock",
+          });
+
+          order.order_status_id = paidNoStockStatus._id;
+          await order.save({ session });
+
+          await session.commitTransaction();
+
+          return res.redirect(
+            `http://localhost:5173/customer/payment-success-nostock?status=paid_no_stock&orderId=${orderId}`,
+          );
+        }
+        // ✅ CÒN HÀNG → TRỪ KHO TRƯỚC
+        await deductStock(order._id, session);
+        // ✅ CÒN HÀNG → coi như SUCCESS
+        payment.status = "SUCCESS";
+        await payment.save({ session });
+
+        order.status_history.push({
+          from_status: order.order_status_id,
+          to_status: paidStatus._id,
+          changed_by: order.user_id,
+          changed_by_role: "customer",
+          note: "VNPAY payment successful (TIMEOUT will reprocess)",
+        });
+
+        order.order_status_id = paidStatus._id;
+        await order.save({ session });
+
+        await session.commitTransaction();
+
+        return res.redirect(
+          `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
+        );
+      }
+
       payment.status = "SUCCESS";
       payment.provider_txn_id = transactionNo;
       payment.provider_response = sortedParams;
@@ -185,7 +294,7 @@ const vnpayReturn = async (req, res) => {
         to_status: paidStatus._id,
         changed_by: order.user_id,
         changed_by_role: "customer",
-        note: "Thanh toán VNPAY thành công",
+        note: "VNPAY payment successful",
       });
 
       order.order_status_id = paidStatus._id;
@@ -197,6 +306,10 @@ const vnpayReturn = async (req, res) => {
         `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
       );
     }
+
+    /* =====================
+   PAYMENT TIMEOUT
+===================== */
 
     /* ===== PAYMENT FAILED ===== */
     payment.status = "FAILED";
@@ -220,7 +333,7 @@ const vnpayReturn = async (req, res) => {
       to_status: status._id,
       changed_by: order.user_id,
       changed_by_role: "customer",
-      note: "VNPAY thanh toán thất bại – cho phép thanh toán lại trong 10 phút",
+      note: "VNPAY payment failed – allow re-payment within 10 minutes",
     });
 
     order.order_status_id = status._id;
@@ -228,6 +341,34 @@ const vnpayReturn = async (req, res) => {
 
     /* ===== COMMIT ===== */
     await session.commitTransaction();
+    try {
+      await NotificationService.sendToUser(order.user_id.toString(), {
+        title: "VNPay payment failed",
+        body: `Thanh toán thất bại cho đơn hàng ${orderId}. Go to Order History to re-pay in 10 minutes`,
+        data: {
+          type: "order",
+          orderId: orderId.toString(),
+          action: "retry_payment",
+        },
+      });
+    } catch (notifErr) {
+      console.error("Failed to send payment failure notification:", notifErr);
+    }
+
+    try {
+      const user = await UserModel.findById(order.user_id)
+        .select("email user_name")
+        .lean();
+      if (user && user.email) {
+        await CustomerEmailService.sendPaymentFailureEmail(
+          user.email,
+          user.user_name || "Customer",
+          orderId.toString(),
+        );
+      }
+    } catch (emailErr) {
+      console.error("Failed to send payment failure email:", emailErr);
+    }
 
     /* ===== REDIRECT ===== */
     return res.redirect(

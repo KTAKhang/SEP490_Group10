@@ -271,4 +271,76 @@ Smart Fruit Shop
     }
 };
 
+
+
+// Additional order-related email helpers
+EmailService.sendOrderConfirmationEmail = async (
+    customerEmail,
+    customerName,
+    orderId,
+    amount,
+    paymentMethod,
+    paymentUrl = null,
+) => {
+    try {
+        const transporter = createTransporter();
+
+        const mailOptions = {
+            from: {
+                name: "Smart Fruit Shop",
+                address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn",
+            },
+            to: customerEmail,
+            subject: `Xác nhận đơn hàng ${orderId}`,
+            html: `
+                <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+                    <h2>✅ Đơn hàng đã được tạo</h2>
+                    <p>Xin chào <strong>${customerName}</strong>,</p>
+                    <p>Đơn hàng <strong>${orderId}</strong> của bạn đã được tạo với tổng tiền <strong>${amount}</strong>.</p>
+                    <p>Phương thức thanh toán: <strong>${paymentMethod}</strong></p>
+                    ${paymentUrl ? `<p>Hoàn tất thanh toán tại: <a href="${paymentUrl}">${paymentUrl}</a></p>` : ""}
+                    <p>Cảm ơn bạn đã mua hàng tại Smart Fruit Shop.</p>
+                </div>
+            `,
+            text: `Đơn hàng ${orderId} đã được tạo. Tổng: ${amount}. Phương thức: ${paymentMethod}`,
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        return { status: "OK", messageId: info.messageId };
+    } catch (error) {
+        console.error("Order confirmation email error:", error);
+        return { status: "ERR", message: error.message };
+    }
+};
+
+EmailService.sendPaymentFailureEmail = async (customerEmail, customerName, orderId) => {
+    try {
+        const transporter = createTransporter();
+
+        const mailOptions = {
+            from: {
+                name: "Smart Fruit Shop",
+                address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn",
+            },
+            to: customerEmail,
+            subject: `Thanh toán thất bại cho đơn ${orderId}`,
+            html: `
+                <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+                    <h2>⚠️ Thanh toán không thành công</h2>
+                    <p>Xin chào <strong>${customerName}</strong>,</p>
+                    <p>Thanh toán cho đơn hàng <strong>${orderId}</strong> không thành công. Bạn có thể thử thanh toán lại trong vòng 10 phút.</p>
+                    <p>Nếu cần hỗ trợ, liên hệ support@smartfruitshop.vn.</p>
+                </div>
+            `,
+            text: `Thanh toán cho đơn ${orderId} thất bại. Vui lòng thử lại.`,
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        return { status: "OK", messageId: info.messageId };
+    } catch (error) {
+        console.error("Payment failure email error:", error);
+        return { status: "ERR", message: error.message };
+    }
+};
+
 module.exports = EmailService;

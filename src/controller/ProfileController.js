@@ -38,7 +38,7 @@ const updateProfile = async (req, res) => {
       return res.status(400).json({
         status: "ERR",
         message:
-          "Tên người dùng phải từ 3–30 ký tự, chỉ gồm chữ cái, số, khoảng trắng hoặc dấu gạch dưới",
+          "Usernames must be between 3 and 30 characters long and can only include letters, numbers, spaces, or underscores.",
       });
     }
 
@@ -48,7 +48,7 @@ const updateProfile = async (req, res) => {
       return res.status(400).json({
         status: "ERR",
         message:
-          "Số điện thoại không hợp lệ (phải bắt đầu bằng 0 và có 9–11 chữ số)",
+          "Invalid phone number (must start with 0 and contain 9–11 digits)",
       });
     }
 
@@ -59,7 +59,7 @@ const updateProfile = async (req, res) => {
       return res.status(400).json({
         status: "ERR",
         message:
-          "Địa chỉ phải từ 5–100 ký tự, chỉ chứa chữ, số, khoảng trắng và các ký tự , . - /",
+          "Addresses must be between 5 and 100 characters long and contain only letters, numbers, spaces, and commas ,.-",
       });
     }
 
@@ -173,7 +173,7 @@ const changePassword = async (req, res) => {
     if (!isStrictPassword(new_password)) {
       return res.status(400).json({
         status: "ERR",
-        message: "Mật khẩu phải chứa 8 ký tự, bao gồm chữ hoa và số",
+        message: "The password must contain 8 characters, including uppercase letters and numbers",
       });
     }
 
