@@ -599,6 +599,47 @@ const uploadNewsContentImage = (req, res, next) => {
 
 module.exports.uploadNewsContentImage = uploadNewsContentImage;
 
+// Middleware: Upload shop description image lên Cloudinary
+const uploadShopDescriptionImage = (req, res, next) => {
+    const handler = upload.single("image"); // Field name for description image
+    handler(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            if (req.file && req.file.buffer) {
+                // Validate file type
+                const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+                if (!allowedMimes.includes(req.file.mimetype)) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Ảnh phải là định dạng jpg, png hoặc webp",
+                    });
+                }
+
+                // Upload với stream + optimization vào folder "shop/description"
+                const result = await uploadToCloudinary(req.file.buffer, "shop/description");
+
+                // Trả về URL và publicId để frontend sử dụng
+                req.uploadedImage = {
+                    url: result.secure_url,
+                    publicId: result.public_id,
+                };
+            } else {
+                return res.status(400).json({
+                    status: "ERR",
+                    message: "Không có file ảnh được upload",
+                });
+            }
+            return next();
+        } catch (error) {
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports.uploadShopDescriptionImage = uploadShopDescriptionImage;
+
 // Middleware: Upload nhiều ảnh shop lên Cloudinary
 const uploadShopImages = (req, res, next) => {
     const handler = upload.array("images", 20); // Allow up to 20 images
@@ -811,3 +852,52 @@ const uploadShopImage = (req, res, next) => {
 };
 
 module.exports.uploadShopImage = uploadShopImage;
+
+// Middleware: Upload homepage asset image lên Cloudinary
+const uploadHomepageAssetImage = (req, res, next) => {
+    const handler = upload.single("image");
+    handler(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            if (req.file && req.file.buffer) {
+                // Validate file type
+                const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+                if (!allowedMimes.includes(req.file.mimetype)) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Ảnh phải là định dạng jpg, png hoặc webp",
+                    });
+                }
+
+                // Check file size (5MB limit)
+                if (req.file.size > 5 * 1024 * 1024) {
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: "Kích thước file vượt quá 5MB",
+                    });
+                }
+
+                // Upload với stream + optimization vào folder "homepage"
+                const result = await uploadToCloudinary(req.file.buffer, "homepage");
+
+                // Trả về URL và publicId để frontend sử dụng
+                req.uploadedImage = {
+                    url: result.secure_url,
+                    publicId: result.public_id,
+                };
+            } else {
+                return res.status(400).json({
+                    status: "ERR",
+                    message: "Không có file ảnh được upload",
+                });
+            }
+            return next();
+        } catch (error) {
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports.uploadHomepageAssetImage = uploadHomepageAssetImage;
