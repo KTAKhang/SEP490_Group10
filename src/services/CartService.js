@@ -2,10 +2,13 @@ const CartModel = require("../models/CartsModel");
 const CartDetailModel = require("../models/CartDetailsModel");
 const ProductModel = require("../models/ProductModel");
 const { default: mongoose } = require("mongoose");
+const { getEffectivePrice } = require("../utils/productPrice");
+
 
 const addItemToCart = async (user_id, product_id, quantity) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+
 
   try {
     /* =======================
@@ -15,6 +18,7 @@ const addItemToCart = async (user_id, product_id, quantity) => {
       throw new Error("The quantity must be >= 1");
     }
 
+
     /* =======================
        2️⃣ CHECK PRODUCT
     ======================= */
@@ -22,9 +26,11 @@ const addItemToCart = async (user_id, product_id, quantity) => {
       .findById(product_id)
       .session(session);
 
+
     if (!product || !product.status) {
       throw new Error("The product does not exist or has been discontinued.");
     }
+
 
     /* =======================
        3️⃣ LOAD / CREATE CART
@@ -32,6 +38,7 @@ const addItemToCart = async (user_id, product_id, quantity) => {
     let cart = await CartModel
       .findOne({ user_id })
       .session(session);
+
 
     if (!cart) {
       const [newCart] = await CartModel.create(
@@ -41,6 +48,7 @@ const addItemToCart = async (user_id, product_id, quantity) => {
       cart = newCart;
     }
 
+
     /* =======================
        4️⃣ LOAD CART DETAIL
     ======================= */
@@ -49,8 +57,10 @@ const addItemToCart = async (user_id, product_id, quantity) => {
       product_id,
     }).session(session);
 
+
     const currentQty = cartDetail ? cartDetail.quantity : 0;
     const newQty = currentQty + quantity;
+
 
     /* =======================
        5️⃣ CHECK STOCK
@@ -61,6 +71,7 @@ const addItemToCart = async (user_id, product_id, quantity) => {
       );
     }
 
+
     /* =======================
        6️⃣ UPSERT CART DETAIL
     ======================= */
@@ -68,18 +79,20 @@ const addItemToCart = async (user_id, product_id, quantity) => {
       cartDetail.quantity = newQty;
       await cartDetail.save({ session });
     } else {
+      const { effectivePrice } = getEffectivePrice(product);
       await CartDetailModel.create(
         [
           {
             cart_id: cart._id,
             product_id,
             quantity,
-            price: product.price,
+            price: effectivePrice,
           },
         ],
         { session }
       );
     }
+
 
     /* =======================
        7️⃣ RECALCULATE CART SUM
@@ -90,10 +103,13 @@ const addItemToCart = async (user_id, product_id, quantity) => {
       { session }
     );
 
+
     cart.sum = distinctItemsCount;
     await cart.save({ session });
 
+
     await session.commitTransaction();
+
 
     return {
       status: "OK",
@@ -108,27 +124,34 @@ const addItemToCart = async (user_id, product_id, quantity) => {
 };
 
 
+
+
 const updateItemInCart = async (user_id, product_id, newQuantity) => {
   const product = await ProductModel.findById(product_id);
   if (!product || !product.status) {
     throw new Error("The product does not exist or has been discontinued.");
   }
 
+
   if (newQuantity > product.onHandQuantity) {
     throw new Error(`Only one left ${product.onHandQuantity} products in stock`);
   }
 
+
   const cart = await CartModel.findOne({ user_id });
   if (!cart) throw new Error("Shopping cart not found");
+
 
   const cartDetail = await CartDetailModel.findOne({
     cart_id: cart._id,
     product_id,
   });
 
+
   if (!cartDetail) {
     throw new Error("The product is not in the shopping cart.");
   }
+
 
   if (newQuantity <= 0) {
     await cartDetail.remove();
@@ -137,14 +160,17 @@ const updateItemInCart = async (user_id, product_id, newQuantity) => {
     await cartDetail.save();
   }
 
+
   const allItems = await CartDetailModel.find({ cart_id: cart._id });
   const newSum = allItems.reduce(
     (total, item) => total + item.quantity * item.price,
     0
   );
 
+
   cart.sum = allItems.length;
   await cart.save();
+
 
   return {
     message: "Shopping cart updated successfully",
@@ -153,21 +179,26 @@ const updateItemInCart = async (user_id, product_id, newQuantity) => {
   };
 };
 
+
 const removeItemFromCart = async (user_id, product_ids) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+
 
   try {
     const cart = await CartModel
       .findOne({ user_id })
       .session(session);
 
+
     if (!cart) throw new Error("Shopping cart not found");
+
 
     // Luôn ép về mảng
     const ids = Array.isArray(product_ids)
       ? product_ids
       : [product_ids];
+
 
     /* ==========================
        1️⃣ Lấy các item cần xóa
@@ -179,9 +210,11 @@ const removeItemFromCart = async (user_id, product_ids) => {
       })
       .session(session);
 
+
     if (itemsToDelete.length === 0) {
       throw new Error("No valid products to delete");
     }
+
 
     /* ==========================
        2️⃣ Tính tổng quantity cần trừ
@@ -190,6 +223,7 @@ const removeItemFromCart = async (user_id, product_ids) => {
       (total, item) => total + item.quantity,
       0
     );
+
 
     /* ==========================
        3️⃣ Xóa nhiều item 1 lần
@@ -202,14 +236,17 @@ const removeItemFromCart = async (user_id, product_ids) => {
       { session }
     );
 
+
     /* ==========================
        4️⃣ Update cart.sum (quantity)
     ========================== */
     cart.sum = Math.max(cart.sum - minusQuantity, 0);
     await cart.save({ session });
 
+
     await session.commitTransaction();
     session.endSession();
+
 
     return {
       status: "OK",
@@ -224,6 +261,7 @@ const removeItemFromCart = async (user_id, product_ids) => {
   }
 };
 
+
 const getCartItems = async (user_id) => {
   const cart = await CartModel.findOne({ user_id });
   if (!cart) {
@@ -234,27 +272,32 @@ const getCartItems = async (user_id) => {
     };
   }
 
+
   const items = await CartDetailModel.find({ cart_id: cart._id }).populate(
     "product_id",
-    "name images price onHandQuantity status"
+    "name images price onHandQuantity status expiryDateStr expiryDate nearExpiryDaysThreshold nearExpiryDiscountPercent"
   );
-
-  const formattedItems = items.map((item) => ({
-    product_id: item.product_id._id,
-    name: item.product_id.name,
-    image: item.product_id.images?.[0],
-    price: item.price,
-    quantity: item.quantity,
-    in_stock: item.product_id.onHandQuantity,
-    status: item.product_id.status,
-    warning: !item.product_id.status
-      ? "The product has been discontinued"
-      : item.product_id.onHandQuantity <= 0
-      ? "The product is temporarily out of stock"
-      : "In stock",
-    subtotal: item.quantity * item.price,
-  }));
-
+  const formattedItems = items.map((item) => {
+    const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(item.product_id);
+    const priceToUse = effectivePrice;
+    return {
+      product_id: item.product_id._id,
+      name: item.product_id.name,
+      image: item.product_id.images?.[0],
+      price: priceToUse,
+      originalPrice: isNearExpiry ? originalPrice : null,
+      isNearExpiry,
+      quantity: item.quantity,
+      in_stock: item.product_id.onHandQuantity,
+      status: item.product_id.status,
+      warning: !item.product_id.status
+        ? "The product has been discontinued"
+        : item.product_id.onHandQuantity <= 0
+        ? "The product is temporarily out of stock"
+        : "In stock",
+      subtotal: item.quantity * priceToUse,
+    };
+  });
   return {
     cart_id: cart._id,
     sum: cart.sum,
@@ -262,7 +305,6 @@ const getCartItems = async (user_id) => {
     items: formattedItems,
   };
 };
-
 module.exports = {
   addItemToCart,
   updateItemInCart,
