@@ -14,20 +14,59 @@ const formatDateTimeVN = () => {
 };
 
 /**
+ * Chạy một lần: kiểm tra và reset sản phẩm hết hạn (dùng khi server khởi động lại sau khi miss 00:00)
+ */
+const runExpiredCheckOnce = async () => {
+  console.log(`[${formatDateTimeVN()}] Running startup check: expired products...`);
+  try {
+    const result = await ProductBatchService.autoResetExpiredProducts();
+    if (result.status === "OK") {
+      const resetCount = result.data?.resetCount || 0;
+      const message = result.message || "";
+      console.log(`[${formatDateTimeVN()}] Startup expired check completed:`, { resetCount, message });
+      if (resetCount > 0 && result.data?.resetProducts) {
+        console.log(`[${formatDateTimeVN()}] Reset products (startup):`, result.data.resetProducts);
+      }
+    } else {
+      console.error(`[${formatDateTimeVN()}] Startup expired check failed:`, result.message);
+    }
+  } catch (error) {
+    console.error(`[${formatDateTimeVN()}] Error in startup expired check:`, error);
+  }
+};
+
+/**
+ * Chạy một lần: chốt lô các sản phẩm đã bán hết nhưng chưa được reset (bắt lại trường hợp bán hết trước khi có auto-reset)
+ */
+const runSoldOutCatchUpOnce = async () => {
+  console.log(`[${formatDateTimeVN()}] Running startup check: sold-out products (catch-up)...`);
+  try {
+    const result = await ProductBatchService.autoResetSoldOutProductsCatchUp();
+    if (result.status === "OK") {
+      const resetCount = result.data?.resetCount || 0;
+      console.log(`[${formatDateTimeVN()}] Startup sold-out catch-up completed:`, { resetCount });
+      if (resetCount > 0 && result.data?.resetProducts) {
+        console.log(`[${formatDateTimeVN()}] Chốt lô (catch-up):`, result.data.resetProducts);
+      }
+    } else {
+      console.error(`[${formatDateTimeVN()}] Startup sold-out catch-up failed:`, result.message);
+    }
+  } catch (error) {
+    console.error(`[${formatDateTimeVN()}] Error in startup sold-out catch-up:`, error);
+  }
+};
+
+/**
  * Scheduled job: Tự động reset products hết hạn
- * Chạy mỗi ngày lúc 00:00 (theo timezone Asia/Ho_Chi_Minh)
- * Cron expression: "0 0 * * *" = 00:00 mỗi ngày (theo server timezone)
- * 
- * Lưu ý: Server timezone nên được set về Asia/Ho_Chi_Minh hoặc tính toán offset
+ * - Khi server khởi động: chạy 1 lần kiểm tra sản phẩm hết hạn (bắt trường hợp miss 00:00)
+ * - Hàng ngày lúc 00:00 (Asia/Ho_Chi_Minh): chạy lại
  */
 const startProductBatchJob = () => {
-  // Chạy mỗi ngày lúc 00:00 (theo server timezone)
-  // Nếu server timezone là UTC, thì 00:00 UTC = 07:00 VN
-  // Để chạy đúng 00:00 VN, cần set: "0 17 * * *" (17:00 UTC = 00:00 VN+7)
-  // Hoặc tốt hơn: set server timezone về Asia/Ho_Chi_Minh
-  
-  // Tạm thời dùng "0 0 * * *" và giả định server timezone = VN
-  // Nếu server timezone khác, cần điều chỉnh cron expression
+  // ✅ Khi chạy code lên: check sản phẩm hết hạn + bắt lại sản phẩm bán hết chưa chốt lô
+  runExpiredCheckOnce();
+  runSoldOutCatchUpOnce();
+
+  // Chạy mỗi ngày lúc 00:00 (theo timezone Asia/Ho_Chi_Minh)
   cron.schedule("0 0 * * *", async () => {
     console.log(`[${formatDateTimeVN()}] Starting auto-reset expired products job...`);
     

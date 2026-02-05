@@ -96,11 +96,15 @@ const updateOrder = async (req, res) => {
       });
     }
 
+    // Order schema enum: "admin" | "sales-staff" | "customer". User có role_id (populate → name).
+    const roleName = req.user.role_id?.name?.toLowerCase?.() || "admin";
+    const roleForHistory = ["admin", "sales-staff", "customer"].includes(roleName) ? roleName : "admin";
+
     const result = await OrderService.updateOrder(
       order_id,
       status_name,
       req.user._id,
-      req.user.role,
+      roleForHistory,
       note || "",
     );
 
@@ -249,6 +253,23 @@ const getOrderStatusStatsAdmin = async (req, res) => {
   }
 };
 
+const getOrderStatusLogs = async (req, res) => {
+  try {
+    const filters = { ...req.query };
+    if (req.params.id) {
+      filters.order_id = req.params.id;
+    }
+    const response = await OrderService.getOrderStatusLogs(filters);
+    if (response.status === "ERR") return res.status(400).json(response);
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message || "Lấy log thay đổi trạng thái thất bại",
+    });
+  }
+};
+
 module.exports = {
   createOrder,
   updateOrder,
@@ -259,5 +280,5 @@ module.exports = {
   getOrdersAdmin,
   getOrderDetailAdmin,
   getOrderStatusStatsAdmin,
-
+  getOrderStatusLogs,
 };

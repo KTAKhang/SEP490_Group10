@@ -73,6 +73,8 @@ mongoose
     console.log("✅ Connected to MongoDB");
     require("./jobs/autoDeleteFailedOrders");
     require("./jobs/preorderFulfillmentJob").run();
+    // ✅ Start product batch job SAU KHI DB đã kết nối (để startup check expired chạy đúng)
+    startProductBatchJob();
   })
   .catch((error) =>
     console.error("❌ MongoDB connection error:", error)
@@ -83,7 +85,4 @@ mongoose
 ====================== */
 server.listen(port, "0.0.0.0", () => {
   console.log(`🚀 Server running on http://localhost:${port}`);
-
-  // ✅ Start scheduled jobs
-  startProductBatchJob();
 });

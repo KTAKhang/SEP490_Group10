@@ -60,10 +60,10 @@ const buildBasketResponse = (basket) => {
 const validateItems = async (items = []) => {
   const list = Array.isArray(items) ? items : [];
   if (list.length === 0) {
-    return { status: "ERR", message: "Giỏ trái cây phải có ít nhất 1 loại trái cây" };
+    return { status: "ERR", message: "Fruit basket must contain at least 1 fruit type" };
   }
   if (list.length > 5) {
-    return { status: "ERR", message: "Giỏ trái cây chỉ được tối đa 5 loại trái cây" };
+    return { status: "ERR", message: "Fruit basket can contain at most 5 fruit types" };
   }
 
   const productIds = [];
@@ -73,11 +73,11 @@ const validateItems = async (items = []) => {
   for (const item of list) {
     const productId = item?.product || item?.productId;
     if (!productId || !mongoose.isValidObjectId(productId)) {
-      return { status: "ERR", message: "productId không hợp lệ" };
+      return { status: "ERR", message: "Invalid productId" };
     }
     const productIdStr = productId.toString();
     if (productIdSet.has(productIdStr)) {
-      return { status: "ERR", message: "Không được chọn trùng sản phẩm trong giỏ trái cây" };
+      return { status: "ERR", message: "Duplicate products are not allowed in a fruit basket" };
     }
     productIdSet.add(productIdStr);
     const productObjectId = new mongoose.Types.ObjectId(productId);
@@ -85,7 +85,7 @@ const validateItems = async (items = []) => {
 
     const qty = Number(item?.quantity ?? 1);
     if (!Number.isInteger(qty) || qty < 1 || qty > 10) {
-      return { status: "ERR", message: "Số lượng mỗi trái cây phải là số nguyên từ 1 đến 10" };
+      return { status: "ERR", message: "Quantity per fruit must be an integer between 1 and 10" };
     }
 
     normalizedItems.push({
@@ -100,7 +100,7 @@ const validateItems = async (items = []) => {
   }).select("name price status stockStatus onHandQuantity images");
 
   if (products.length !== productIds.length) {
-    return { status: "ERR", message: "Một hoặc nhiều sản phẩm không tồn tại hoặc đã bị ẩn" };
+    return { status: "ERR", message: "One or more products do not exist or are hidden" };
   }
 
   return { status: "OK", productIds, normalizedItems };
@@ -111,13 +111,13 @@ const validateImages = (images, imagePublicIds) => {
   const imagePublicIdArray = coerceArray(imagePublicIds);
 
   if (imageArray.length > 10) {
-    return { status: "ERR", message: "Số lượng ảnh không được vượt quá 10" };
+    return { status: "ERR", message: "Number of images must not exceed 10" };
   }
   if (imagePublicIdArray.length > 10) {
-    return { status: "ERR", message: "Số lượng imagePublicIds không được vượt quá 10" };
+    return { status: "ERR", message: "Number of imagePublicIds must not exceed 10" };
   }
   if (imagePublicIdArray.length > 0 && imageArray.length !== imagePublicIdArray.length) {
-    return { status: "ERR", message: "Số lượng images và imagePublicIds phải bằng nhau" };
+    return { status: "ERR", message: "The number of images and imagePublicIds must match" };
   }
 
   return { status: "OK", imageArray, imagePublicIdArray };
@@ -128,7 +128,7 @@ const createFruitBasket = async (payload = {}) => {
     const { name, short_desc, detail_desc, items, images, imagePublicIds, status } = payload;
 
     if (!name || !name.toString().trim()) {
-      return { status: "ERR", message: "Tên giỏ trái cây là bắt buộc" };
+      return { status: "ERR", message: "Fruit basket name is required" };
     }
 
     const normalizedName = name.toString().trim();
@@ -136,7 +136,7 @@ const createFruitBasket = async (payload = {}) => {
       name: { $regex: new RegExp(`^${normalizedName}$`, "i") },
     });
     if (existing) {
-      return { status: "ERR", message: "Tên giỏ trái cây đã tồn tại" };
+      return { status: "ERR", message: "Fruit basket name already exists" };
     }
 
     const itemCheck = await validateItems(items);
@@ -164,7 +164,7 @@ const createFruitBasket = async (payload = {}) => {
 
     return {
       status: "OK",
-      message: "Tạo giỏ trái cây thành công",
+      message: "Fruit basket created successfully",
       data: buildBasketResponse(populated),
     };
   } catch (error) {
@@ -204,7 +204,7 @@ const getFruitBaskets = async ({ page = 1, limit = 5, search = "", status, sortB
 
     return {
       status: "OK",
-      message: "Lấy danh sách giỏ trái cây thành công",
+      message: "Fetched fruit basket list successfully",
       data: formatted,
       pagination: {
         page: pageNum,
@@ -221,7 +221,7 @@ const getFruitBaskets = async ({ page = 1, limit = 5, search = "", status, sortB
 const getFruitBasketById = async (id) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return { status: "ERR", message: "ID giỏ trái cây không hợp lệ" };
+      return { status: "ERR", message: "Invalid fruit basket ID" };
     }
 
     const basket = await FruitBasketModel.findById(id).populate({
@@ -229,11 +229,11 @@ const getFruitBasketById = async (id) => {
       select: "name price status stockStatus onHandQuantity images",
     });
 
-    if (!basket) return { status: "ERR", message: "Giỏ trái cây không tồn tại" };
+    if (!basket) return { status: "ERR", message: "Fruit basket does not exist" };
 
     return {
       status: "OK",
-      message: "Lấy giỏ trái cây thành công",
+      message: "Fetched fruit basket successfully",
       data: buildBasketResponse(basket),
     };
   } catch (error) {
@@ -244,7 +244,7 @@ const getFruitBasketById = async (id) => {
 const updateFruitBasket = async (id, payload = {}) => {
   try {
     const basket = await FruitBasketModel.findById(id);
-    if (!basket) return { status: "ERR", message: "Giỏ trái cây không tồn tại" };
+    if (!basket) return { status: "ERR", message: "Fruit basket does not exist" };
 
     const allowed = ["name", "short_desc", "detail_desc", "items", "images", "imagePublicIds", "status"];
     for (const key of Object.keys(payload)) {
@@ -253,13 +253,13 @@ const updateFruitBasket = async (id, payload = {}) => {
 
     if (payload.name !== undefined) {
       const newName = (payload.name ?? "").toString().trim();
-      if (!newName) return { status: "ERR", message: "Tên giỏ trái cây là bắt buộc" };
+      if (!newName) return { status: "ERR", message: "Fruit basket name is required" };
 
       const existing = await FruitBasketModel.findOne({
         _id: { $ne: id },
         name: { $regex: new RegExp(`^${newName}$`, "i") },
       });
-      if (existing) return { status: "ERR", message: "Tên giỏ trái cây đã tồn tại" };
+      if (existing) return { status: "ERR", message: "Fruit basket name already exists" };
       basket.name = newName;
     }
 
@@ -290,7 +290,7 @@ const updateFruitBasket = async (id, payload = {}) => {
 
     return {
       status: "OK",
-      message: "Cập nhật giỏ trái cây thành công",
+      message: "Fruit basket updated successfully",
       data: buildBasketResponse(populated),
     };
   } catch (error) {
@@ -301,10 +301,10 @@ const updateFruitBasket = async (id, payload = {}) => {
 const deleteFruitBasket = async (id) => {
   try {
     const basket = await FruitBasketModel.findById(id);
-    if (!basket) return { status: "ERR", message: "Giỏ trái cây không tồn tại" };
+    if (!basket) return { status: "ERR", message: "Fruit basket does not exist" };
 
     await FruitBasketModel.findByIdAndDelete(id);
-    return { status: "OK", message: "Xóa giỏ trái cây thành công" };
+    return { status: "OK", message: "Fruit basket deleted successfully" };
   } catch (error) {
     return { status: "ERR", message: error.message };
   }

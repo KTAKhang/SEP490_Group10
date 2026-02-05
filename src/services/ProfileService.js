@@ -87,7 +87,7 @@ const getUserById = (id) => {
             if (!userDetail) {
                 resolve({
                     status: "ERR",
-                    message: "Người dùng không tồn tại",
+                    message: "User does not exist",
                 });
             }
             const dataUser = await UserModel.findById(userDetail._id).populate(
@@ -112,12 +112,12 @@ const getUserById = (id) => {
             if (!userDetail) {
                 resolve({
                     status: "ERR",
-                    message: "Người dùng không tồn tại",
+                    message: "User does not exist",
                 });
             }
             resolve({
                 status: "OK",
-                message: "Nhận thông tin người dùng thành công!",
+                message: "Fetched user information successfully!",
                 data: dataOutput,
             });
         } catch (error) {
@@ -129,14 +129,14 @@ const changePassword = async (userID, old_password, new_password) => {
     try {
         const checkUser = await UserModel.findById(userID);
         if (!checkUser) {
-            return { status: "ERR", message: "Người dùng không tồn tại!" };
+            return { status: "ERR", message: "User does not exist!" };
         }
         if (checkUser.isGoogleAccount === true) {
-            return { status: "ERR", message: "Không thể đổi mật khẩu cho tài khoản Google." };
+            return { status: "ERR", message: "Cannot change the password for a Google account." };
         }
         const checkPassword = bcrypt.compareSync(old_password, checkUser.password);
         if (!checkPassword) {
-            return { status: "ERR", message: "Mật khẩu cũ không đúng!" };
+            return { status: "ERR", message: "Incorrect current password!" };
         }
         const hash = bcrypt.hashSync(new_password, 10);
         const updateData = await UserModel.findByIdAndUpdate(
@@ -163,7 +163,7 @@ const changePassword = async (userID, old_password, new_password) => {
         };
         return {
             status: "OK",
-            message: "Thay đổi mật khẩu thành công!",
+            message: "Password changed successfully!",
             data: dataOutput,
         };
     } catch (error) {

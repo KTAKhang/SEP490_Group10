@@ -29,7 +29,7 @@ const getCategories = async ({ page = 1, limit = 6, search = "", sortBy = "creat
 
     return {
       status: "OK",
-      message: "Lấy danh sách danh mục thành công",
+      message: "Fetched category list successfully",
       data,
       pagination: {
         page: pageNum,

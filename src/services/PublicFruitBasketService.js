@@ -74,7 +74,7 @@ const getFruitBaskets = async ({ page = 1, limit = 12, search = "", sortBy = "cr
 
     return {
       status: "OK",
-      message: "Lấy danh sách giỏ trái cây thành công",
+      message: "Fetched fruit basket list successfully",
       data: formatted,
       pagination: {
         page: pageNum,
@@ -91,7 +91,7 @@ const getFruitBaskets = async ({ page = 1, limit = 12, search = "", sortBy = "cr
 const getFruitBasketById = async (id) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return { status: "ERR", message: "ID giỏ trái cây không hợp lệ" };
+      return { status: "ERR", message: "Invalid fruit basket ID" };
     }
 
     const basket = await FruitBasketModel.findById(id).populate({
@@ -100,12 +100,12 @@ const getFruitBasketById = async (id) => {
     });
 
     if (!basket || basket.status === false) {
-      return { status: "ERR", message: "Giỏ trái cây không tồn tại" };
+      return { status: "ERR", message: "Fruit basket does not exist" };
     }
 
     return {
       status: "OK",
-      message: "Lấy giỏ trái cây thành công",
+      message: "Fetched fruit basket successfully",
       data: buildBasketResponse(basket),
     };
   } catch (error) {

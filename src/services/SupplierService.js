@@ -23,18 +23,24 @@ const createSupplier = async (userId, payload = {}) => {
     } = payload;
 
     if (!name || !name.toString().trim()) {
-      return { status: "ERR", message: "Tên nhà cung cấp là bắt buộc" };
+      return { status: "ERR", message: "Supplier name is required" };
     }
 
     if (!type || !["FARM", "COOPERATIVE", "BUSINESS"].includes(type)) {
-      return { status: "ERR", message: "Loại nhà cung cấp phải là FARM, COOPERATIVE hoặc BUSINESS" };
+      return {
+        status: "ERR",
+        message: "Supplier type must be FARM, COOPERATIVE, or BUSINESS",
+      };
     }
 
     // ✅ BR-SUP-02: Phải có phone hoặc email (ít nhất 1)
     const normalizedPhone = phone?.toString().trim() || "";
     const normalizedEmail = email?.toString().trim() || "";
     if (!normalizedPhone && !normalizedEmail) {
-      return { status: "ERR", message: "Phải có ít nhất số điện thoại hoặc email" };
+      return {
+        status: "ERR",
+        message: "At least one phone number or email is required",
+      };
     }
 
     // ✅ BR-SUP-03: Kiểm tra trùng (name + phone)
@@ -46,7 +52,10 @@ const createSupplier = async (userId, payload = {}) => {
         phone: normalizedPhone,
       });
       if (existingByNamePhone) {
-        return { status: "ERR", message: `Nhà cung cấp "${normalizedName}" với số điện thoại "${normalizedPhone}" đã tồn tại` };
+        return {
+          status: "ERR",
+          message: `Supplier "${normalizedName}" with phone number "${normalizedPhone}" already exists`,
+        };
       }
     }
 
@@ -67,7 +76,7 @@ const createSupplier = async (userId, payload = {}) => {
 
     return {
       status: "OK",
-      message: "Tạo nhà cung cấp thành công",
+      message: "Supplier created successfully",
       data: supplier,
     };
   } catch (error) {
@@ -82,7 +91,7 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
   try {
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {
-      return { status: "ERR", message: "Nhà cung cấp không tồn tại" };
+      return { status: "ERR", message: "Supplier does not exist" };
     }
 
     // ✅ BR-SUP-04: Không cho chỉnh sửa Supplier TERMINATED trừ Admin
@@ -94,7 +103,7 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
     if (supplier.cooperationStatus === "TERMINATED" && !isAdmin) {
       return { 
         status: "ERR", 
-        message: "Không thể chỉnh sửa nhà cung cấp đã ngừng hợp tác. Chỉ Admin mới có quyền thực hiện." 
+        message: "Cannot edit a supplier that has ended cooperation. Only admins can perform this action." 
       };
     }
 
@@ -120,7 +129,10 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
     const newPhone = payload.phone !== undefined ? payload.phone?.toString().trim() || "" : supplier.phone || "";
     const newEmail = payload.email !== undefined ? payload.email?.toString().trim() || "" : supplier.email || "";
     if (!newPhone && !newEmail) {
-      return { status: "ERR", message: "Phải có ít nhất số điện thoại hoặc email" };
+      return {
+        status: "ERR",
+        message: "At least one phone number or email is required",
+      };
     }
 
     // Track changes
@@ -136,7 +148,10 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
           phone: newPhone,
         });
         if (existingByNamePhone) {
-          return { status: "ERR", message: `Nhà cung cấp "${normalizedName}" với số điện thoại "${newPhone}" đã tồn tại` };
+          return {
+            status: "ERR",
+            message: `Supplier "${normalizedName}" with phone number "${newPhone}" already exists`,
+          };
         }
       }
       supplier.name = normalizedName;
@@ -144,7 +159,10 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
 
     if (payload.type !== undefined && payload.type !== supplier.type) {
       if (!["FARM", "COOPERATIVE", "BUSINESS"].includes(payload.type)) {
-        return { status: "ERR", message: "Loại nhà cung cấp phải là FARM, COOPERATIVE hoặc BUSINESS" };
+        return {
+          status: "ERR",
+          message: "Supplier type must be FARM, COOPERATIVE, or BUSINESS",
+        };
       }
       changes.set("type", { old: supplier.type, new: payload.type });
       supplier.type = payload.type;
@@ -185,7 +203,7 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
 
     return {
       status: "OK",
-      message: "Cập nhật nhà cung cấp thành công",
+      message: "Supplier updated successfully",
       data: supplier,
     };
   } catch (error) {
@@ -368,7 +386,7 @@ const getSuppliers = async (filters = {}) => {
 
     return {
       status: "OK",
-      message: "Lấy danh sách nhà cung cấp thành công",
+      message: "Fetched supplier list successfully",
       data,
       pagination: {
         page: pageNum,
@@ -388,12 +406,12 @@ const getSuppliers = async (filters = {}) => {
 const deleteSupplier = async (supplierId, userId) => {
   try {
     if (!mongoose.isValidObjectId(supplierId)) {
-      return { status: "ERR", message: "supplierId không hợp lệ" };
+      return { status: "ERR", message: "Invalid supplierId" };
     }
 
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {
-      return { status: "ERR", message: "Nhà cung cấp không tồn tại" };
+      return { status: "ERR", message: "Supplier does not exist" };
     }
 
     // Kiểm tra có products đang sử dụng supplier này không
@@ -418,7 +436,7 @@ const deleteSupplier = async (supplierId, userId) => {
 
     return {
       status: "OK",
-      message: "Xóa nhà cung cấp thành công",
+      message: "Supplier deleted successfully",
     };
   } catch (error) {
     return { status: "ERR", message: error.message };
@@ -431,7 +449,7 @@ const deleteSupplier = async (supplierId, userId) => {
 const getSupplierById = async (supplierId) => {
   try {
     if (!mongoose.isValidObjectId(supplierId)) {
-      return { status: "ERR", message: "ID nhà cung cấp không hợp lệ" };
+      return { status: "ERR", message: "Invalid supplier ID" };
     }
 
     const supplier = await SupplierModel.findById(supplierId)
@@ -440,12 +458,12 @@ const getSupplierById = async (supplierId) => {
       .lean();
 
     if (!supplier) {
-      return { status: "ERR", message: "Nhà cung cấp không tồn tại" };
+      return { status: "ERR", message: "Supplier does not exist" };
     }
 
     return {
       status: "OK",
-      message: "Lấy chi tiết nhà cung cấp thành công",
+      message: "Fetched supplier details successfully",
       data: supplier,
     };
   } catch (error) {
@@ -468,7 +486,7 @@ const getSuppliersForBrand = async () => {
 
     return {
       status: "OK",
-      message: "Lấy danh sách nhà cung cấp thành công",
+      message: "Fetched supplier list successfully",
       data: suppliers,
     };
   } catch (error) {
@@ -484,26 +502,29 @@ const updatePurchaseCost = async (supplierId, userId, payload = {}) => {
     const { productId, cost } = payload;
 
     if (!mongoose.isValidObjectId(supplierId)) {
-      return { status: "ERR", message: "supplierId không hợp lệ" };
+      return { status: "ERR", message: "Invalid supplierId" };
     }
 
     if (!mongoose.isValidObjectId(productId)) {
-      return { status: "ERR", message: "productId không hợp lệ" };
+      return { status: "ERR", message: "Invalid productId" };
     }
 
     const costValue = Number(cost);
     if (!Number.isFinite(costValue) || costValue < 0) {
-      return { status: "ERR", message: "Giá mua phải là số >= 0" };
+      return {
+        status: "ERR",
+        message: "Purchase price must be greater than or equal to 0",
+      };
     }
 
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {
-      return { status: "ERR", message: "Nhà cung cấp không tồn tại" };
+      return { status: "ERR", message: "Supplier does not exist" };
     }
 
     const product = await ProductModel.findById(productId);
     if (!product) {
-      return { status: "ERR", message: "Sản phẩm không tồn tại" };
+      return { status: "ERR", message: "Product does not exist" };
     }
 
     const oldCost = supplier.purchaseCosts?.get(productId.toString()) || 0;
@@ -521,7 +542,7 @@ const updatePurchaseCost = async (supplierId, userId, payload = {}) => {
 
     return {
       status: "OK",
-      message: "Cập nhật giá mua thành công",
+      message: "Purchase price updated successfully",
       data: {
         supplier: supplier,
         product: { _id: product._id, name: product.name },
@@ -541,17 +562,20 @@ const updateCooperationStatus = async (supplierId, userId, payload = {}) => {
     const { cooperationStatus, notes } = payload;
 
     if (!cooperationStatus || !["ACTIVE", "SUSPENDED", "TERMINATED"].includes(cooperationStatus)) {
-      return { status: "ERR", message: "Trạng thái hợp tác phải là ACTIVE, SUSPENDED hoặc TERMINATED" };
+      return {
+        status: "ERR",
+        message: "Cooperation status must be ACTIVE, SUSPENDED, or TERMINATED",
+      };
     }
 
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {
-      return { status: "ERR", message: "Nhà cung cấp không tồn tại" };
+      return { status: "ERR", message: "Supplier does not exist" };
     }
 
     const oldStatus = supplier.cooperationStatus;
     if (oldStatus === cooperationStatus) {
-      return { status: "OK", message: "Trạng thái không thay đổi", data: supplier };
+      return { status: "OK", message: "Status unchanged", data: supplier };
     }
 
     supplier.cooperationStatus = cooperationStatus;
@@ -563,7 +587,7 @@ const updateCooperationStatus = async (supplierId, userId, payload = {}) => {
 
     return {
       status: "OK",
-      message: "Cập nhật trạng thái hợp tác thành công",
+      message: "Cooperation status updated successfully",
       data: supplier,
     };
   } catch (error) {

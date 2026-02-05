@@ -43,17 +43,6 @@ const harvestBatchSchema = new mongoose.Schema(
       match: [/^\d{4}-\d{2}-\d{2}$/, "harvestDateStr phải có format YYYY-MM-DD"],
     },
 
-    quantity: {
-      type: Number,
-      required: [true, "Số lượng là bắt buộc"],
-      min: [1, "Số lượng phải lớn hơn 0"],
-      validate: {
-        validator: Number.isInteger,
-        message: "quantity phải là số nguyên",
-      },
-      // ✅ Mặc định tính theo kilogram (KG)
-    },
-
     // ✅ Tracking số lượng đã nhập kho
     receivedQuantity: {
       type: Number,
@@ -65,20 +54,11 @@ const harvestBatchSchema = new mongoose.Schema(
       },
     },
 
-    // ✅ Virtual: remainingQuantity = quantity - receivedQuantity
-    // (không lưu vào DB, tính toán mỗi lần query)
-
     location: {
       type: String,
       trim: true,
       maxlength: [200, "Địa điểm thu hoạch không được vượt quá 200 ký tự"],
       // ✅ BR-SUP-10: Location (khu vực/vùng trồng) là recommended nhưng optional để linh hoạt
-    },
-
-    qualityGrade: {
-      type: String,
-      enum: ["A", "B", "C", "D"],
-      default: "A",
     },
 
     notes: {
@@ -94,14 +74,28 @@ const harvestBatchSchema = new mongoose.Schema(
       ref: "inventory_transactions",
       default: [],
     },
+
+    /**
+     * receiptEligible: Chỉ lô có status true mới được chọn để nhập hàng vào kho.
+     * false = không thể chọn lô này khi tạo phiếu nhập kho.
+     */
+    receiptEligible: {
+      type: Boolean,
+      default: true,
+    },
+
+    /**
+     * visibleInReceipt: Ẩn/hiện trong danh sách chọn lô khi nhập kho.
+     * false = ẩn khỏi dropdown (tránh hiển thị lô đã nhập, giảm rối loạn cho nhân viên kho).
+     * Được set false sau khi lô đã được nhập kho.
+     */
+    visibleInReceipt: {
+      type: Boolean,
+      default: true,
+    },
   },
   { timestamps: true }
 );
-
-// ✅ Virtual: remainingQuantity = quantity - receivedQuantity
-harvestBatchSchema.virtual("remainingQuantity").get(function () {
-  return Math.max(0, (this.quantity || 0) - (this.receivedQuantity || 0));
-});
 
 // ✅ Enable virtuals in JSON output
 harvestBatchSchema.set("toJSON", { virtuals: true });
@@ -146,13 +140,10 @@ harvestBatchSchema.pre("save", function (next) {
     return next(new Error("Mã lô thu hoạch không thể chỉnh sửa sau khi tạo"));
   }
 
-  // ✅ Validation: receivedQuantity <= quantity
+  // ✅ Validation: receivedQuantity >= 0
   if (this.isModified("receivedQuantity") && this.receivedQuantity !== undefined) {
     if (this.receivedQuantity < 0) {
       return next(new Error("receivedQuantity không được âm"));
-    }
-    if (this.receivedQuantity > (this.quantity || 0)) {
-      return next(new Error("receivedQuantity không được lớn hơn quantity"));
     }
   }
 

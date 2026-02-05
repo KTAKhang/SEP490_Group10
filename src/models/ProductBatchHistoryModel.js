@@ -97,6 +97,45 @@ const productBatchHistorySchema = new mongoose.Schema(
       required: true,
     },
 
+    // ✅ Giá nhập / giá bán tại thời điểm chốt lô (để tính doanh thu, lợi nhuận gộp, tổn thất)
+    unitCostPrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    unitSellPrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    // ✅ Bán xả kho / giảm giá: doanh thu và số lượng từ đơn hàng trong kỳ lô
+    actualRevenue: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    clearanceQuantity: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    clearanceRevenue: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    fullPriceQuantity: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    fullPriceRevenue: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     // Trạng thái: luôn là "COMPLETED"
     status: {
       type: String,

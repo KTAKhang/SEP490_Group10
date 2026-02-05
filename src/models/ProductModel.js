@@ -185,6 +185,20 @@ const productSchema = new mongoose.Schema(
       match: [/^\d{4}-\d{2}-\d{2}$/, "expiryDateStr phải có format YYYY-MM-DD"],
     },
 
+    // ✅ Giá sắp hết hạn: còn ≤ nearExpiryDaysThreshold ngày thì bán với giá giảm (effectivePrice = price * (1 - nearExpiryDiscountPercent/100))
+    nearExpiryDaysThreshold: {
+      type: Number,
+      default: 7,
+      min: 0,
+      validate: { validator: Number.isInteger, message: "nearExpiryDaysThreshold phải là số nguyên" },
+    },
+    nearExpiryDiscountPercent: {
+      type: Number,
+      default: 50,
+      min: 0,
+      max: 100,
+    },
+
   },
   { 
     timestamps: true,

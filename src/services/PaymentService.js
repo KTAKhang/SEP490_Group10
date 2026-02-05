@@ -87,7 +87,7 @@ const refundVNPaySync = async ({ order_id, session }) => {
     status: "SUCCESS",
   }).session(session);
 
-  if (!payment) throw new Error("Không tìm thấy payment để hoàn tiền");
+  if (!payment) throw new Error("Payment not found for refund");
 
   const result = await refund({
     order_id,
@@ -96,7 +96,7 @@ const refundVNPaySync = async ({ order_id, session }) => {
   });
 
   if (result.vnp_ResponseCode !== "00") {
-    throw new Error("VNPay refund thất bại");
+    throw new Error("VNPay refund failed");
   }
 
   await PaymentModel.create(
@@ -108,7 +108,7 @@ const refundVNPaySync = async ({ order_id, session }) => {
         amount: payment.amount,
         status: "SUCCESS",
         provider_response: result,
-        note: "Refund khi huỷ đơn",
+        note: "Refund for cancelled order",
       },
     ],
     { session },

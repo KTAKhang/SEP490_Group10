@@ -5,7 +5,7 @@ const cloudinary = require("../config/cloudinaryConfig");
 const createCategory = async ({ name, description, image, imagePublicId, status }) => {
   try {
     if (!name || !name.trim()) {
-      return { status: "ERR", message: "Tên danh mục là bắt buộc" };
+      return { status: "ERR", message: "Category name is required" };
     }
 
     const normalizedName = name.trim();
@@ -13,7 +13,7 @@ const createCategory = async ({ name, description, image, imagePublicId, status 
       name: { $regex: new RegExp(`^${normalizedName}$`, "i") },
     });
     if (existing) {
-      return { status: "ERR", message: "Tên danh mục đã tồn tại" };
+      return { status: "ERR", message: "Category name already exists" };
     }
 
     const category = new CategoryModel({
@@ -26,7 +26,7 @@ const createCategory = async ({ name, description, image, imagePublicId, status 
 
     await category.save();
 
-    return { status: "OK", message: "Tạo danh mục thành công", data: category };
+    return { status: "OK", message: "Category created successfully", data: category };
   } catch (error) {
     return { status: "ERR", message: error.message };
   }
@@ -55,7 +55,7 @@ const getCategories = async ({ page = 1, limit = 20, search = "", status, sortBy
 
     return {
       status: "OK",
-      message: "Lấy danh sách danh mục thành công",
+      message: "Fetched category list successfully",
       data,
       pagination: {
         page: pageNum,
@@ -72,8 +72,8 @@ const getCategories = async ({ page = 1, limit = 20, search = "", status, sortBy
 const getCategoryById = async (id) => {
   try {
     const category = await CategoryModel.findById(id);
-    if (!category) return { status: "ERR", message: "Danh mục không tồn tại" };
-    return { status: "OK", message: "Lấy danh mục thành công", data: category };
+    if (!category) return { status: "ERR", message: "Category does not exist" };
+    return { status: "OK", message: "Fetched category successfully", data: category };
   } catch (error) {
     return { status: "ERR", message: error.message };
   }
@@ -82,19 +82,19 @@ const getCategoryById = async (id) => {
 const updateCategory = async (id, payload = {}) => {
   try {
     const category = await CategoryModel.findById(id);
-    if (!category) return { status: "ERR", message: "Danh mục không tồn tại" };
+    if (!category) return { status: "ERR", message: "Category does not exist" };
 
     // Lưu ảnh cũ để xóa sau nếu có ảnh mới
     const oldImagePublicId = category.imagePublicId;
 
     if (payload.name !== undefined) {
       const newName = (payload.name ?? "").toString().trim();
-      if (!newName) return { status: "ERR", message: "Tên danh mục là bắt buộc" };
+      if (!newName) return { status: "ERR", message: "Category name is required" };
       const existing = await CategoryModel.findOne({
         _id: { $ne: id },
         name: { $regex: new RegExp(`^${newName}$`, "i") },
       });
-      if (existing) return { status: "ERR", message: "Tên danh mục đã tồn tại" };
+      if (existing) return { status: "ERR", message: "Category name already exists" };
       category.name = newName;
     }
 
@@ -107,7 +107,7 @@ const updateCategory = async (id, payload = {}) => {
         try {
           await cloudinary.uploader.destroy(oldImagePublicId);
         } catch (err) {
-          console.warn("Không thể xóa ảnh cũ trên Cloudinary:", err.message);
+          console.warn("Failed to delete old image from Cloudinary:", err.message);
         }
       }
       category.image = (payload.image ?? "").toString();
@@ -118,7 +118,7 @@ const updateCategory = async (id, payload = {}) => {
         try {
           await cloudinary.uploader.destroy(oldImagePublicId);
         } catch (err) {
-          console.warn("Không thể xóa ảnh cũ trên Cloudinary:", err.message);
+          console.warn("Failed to delete old image from Cloudinary:", err.message);
         }
       }
       category.image = "";
@@ -129,7 +129,7 @@ const updateCategory = async (id, payload = {}) => {
 
     await category.save();
 
-    return { status: "OK", message: "Cập nhật danh mục thành công", data: category };
+    return { status: "OK", message: "Category updated successfully", data: category };
   } catch (error) {
     return { status: "ERR", message: error.message };
   }
@@ -138,14 +138,14 @@ const updateCategory = async (id, payload = {}) => {
 const deleteCategory = async (id) => {
   try {
     const category = await CategoryModel.findById(id);
-    if (!category) return { status: "ERR", message: "Danh mục không tồn tại" };
+    if (!category) return { status: "ERR", message: "Category does not exist" };
 
     // Kiểm tra xem có sản phẩm nào đang sử dụng category này không
     const productCount = await ProductModel.countDocuments({ category: id });
     if (productCount > 0) {
       return { 
         status: "ERR", 
-        message: `Không thể xóa danh mục này vì có ${productCount} sản phẩm đang sử dụng. Vui lòng xóa hoặc chuyển các sản phẩm sang danh mục khác trước.` 
+        message: `Cannot delete this category because ${productCount} products are using it. Please remove or reassign those products first.` 
       };
     }
 
@@ -154,12 +154,12 @@ const deleteCategory = async (id) => {
       try {
         await cloudinary.uploader.destroy(category.imagePublicId);
       } catch (err) {
-        console.warn("Không thể xóa ảnh trên Cloudinary:", err.message);
+        console.warn("Failed to delete image from Cloudinary:", err.message);
       }
     }
 
     await CategoryModel.findByIdAndDelete(id);
-    return { status: "OK", message: "Xóa danh mục thành công" };
+    return { status: "OK", message: "Category deleted successfully" };
   } catch (error) {
     return { status: "ERR", message: error.message };
   }
@@ -175,7 +175,7 @@ const getCategoryStats = async () => {
 
     return {
       status: "OK",
-      message: "Lấy thống kê danh mục thành công",
+      message: "Fetched category statistics successfully",
       data: {
         total,
         active,

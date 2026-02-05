@@ -311,10 +311,29 @@ const vnpayReturn = async (req, res) => {
 
         await session.commitTransaction();
 
+        // ✅ Tự động chốt lô (reset) sản phẩm bán hết sau khi trừ kho (VNPAY)
+        const orderDetailsForReset = await OrderDetailModel.find({ order_id: order._id }).select("product_id").lean();
+        const ProductBatchService = require("../services/ProductBatchService");
+        for (const item of orderDetailsForReset) {
+          try {
+            const product = await ProductModel.findById(item.product_id)
+              .select("onHandQuantity warehouseEntryDate warehouseEntryDateStr")
+              .lean();
+            if (product && product.onHandQuantity === 0 && (product.warehouseEntryDate || product.warehouseEntryDateStr)) {
+              await ProductBatchService.autoResetSoldOutProduct(item.product_id.toString());
+            }
+          } catch (e) {
+            console.error("Auto-reset sold out product failed:", item.product_id, e);
+          }
+        }
+
         return res.redirect(
           `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
         );
       }
+
+      // ✅ Trừ kho khi thanh toán VNPAY thành công lần đầu
+      await deductStock(order._id, session);
 
       payment.status = "SUCCESS";
       payment.provider_txn_id = transactionNo;
@@ -333,6 +352,22 @@ const vnpayReturn = async (req, res) => {
       await order.save({ session });
 
       await session.commitTransaction();
+
+      // ✅ Tự động chốt lô (reset) sản phẩm bán hết sau khi trừ kho (VNPAY - lần đầu)
+      const orderDetailsFirstPay = await OrderDetailModel.find({ order_id: order._id }).select("product_id").lean();
+      const ProductBatchServiceFirst = require("../services/ProductBatchService");
+      for (const item of orderDetailsFirstPay) {
+        try {
+          const product = await ProductModel.findById(item.product_id)
+            .select("onHandQuantity warehouseEntryDate warehouseEntryDateStr")
+            .lean();
+          if (product && product.onHandQuantity === 0 && (product.warehouseEntryDate || product.warehouseEntryDateStr)) {
+            await ProductBatchServiceFirst.autoResetSoldOutProduct(item.product_id.toString());
+          }
+        } catch (e) {
+          console.error("Auto-reset sold out product failed:", item.product_id, e);
+        }
+      }
 
       return res.redirect(
         `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,

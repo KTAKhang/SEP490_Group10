@@ -44,6 +44,13 @@ const orderDetailSchema = new mongoose.Schema({
     required: true,
     min: 0,
   },
+
+  // Giá gốc tại thời điểm đặt (để phân biệt bán đúng giá vs bán xả kho / giảm giá)
+  original_price: {
+    type: Number,
+    default: null,
+    min: 0,
+  },
 });
 const OrderDetailModel = mongoose.model('order_details', orderDetailSchema);
 module.exports = OrderDetailModel;

@@ -2,6 +2,7 @@ const CartModel = require("../models/CartsModel");
 const CartDetailModel = require("../models/CartDetailsModel");
 const ProductModel = require("../models/ProductModel");
 const { default: mongoose } = require("mongoose");
+const { getEffectivePrice } = require("../utils/productPrice");
 
 const addItemToCart = async (user_id, product_id, quantity) => {
   const session = await mongoose.startSession();
@@ -68,13 +69,14 @@ const addItemToCart = async (user_id, product_id, quantity) => {
       cartDetail.quantity = newQty;
       await cartDetail.save({ session });
     } else {
+      const { effectivePrice } = getEffectivePrice(product);
       await CartDetailModel.create(
         [
           {
             cart_id: cart._id,
             product_id,
             quantity,
-            price: product.price,
+            price: effectivePrice,
           },
         ],
         { session }
@@ -236,24 +238,30 @@ const getCartItems = async (user_id) => {
 
   const items = await CartDetailModel.find({ cart_id: cart._id }).populate(
     "product_id",
-    "name images price onHandQuantity status"
+    "name images price onHandQuantity status expiryDateStr expiryDate nearExpiryDaysThreshold nearExpiryDiscountPercent"
   );
 
-  const formattedItems = items.map((item) => ({
-    product_id: item.product_id._id,
-    name: item.product_id.name,
-    image: item.product_id.images?.[0],
-    price: item.price,
-    quantity: item.quantity,
-    in_stock: item.product_id.onHandQuantity,
-    status: item.product_id.status,
-    warning: !item.product_id.status
-      ? "The product has been discontinued"
-      : item.product_id.onHandQuantity <= 0
-      ? "The product is temporarily out of stock"
-      : "In stock",
-    subtotal: item.quantity * item.price,
-  }));
+  const formattedItems = items.map((item) => {
+    const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(item.product_id);
+    const priceToUse = effectivePrice;
+    return {
+      product_id: item.product_id._id,
+      name: item.product_id.name,
+      image: item.product_id.images?.[0],
+      price: priceToUse,
+      originalPrice: isNearExpiry ? originalPrice : null,
+      isNearExpiry,
+      quantity: item.quantity,
+      in_stock: item.product_id.onHandQuantity,
+      status: item.product_id.status,
+      warning: !item.product_id.status
+        ? "The product has been discontinued"
+        : item.product_id.onHandQuantity <= 0
+        ? "The product is temporarily out of stock"
+        : "In stock",
+      subtotal: item.quantity * priceToUse,
+    };
+  });
 
   return {
     cart_id: cart._id,
