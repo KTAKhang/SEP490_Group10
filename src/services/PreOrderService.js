@@ -8,8 +8,8 @@
  * - Admin: list/filter pre-orders, view detail, mark order completed when delivery is done
  *
  * Core flow:
- * 1. Customer creates payment intent → pays deposit via VNPay → fulfillPaymentIntent creates PreOrder (status WAITING_FOR_PRODUCT)
- * 2. Admin allocates stock → customer can pay remaining; fulfillRemainingPayment sets remainingPaidAt + status READY_FOR_FULFILLMENT
+ * 1. Customer creates payment intent → pays deposit via VNPay → fulfillPaymentIntent creates PreOrder (status WAITING_FOR_ALLOCATION)
+ * 2. Admin allocates stock (FIFO); allocated orders → ALLOCATED_WAITING_PAYMENT; customer pays remaining → READY_FOR_FULFILLMENT
  * 3. Admin marks completed when delivery is done (status COMPLETED)
  *
  * Pre-orders cannot be cancelled by customer.
@@ -17,11 +17,10 @@
 
 const FruitTypeModel = require("../models/FruitTypeModel");
 const PreOrderModel = require("../models/PreOrderModel");
-const PreOrderAllocationModel = require("../models/PreOrderAllocationModel");
 const UserModel = require("../models/UserModel");
 const PreOrderPaymentIntentModel = require("../models/PreOrderPaymentIntentModel");
 const PreOrderRemainingPaymentModel = require("../models/PreOrderRemainingPaymentModel");
-const { isPreOrderLockedByHarvest } = require("./FruitTypeService");
+const { isPreOrderLockedByHarvest, DAYS_BEFORE_HARVEST_TO_LOCK } = require("./FruitTypeService");
 const { createPreOrderVnpayUrl } = require("../utils/createVnpayUrl");
 
 /** Payment intent expiry in minutes (VNPay redirect). */
@@ -34,7 +33,7 @@ const CANCEL_WINDOW_HOURS = 24;
  *
  * Business rules:
  * - Fruit type must exist, allowPreOrder = true, status = ACTIVE
- * - Pre-order is locked 3 days before estimated harvest (no new orders)
+ * - Pre-order is locked N days before estimated harvest (no new orders; N = DAYS_BEFORE_HARVEST_TO_LOCK in FruitTypeService)
  * - Quantity must be within fruit type minOrderKg..maxOrderKg
  * - Deposit is always 50% of (estimatedPrice * quantityKg)
  *
@@ -59,7 +58,7 @@ async function createPaymentIntentAndGetPayUrl({ userId, fruitTypeId, quantityKg
     throw new Error("This fruit type does not accept pre-orders");
   }
   if (isPreOrderLockedByHarvest(fruitType.estimatedHarvestDate)) {
-    throw new Error("Pre-order closed for this fruit: less than 3 days until harvest.");
+    throw new Error(`Pre-order closed for this fruit: less than ${DAYS_BEFORE_HARVEST_TO_LOCK} days until harvest.`);
   }
   const qty = Number(quantityKg);
   if (isNaN(qty) || qty < fruitType.minOrderKg || qty > fruitType.maxOrderKg) {
@@ -95,7 +94,7 @@ async function createPaymentIntentAndGetPayUrl({ userId, fruitTypeId, quantityKg
  * 3. Return list (populated userId, fruitTypeId) and pagination metadata
  *
  * @param {Object} [filters={}] - Filter and pagination options
- * @param {string} [filters.status] - Optional status filter (WAITING_FOR_PRODUCT | READY_FOR_FULFILLMENT | COMPLETED)
+ * @param {string} [filters.status] - Optional status filter (WAITING_FOR_ALLOCATION | WAITING_FOR_NEXT_BATCH | ALLOCATED_WAITING_PAYMENT | READY_FOR_FULFILLMENT | COMPLETED)
  * @param {string} [filters.keyword] - Search term for customer name/email or fruit type name
  * @param {number} [filters.page=1] - Page number
  * @param {number} [filters.limit=20] - Items per page
@@ -160,14 +159,13 @@ async function getAdminPreOrderDetail(id) {
  * Customer: list my pre-orders with optional status filter, sort and pagination. Enriches each order with remainingAmount and canPayRemaining.
  *
  * Business rules:
- * - canPayRemaining = true only when: status WAITING_FOR_PRODUCT, fruit type has allocation (admin allocated), and remaining amount > 0
+ * - canPayRemaining = true only when: status ALLOCATED_WAITING_PAYMENT and remaining amount > 0
  * - remainingAmount = 0 if remainingPaidAt is set; otherwise totalAmount - depositPaid
  *
  * Flow:
  * 1. Build filter by userId and optional status; apply sort and pagination
  * 2. Fetch pre-orders and total count in parallel
- * 3. Load all fruit type IDs that have allocation (allocatedKg > 0)
- * 4. For each pre-order: compute remainingAmount, resolve fruitTypeId (populated or raw), set canPayRemaining
+ * 3. For each pre-order: compute remainingAmount, set canPayRemaining (status === ALLOCATED_WAITING_PAYMENT && remainingAmount > 0)
  *
  * @param {string} userId - Logged-in customer user ID
  * @param {Object} [query={}] - Query options
@@ -175,9 +173,11 @@ async function getAdminPreOrderDetail(id) {
  * @param {number} [query.limit=20] - Items per page
  * @param {string} [query.sortBy="createdAt"] - createdAt | status | totalAmount
  * @param {string} [query.sortOrder="desc"] - asc | desc
- * @param {string} [query.status] - Optional: WAITING_FOR_PRODUCT | READY_FOR_FULFILLMENT | COMPLETED
+ * @param {string} [query.status] - Optional: WAITING_FOR_ALLOCATION | WAITING_FOR_NEXT_BATCH | ALLOCATED_WAITING_PAYMENT | READY_FOR_FULFILLMENT | COMPLETED
  * @returns {Promise<{ status: string, data: Array, pagination: Object }>}
  */
+const PREORDER_STATUSES = ["WAITING_FOR_ALLOCATION", "WAITING_FOR_NEXT_BATCH", "ALLOCATED_WAITING_PAYMENT", "READY_FOR_FULFILLMENT", "COMPLETED", "WAITING_FOR_PRODUCT"];
+
 async function getMyPreOrders(userId, query = {}) {
   const { page = 1, limit = 20, sortBy = "createdAt", sortOrder = "desc", status } = query;
   const limitNum = Math.max(1, Math.min(100, Number(limit) || 20));
@@ -187,7 +187,7 @@ async function getMyPreOrders(userId, query = {}) {
   const sortOpt = { [sortField]: sortOrder === "asc" ? 1 : -1 };
 
   const filter = { userId };
-  if (status && ["WAITING_FOR_PRODUCT", "READY_FOR_FULFILLMENT", "COMPLETED"].includes(status)) {
+  if (status && PREORDER_STATUSES.includes(status)) {
     filter.status = status;
   }
 
@@ -201,22 +201,11 @@ async function getMyPreOrders(userId, query = {}) {
     PreOrderModel.countDocuments(filter),
   ]);
 
-  const allocatedFruitTypeIds = new Set(
-    (await PreOrderAllocationModel.find({ allocatedKg: { $gt: 0 } }).select("fruitTypeId").lean()).map((a) =>
-      a.fruitTypeId.toString()
-    )
-  );
-
   const dataWithRemaining = list.map((po) => {
     const depositPaid = po.depositPaid ?? 0;
     const totalAmount = po.totalAmount ?? 0;
     const remainingAmount = po.remainingPaidAt ? 0 : Math.max(0, totalAmount - depositPaid);
-    const ftId = (po.fruitTypeId && (po.fruitTypeId._id || po.fruitTypeId)) || po.fruitTypeId;
-    const canPayRemaining =
-      po.status === "WAITING_FOR_PRODUCT" &&
-      ftId &&
-      allocatedFruitTypeIds.has(ftId.toString()) &&
-      remainingAmount > 0;
+    const canPayRemaining = po.status === "ALLOCATED_WAITING_PAYMENT" && remainingAmount > 0;
     return { ...po, remainingAmount, canPayRemaining };
   });
   return {
@@ -230,20 +219,18 @@ async function getMyPreOrders(userId, query = {}) {
 const REMAINING_INTENT_EXPIRE_MINUTES = 15;
 
 /**
- * Create a remaining-payment intent (50% balance) and return VNPay URL. Allowed only when pre-order is WAITING_FOR_PRODUCT and admin has allocated stock for that fruit type.
+ * Create a remaining-payment intent (50% balance) and return VNPay URL. Allowed only when pre-order status is ALLOCATED_WAITING_PAYMENT.
  *
  * Business rules:
  * - Pre-order must belong to userId and exist
- * - status must be WAITING_FOR_PRODUCT (remaining payment is offered after allocation, not before)
- * - An allocation record must exist for this pre-order's fruitTypeId with allocatedKg > 0
+ * - status must be ALLOCATED_WAITING_PAYMENT (stock allocated, waiting for remaining 50%)
  * - Order must not already be fully paid (remainingPaidAt null)
  * - Remaining amount = totalAmount - depositPaid must be > 0
  *
  * Flow:
  * 1. Load pre-order and validate ownership and status
- * 2. Check allocation exists for fruitTypeId
- * 3. Compute remaining amount and create PreOrderRemainingPayment (PENDING)
- * 4. Build VNPay URL and return
+ * 2. Compute remaining amount and create PreOrderRemainingPayment (PENDING)
+ * 3. Build VNPay URL and return
  *
  * @param {string} preOrderId - Pre-order document ID
  * @param {string} userId - Logged-in customer user ID
@@ -253,12 +240,9 @@ const REMAINING_INTENT_EXPIRE_MINUTES = 15;
 async function createRemainingPaymentIntent(preOrderId, userId, ip) {
   const po = await PreOrderModel.findOne({ _id: preOrderId, userId }).lean();
   if (!po) throw new Error("Pre-order not found");
-  if (po.status !== "WAITING_FOR_PRODUCT") throw new Error("Remaining payment is available only after allocation. Current status: " + (po.status || "unknown"));
-  const allocation = await PreOrderAllocationModel.findOne({
-    fruitTypeId: po.fruitTypeId,
-    allocatedKg: { $gt: 0 },
-  }).lean();
-  if (!allocation) throw new Error("Product not yet allocated. Please wait for admin to allocate.");
+  if (po.status !== "ALLOCATED_WAITING_PAYMENT") {
+    throw new Error("Remaining payment is available only when stock is allocated. Current status: " + (po.status || "unknown"));
+  }
   if (po.remainingPaidAt) throw new Error("Order already fully paid");
   const totalAmount = po.totalAmount ?? 0;
   const depositPaid = po.depositPaid ?? 0;
@@ -305,7 +289,7 @@ async function fulfillPaymentIntent(intentId, session) {
     userId: intent.userId,
     fruitTypeId: intent.fruitTypeId,
     quantityKg: intent.quantityKg,
-    status: "WAITING_FOR_PRODUCT",
+    status: "WAITING_FOR_ALLOCATION",
     paymentStatus: "PAID",
     depositPaid: intent.amount,
     totalAmount,

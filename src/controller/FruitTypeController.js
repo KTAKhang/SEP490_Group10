@@ -57,4 +57,14 @@ const update = async (req, res) => {
   }
 };
 
-module.exports = { listAvailable, getAvailableById, listAdmin, getById, create, update };
+const remove = async (req, res) => {
+  try {
+    const response = await FruitTypeService.remove(req.params.id);
+    return res.status(200).json(response);
+  } catch (err) {
+    const code = err.message && err.message.includes("not found") ? 404 : 400;
+    return res.status(code).json({ status: "ERR", message: err.message });
+  }
+};
+
+module.exports = { listAvailable, getAvailableById, listAdmin, getById, create, update, remove };

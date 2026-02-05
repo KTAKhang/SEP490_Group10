@@ -1,11 +1,9 @@
 /**
  * Pre-order Allocation Service
  *
- * Business logic for admin allocation of pre-order stock: demand by fruit type (from PreOrder + PreOrderStock),
- * upsert allocation (one-time per fruit type when fully received), list allocations. Does not use Product model.
- *
- * Flow: Warehouse receives stock at Pre-order Stock → Admin runs allocation (upsertAllocation) when receivedKg >= demand
- * → Allocation is one-time only; then fruit type is set INACTIVE. triggerReadyAndNotifyForFruitType sends email/FCM.
+ * Demand = sum(quantityKg) of PreOrders with status WAITING_FOR_ALLOCATION, WAITING_FOR_NEXT_BATCH, ALLOCATED_WAITING_PAYMENT.
+ * READY_FOR_FULFILLMENT and COMPLETED are NOT counted in demand.
+ * Allocation runs FIFO by createdAt: first WAITING_FOR_NEXT_BATCH, then WAITING_FOR_ALLOCATION. No partial allocation.
  */
 
 const mongoose = require("mongoose");
@@ -13,68 +11,75 @@ const PreOrderModel = require("../models/PreOrderModel");
 const PreOrderAllocationModel = require("../models/PreOrderAllocationModel");
 const PreOrderStockModel = require("../models/PreOrderStockModel");
 const FruitTypeModel = require("../models/FruitTypeModel");
-const { triggerReadyAndNotifyForFruitType } = require("./preorderFulfillmentLogic");
+const { triggerReadyAndNotifyForFruitType, notifyPreOrderDelayed } = require("./preorderFulfillmentLogic");
 
-const CANCEL_WINDOW_HOURS = 24;
-/** Optional: only count pre-orders created before this many hours ago (0 = no cutoff). */
-const DEMAND_CUTOFF_HOURS = 0;
+/** Statuses that count toward demand (still needing stock or waiting for remaining payment). */
+const DEMAND_STATUSES = ["WAITING_FOR_ALLOCATION", "WAITING_FOR_NEXT_BATCH", "ALLOCATED_WAITING_PAYMENT", "WAITING_FOR_PRODUCT"];
+/** Statuses that count as already allocated (no longer in demand). */
+const ALLOCATED_STATUSES = ["ALLOCATED_WAITING_PAYMENT", "READY_FOR_FULFILLMENT", "COMPLETED"];
+
+/** In-memory lock: prevent parallel allocation for the same fruit type (reject duplicate concurrent requests). */
+const allocatingFruitIds = new Set();
 
 /**
- * Demand dashboard: aggregate demand (quantityKg) by fruit type from pre-orders (status WAITING_FOR_PRODUCT or READY_FOR_FULFILLMENT),
- * join with PreOrderAllocation (allocatedKg) and PreOrderStock (receivedKg). Optionally filter by keyword (fruit type name) and paginate.
- *
- * Flow:
- * 1. Aggregate PreOrder: match status in [WAITING_FOR_PRODUCT, READY_FOR_FULFILLMENT], optional createdAt cutoff; group by fruitTypeId, sum quantityKg, count
- * 2. Load allocations and stocks for those fruitTypeIds; build allocMap (fruitTypeId -> total allocatedKg) and stockMap (fruitTypeId -> receivedKg)
- * 3. Load FruitType for names; build result rows: demandKg, orderCount, allocatedKg, receivedKgFromPreOrderStock, remainingKg, fullyReceived
- * 4. Optional keyword filter (fruit type name); paginate (slice) and return data + pagination
+ * Demand dashboard: aggregate demand by fruit type from pre-orders with status in DEMAND_STATUSES.
+ * allocatedKg = sum(quantityKg) of orders with status in ALLOCATED_STATUSES (computed from PreOrder).
  *
  * @param {Object} [query={}] - Optional page, limit, keyword
- * @param {number} [query.page=1] - Page number
- * @param {number} [query.limit=20] - Items per page
- * @param {string} [query.keyword] - Filter by fruit type name (case-insensitive substring)
  * @returns {Promise<{ status: string, data: Array, pagination: Object }>}
  */
 const getDemandByFruitType = async (query = {}) => {
   const { page = 1, limit = 20, keyword } = query;
-  const match = { status: { $in: ["WAITING_FOR_PRODUCT", "READY_FOR_FULFILLMENT"] } };
-  if (DEMAND_CUTOFF_HOURS > 0) {
-    const cutoff = new Date(Date.now() - DEMAND_CUTOFF_HOURS * 60 * 60 * 1000);
-    match.createdAt = { $lte: cutoff };
-  }
-  const demandAgg = await PreOrderModel.aggregate([
-    { $match: match },
-    { $group: { _id: "$fruitTypeId", demandKg: { $sum: "$quantityKg" }, count: { $sum: 1 } } },
+  const demandMatch = { status: { $in: DEMAND_STATUSES } };
+  const [demandAgg, stocks] = await Promise.all([
+    PreOrderModel.aggregate([
+      { $match: demandMatch },
+      { $group: { _id: "$fruitTypeId", demandKg: { $sum: "$quantityKg" }, count: { $sum: 1 } } },
+    ]),
+    PreOrderStockModel.find({}).select("fruitTypeId receivedKg").lean(),
   ]);
 
-  const fruitTypeIds = demandAgg.map((d) => d._id);
-  const [allocations, stocks] = await Promise.all([
-    PreOrderAllocationModel.find({ fruitTypeId: { $in: fruitTypeIds } }).lean(),
-    PreOrderStockModel.find({ fruitTypeId: { $in: fruitTypeIds } }).lean(),
+  const demandFruitIds = new Set(demandAgg.map((d) => (d._id || d._id?.toString()).toString()));
+  stocks.forEach((s) => {
+    if (s.fruitTypeId) demandFruitIds.add((s.fruitTypeId._id || s.fruitTypeId).toString());
+  });
+  const fruitTypeIds = [...demandFruitIds].map((id) => new mongoose.Types.ObjectId(id));
+
+  const [allocAgg, fruitTypes] = await Promise.all([
+    PreOrderModel.aggregate([
+      { $match: { fruitTypeId: { $in: fruitTypeIds }, status: { $in: ALLOCATED_STATUSES } } },
+      { $group: { _id: "$fruitTypeId", allocatedKg: { $sum: "$quantityKg" } } },
+    ]),
+    FruitTypeModel.find({ _id: { $in: fruitTypeIds } }).lean(),
   ]);
 
-  const allocMap = {};
-  for (const a of allocations) {
-    const fid = a.fruitTypeId.toString();
-    allocMap[fid] = (allocMap[fid] || 0) + (a.allocatedKg || 0);
-  }
-  const stockMap = Object.fromEntries(stocks.map((s) => [s.fruitTypeId.toString(), s.receivedKg ?? 0]));
-
-  const fruitTypes = await FruitTypeModel.find({ _id: { $in: fruitTypeIds } }).lean();
+  const allocMap = Object.fromEntries(allocAgg.map((a) => [a._id.toString(), a.allocatedKg ?? 0]));
+  const stockMap = Object.fromEntries(
+    stocks.map((s) => {
+      const fid = (s.fruitTypeId?._id || s.fruitTypeId).toString();
+      return [fid, s.receivedKg ?? 0];
+    })
+  );
+  const demandMap = Object.fromEntries(
+    demandAgg.map((d) => [d._id.toString(), { demandKg: d.demandKg ?? 0, count: d.count ?? 0 }])
+  );
   const fruitMap = Object.fromEntries(fruitTypes.map((f) => [f._id.toString(), f]));
 
-  let result = demandAgg.map((d) => {
-    const fid = d._id.toString();
+  let result = fruitTypeIds.map((id) => {
+    const fid = id.toString();
     const ft = fruitMap[fid];
+    const demandInfo = demandMap[fid] || { demandKg: 0, count: 0 };
+    const demandKg = demandInfo.demandKg;
+    const orderCount = demandInfo.count;
     const allocatedKg = allocMap[fid] || 0;
     const receivedKg = stockMap[fid] ?? 0;
-    const remaining = Math.max(0, d.demandKg - allocatedKg);
-    const fullyReceived = receivedKg >= (d.demandKg || 0);
+    const remaining = Math.max(0, demandKg - allocatedKg);
+    const fullyReceived = demandKg > 0 ? receivedKg >= demandKg : true;
     return {
-      fruitTypeId: d._id,
+      fruitTypeId: id,
       fruitTypeName: ft?.name,
-      demandKg: d.demandKg,
-      orderCount: d.count,
+      demandKg,
+      orderCount,
       allocatedKg,
       remainingKg: remaining,
       receivedKgFromPreOrderStock: receivedKg,
@@ -82,6 +87,11 @@ const getDemandByFruitType = async (query = {}) => {
     };
   });
 
+  result.sort((a, b) => {
+    if (a.demandKg > 0 && b.demandKg === 0) return -1;
+    if (a.demandKg === 0 && b.demandKg > 0) return 1;
+    return (a.fruitTypeName || "").localeCompare(b.fruitTypeName || "");
+  });
   if (keyword && String(keyword).trim()) {
     const k = String(keyword).trim().toLowerCase();
     result = result.filter((r) => (r.fruitTypeName || "").toLowerCase().includes(k));
@@ -98,24 +108,30 @@ const getDemandByFruitType = async (query = {}) => {
 };
 
 /**
- * Admin: allocate pre-order stock for a fruit type. Allowed only when PreOrderStock receivedKg >= demand (fully received).
- * Allocation is one-time only per fruit type (allocatedKg = receivedKg). After allocation, fruit type is set INACTIVE.
- * Triggers email and FCM to customers (triggerReadyAndNotifyForFruitType).
+ * Admin: run FIFO allocation for a fruit type. Iterates PreOrders in order: WAITING_FOR_NEXT_BATCH first (by createdAt),
+ * then WAITING_FOR_ALLOCATION. Allocates only when remaining stock >= order.quantityKg; no partial allocation.
+ * If insufficient for current order: set WAITING_FOR_ALLOCATION → WAITING_FOR_NEXT_BATCH and stop.
  *
  * Flow:
- * 1. Load fruit type; load PreOrderStock for fruitTypeId (receivedKg)
- * 2. Aggregate demand: sum(quantityKg) for pre-orders with status WAITING_FOR_PRODUCT or READY_FOR_FULFILLMENT
- * 3. Validate: receivedKg > 0, receivedKg >= demandKg; no existing allocation with allocatedKg > 0
- * 4. Delete any existing allocation rows for fruitTypeId; create new allocation with allocatedKg = receivedKg
- * 5. Call triggerReadyAndNotifyForFruitType (email + FCM); on error log and continue
- * 6. Set fruit type status to INACTIVE
+ * 1. Load fruit type and PreOrderStock (receivedKg)
+ * 2. allocatedSoFar = sum(quantityKg) of PreOrders with status in ALLOCATED_STATUSES for this fruit type
+ * 3. available = receivedKg - allocatedSoFar
+ * 4. Load orders: WAITING_FOR_NEXT_BATCH first (createdAt asc), then WAITING_FOR_ALLOCATION (createdAt asc)
+ * 5. For each: if available >= order.quantityKg → set ALLOCATED_WAITING_PAYMENT, available -= quantityKg; else set WAITING_FOR_NEXT_BATCH (if was WAITING_FOR_ALLOCATION) and break
+ * 6. Upsert PreOrderAllocationModel.allocatedKg = new total; triggerReadyAndNotifyForFruitType
  *
  * @param {Object} params - Input parameters
  * @param {string} params.fruitTypeId - Fruit type document ID
- * @param {number} [params.allocatedKg] - Ignored; allocation amount is set to receivedKg
+ * @param {number} [params.allocatedKg] - Ignored
  * @returns {Promise<{ status: string, data: Object }>}
  */
-const upsertAllocation = async ({ fruitTypeId, allocatedKg }) => {
+const upsertAllocation = async ({ fruitTypeId, allocatedKg: _ignored }) => {
+  const fid = String(fruitTypeId);
+  if (allocatingFruitIds.has(fid)) {
+    throw new Error("Allocation for this fruit type is already in progress. Please wait.");
+  }
+  allocatingFruitIds.add(fid);
+  try {
   const ft = await FruitTypeModel.findById(fruitTypeId);
   if (!ft) throw new Error("Fruit type not found");
 
@@ -125,28 +141,63 @@ const upsertAllocation = async ({ fruitTypeId, allocatedKg }) => {
     throw new Error("Pre-order stock has no quantity. Warehouse staff must receive at Pre-order Stock.");
   }
 
-  const demandAgg = await PreOrderModel.aggregate([
-    { $match: { fruitTypeId: ft._id, status: { $in: ["WAITING_FOR_PRODUCT", "READY_FOR_FULFILLMENT"] } } },
-    { $group: { _id: null, demandKg: { $sum: "$quantityKg" } } },
+  const ftObjId = new mongoose.Types.ObjectId(fruitTypeId);
+  const allocatedAgg = await PreOrderModel.aggregate([
+    { $match: { fruitTypeId: ftObjId, status: { $in: ALLOCATED_STATUSES } } },
+    { $group: { _id: null, allocatedKg: { $sum: "$quantityKg" } } },
   ]);
-  const demandKg = demandAgg[0]?.demandKg ?? 0;
-  if (receivedKg < demandKg) {
-    throw new Error(
-      `Allocation only when fully received. Received ${receivedKg} kg, demand ${demandKg} kg. Warehouse must receive more at Pre-order Stock.`
-    );
+  const allocatedSoFar = allocatedAgg[0]?.allocatedKg ?? 0;
+  let available = receivedKg - allocatedSoFar;
+  if (available <= 0) {
+    return { status: "OK", data: { message: "No available stock to allocate." } };
   }
 
-  const existing = await PreOrderAllocationModel.findOne({ fruitTypeId }).lean();
-  if (existing && (existing.allocatedKg ?? 0) > 0) {
-    throw new Error(
-      "Allocation for this fruit type is done once only. Already allocated, cannot change."
-    );
+  const nextBatch = await PreOrderModel.find({
+    fruitTypeId: ftObjId,
+    status: "WAITING_FOR_NEXT_BATCH",
+  })
+    .sort({ createdAt: 1 })
+    .lean();
+  const waitingAlloc = await PreOrderModel.find({
+    fruitTypeId: ftObjId,
+    status: { $in: ["WAITING_FOR_ALLOCATION", "WAITING_FOR_PRODUCT"] },
+  })
+    .sort({ createdAt: 1 })
+    .lean();
+  const queue = [...nextBatch, ...waitingAlloc];
+
+  for (const po of queue) {
+    const qty = po.quantityKg ?? 0;
+    if (qty <= 0) continue;
+    if (available >= qty) {
+      await PreOrderModel.updateOne({ _id: po._id }, { $set: { status: "ALLOCATED_WAITING_PAYMENT" } });
+      available -= qty;
+    } else {
+      // Allocation failed for this order due to insufficient stock: set WAITING_FOR_NEXT_BATCH and notify customer.
+      // Notify is triggered HERE only (not on createBatch/createReceive/cron): this is the exact moment we transition
+      // from WAITING_FOR_ALLOCATION/WAITING_FOR_PRODUCT → WAITING_FOR_NEXT_BATCH due to allocation attempt.
+      if (po.status === "WAITING_FOR_ALLOCATION" || po.status === "WAITING_FOR_PRODUCT") {
+        await PreOrderModel.updateOne({ _id: po._id }, { $set: { status: "WAITING_FOR_NEXT_BATCH" } });
+        try {
+          await notifyPreOrderDelayed(po);
+        } catch (e) {
+          console.warn("PreOrder delayed notify skip:", e.message);
+        }
+      }
+      break;
+    }
   }
 
-  const kg = receivedKg;
-
-  await PreOrderAllocationModel.deleteMany({ fruitTypeId });
-  const doc = await PreOrderAllocationModel.create({ fruitTypeId, allocatedKg: kg });
+  const newAllocAgg = await PreOrderModel.aggregate([
+    { $match: { fruitTypeId: ftObjId, status: { $in: ALLOCATED_STATUSES } } },
+    { $group: { _id: null, allocatedKg: { $sum: "$quantityKg" } } },
+  ]);
+  const newAllocatedKg = newAllocAgg[0]?.allocatedKg ?? 0;
+  await PreOrderAllocationModel.findOneAndUpdate(
+    { fruitTypeId },
+    { $set: { allocatedKg: newAllocatedKg } },
+    { new: true, upsert: true }
+  );
 
   try {
     await triggerReadyAndNotifyForFruitType(fruitTypeId.toString());
@@ -154,9 +205,22 @@ const upsertAllocation = async ({ fruitTypeId, allocatedKg }) => {
     console.warn("PreOrder triggerReadyAfterAllocation:", e.message);
   }
 
-  await FruitTypeModel.findByIdAndUpdate(fruitTypeId, { status: "INACTIVE" });
+  // When remaining demand = 0 (fully fulfilled), set fruit type to INACTIVE (admin chốt đơn, ẩn khỏi pre-order mới).
+  const demandAgg = await PreOrderModel.aggregate([
+    { $match: { fruitTypeId: ftObjId, status: { $in: DEMAND_STATUSES } } },
+    { $group: { _id: null, demandKg: { $sum: "$quantityKg" } } },
+  ]);
+  const demandKg = demandAgg[0]?.demandKg ?? 0;
+  const availableKg = Math.max(0, receivedKg - newAllocatedKg);
+  const remainingDemandKg = Math.max(0, demandKg - availableKg);
+  if (remainingDemandKg <= 0) {
+    await FruitTypeModel.findByIdAndUpdate(fruitTypeId, { $set: { status: "INACTIVE" } });
+  }
 
-  return { status: "OK", data: doc };
+  return { status: "OK", data: { allocatedKg: newAllocatedKg } };
+  } finally {
+    allocatingFruitIds.delete(fid);
+  }
 };
 
 /**
