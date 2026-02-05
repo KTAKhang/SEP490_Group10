@@ -355,11 +355,7 @@ const vnpayReturn = async (req, res) => {
 
         order.order_status_id = paidStatus._id;
         await order.save({ session });
-
-
         await session.commitTransaction();
-
-
         // ✅ Tự động chốt lô (reset) sản phẩm bán hết sau khi trừ kho (VNPAY)
         const orderDetailsForReset = await OrderDetailModel.find({ order_id: order._id }).select("product_id").lean();
         const ProductBatchService = require("../services/ProductBatchService");
@@ -375,18 +371,10 @@ const vnpayReturn = async (req, res) => {
             console.error("Auto-reset sold out product failed:", item.product_id, e);
           }
         }
-
-
         return res.redirect(
           `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
         );
       }
-
-
-      // ✅ Trừ kho khi thanh toán VNPAY thành công lần đầu
-      await deductStock(order._id, session);
-
-
       payment.status = "SUCCESS";
       payment.provider_txn_id = transactionNo;
       payment.provider_response = sortedParams;
@@ -404,11 +392,7 @@ const vnpayReturn = async (req, res) => {
 
       order.order_status_id = paidStatus._id;
       await order.save({ session });
-
-
       await session.commitTransaction();
-
-
       // ✅ Tự động chốt lô (reset) sản phẩm bán hết sau khi trừ kho (VNPAY - lần đầu)
       const orderDetailsFirstPay = await OrderDetailModel.find({ order_id: order._id }).select("product_id").lean();
       const ProductBatchServiceFirst = require("../services/ProductBatchService");
@@ -424,8 +408,6 @@ const vnpayReturn = async (req, res) => {
           console.error("Auto-reset sold out product failed:", item.product_id, e);
         }
       }
-
-
       return res.redirect(
         `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
       );

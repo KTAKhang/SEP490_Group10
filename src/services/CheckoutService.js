@@ -4,8 +4,6 @@ const CartDetailModel = require("../models/CartDetailsModel");
 const CartModel = require("../models/CartsModel");
 const ProductModel = require("../models/ProductModel");
 const { getEffectivePrice } = require("../utils/productPrice");
-
-
 const HOLD_MINUTES = 15;
 const COOLDOWN_MINUTES = 30;
 const MAX_HOLD_PERCENT = 1;
@@ -29,20 +27,10 @@ const checkoutHold = async (
        0️⃣ LOAD CART
     ======================= */
     const cart = await CartModel.findOne({ user_id }).session(session);
-
-
-    if (!cart) throw new Error("Cart is empty");
-
-
     const cartItems = await CartDetailModel.find({
       cart_id: cart._id,
       product_id: { $in: selected_product_ids },
     }).session(session);
-
-
-    if (!cartItems.length) throw new Error("No products were selected");
-
-
     /* =======================
        LOOP ITEMS
     ======================= */
@@ -54,15 +42,11 @@ const checkoutHold = async (
 
       if (!product || !product.status)
         throw new Error(`Product ${product?.name || ""} is not available`);
-
-
       /* =======================
          1️⃣ CHECK KHO THỰC TẾ
       ======================= */
       if (product.onHandQuantity < item.quantity)
         throw new Error(`Not enough stock for ${product.name}`);
-
-
       /* =======================
          2️⃣ RESUME CHECKOUT CŨ
       ======================= */
@@ -191,8 +175,6 @@ const checkoutHold = async (
       cart_id: cart._id,
       product_id: { $in: selected_product_ids },
     }).populate("product_id", "name images price onHandQuantity status expiryDateStr expiryDate nearExpiryDaysThreshold nearExpiryDiscountPercent");
-
-
     const formattedItems = checkoutItems.map((item) => {
       const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(item.product_id);
       return {
@@ -213,8 +195,6 @@ const checkoutHold = async (
         subtotal: item.quantity * effectivePrice,
       };
     });
-
-
     return {
       status: "OK",
       message: "Items reserved, please complete payment within 15 minutes",

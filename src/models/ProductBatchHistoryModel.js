@@ -110,8 +110,6 @@ const productBatchHistorySchema = new mongoose.Schema(
       enum: ["SOLD_OUT", "EXPIRED"],
       required: true,
     },
-
-
     // ✅ Giá nhập / giá bán tại thời điểm chốt lô (để tính doanh thu, lợi nhuận gộp, tổn thất)
     unitCostPrice: {
       type: Number,
@@ -123,8 +121,6 @@ const productBatchHistorySchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
-
-
     // ✅ Bán xả kho / giảm giá: doanh thu và số lượng từ đơn hàng trong kỳ lô
     actualRevenue: {
       type: Number,
@@ -151,8 +147,6 @@ const productBatchHistorySchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
-
-
     // Trạng thái: luôn là "COMPLETED"
     status: {
       type: String,

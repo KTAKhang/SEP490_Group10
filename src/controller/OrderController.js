@@ -106,13 +106,9 @@ const updateOrder = async (req, res) => {
         message: "Thiếu order_id hoặc status_name",
       });
     }
-
-
     // Order schema enum: "admin" | "sales-staff" | "customer". User có role_id (populate → name).
     const roleName = req.user.role_id?.name?.toLowerCase?.() || "admin";
     const roleForHistory = ["admin", "sales-staff", "customer"].includes(roleName) ? roleName : "admin";
-
-
     const result = await OrderService.updateOrder(
       order_id,
       status_name,
@@ -267,8 +263,6 @@ const getOrderStatusStatsAdmin = async (req, res) => {
     });
   }
 };
-
-
 const getOrderStatusLogs = async (req, res) => {
   try {
     const filters = { ...req.query };
@@ -285,8 +279,6 @@ const getOrderStatusLogs = async (req, res) => {
     });
   }
 };
-
-
 module.exports = {
   createOrder,
   updateOrder,

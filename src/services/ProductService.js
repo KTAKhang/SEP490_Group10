@@ -5,14 +5,10 @@ const SupplierModel = require("../models/SupplierModel");
 const cloudinary = require("../config/cloudinaryConfig");
 const { getTodayInVietnam, formatDateVN, calculateDaysBetween } = require("../utils/dateVN");
 const { getEffectivePrice } = require("../utils/productPrice");
-
-
 const createProduct = async (payload = {}) => {
   try {
     const { name, short_desc, price, plannedQuantity, category, images, imagePublicIds, brand, detail_desc, status } =
       payload;
-
-
     if (!name || !name.toString().trim()) return { status: "ERR", message: "Product name is required" };
     if (price === undefined || price === null || Number.isNaN(Number(price)) || Number(price) < 0) {
       return { status: "ERR", message: "Invalid product price" };
@@ -21,8 +17,6 @@ const createProduct = async (payload = {}) => {
       return { status: "ERR", message: "Invalid plannedQuantity value" };
     }
     if (!category) return { status: "ERR", message: "Category is required" };
-
-
     // ✅ Validate brand: bắt buộc phải có (không cho phép null/empty)
     if (!brand || !brand.toString().trim()) {
       return { status: "ERR", message: "Brand is required" };
@@ -31,7 +25,6 @@ const createProduct = async (payload = {}) => {
 
     const categoryDoc = await CategoryModel.findById(category);
     if (!categoryDoc) return { status: "ERR", message: "Category does not exist" };
-   
     // Kiểm tra category không được ẩn
     if (categoryDoc.status === false) {
       return { status: "ERR", message: "Cannot select a hidden category" };
@@ -133,8 +126,6 @@ const createProduct = async (payload = {}) => {
     const populated = await ProductModel.findById(product._id)
       .populate("category", "name")
       .populate("supplier", "name type cooperationStatus");
-
-
     return { status: "OK", message: "Product created successfully", data: populated };
   } catch (error) {
     return { status: "ERR", message: error.message };
@@ -175,8 +166,6 @@ const getProducts = async (filters = {}) => {
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
     const sortDirection = sortOrder === "asc" ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
-
-
     const [rawData, total] = await Promise.all([
       ProductModel.find(query)
         .populate("category", "name")
@@ -187,14 +176,10 @@ const getProducts = async (filters = {}) => {
         .lean(),
       ProductModel.countDocuments(query),
     ]);
-
-
     const data = rawData.map((p) => {
       const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(p);
       return { ...p, effectivePrice, isNearExpiry, originalPrice };
     });
-
-
     return {
       status: "OK",
       message: "Fetched product list successfully",
@@ -229,8 +214,6 @@ const updateProductAdmin = async (id, payload = {}) => {
   try {
     const product = await ProductModel.findById(id);
     if (!product) return { status: "ERR", message: "Product does not exist" };
-
-
     // Whitelist fields (Admin được sửa plannedQuantity, price, mô tả...)
     const allowed = [
       "name",
@@ -305,7 +288,6 @@ const updateProductAdmin = async (id, payload = {}) => {
     if (payload.category !== undefined) {
       const categoryDoc = await CategoryModel.findById(payload.category);
       if (!categoryDoc) return { status: "ERR", message: "Category does not exist" };
-     
       // Kiểm tra category không được ẩn
       if (categoryDoc.status === false) {
         return { status: "ERR", message: "Cannot select a hidden category" };
@@ -410,8 +392,6 @@ const updateProductAdmin = async (id, payload = {}) => {
     // Brand đã được xử lý ở trên với supplier validation
     if (payload.detail_desc !== undefined) product.detail_desc = (payload.detail_desc ?? "").toString();
     if (payload.status !== undefined) product.status = payload.status;
-
-
     if (payload.nearExpiryDaysThreshold !== undefined) {
       const v = Number(payload.nearExpiryDaysThreshold);
       if (!Number.isInteger(v) || v < 0) return { status: "ERR", message: "nearExpiryDaysThreshold must be an integer greater than or equal to 0" };
@@ -422,8 +402,6 @@ const updateProductAdmin = async (id, payload = {}) => {
       if (Number.isNaN(v) || v < 0 || v > 100) return { status: "ERR", message: "nearExpiryDiscountPercent must be between 0 and 100" };
       product.nearExpiryDiscountPercent = v;
     }
-
-
     // ✅ Save product trước
     await product.save();
 
@@ -456,13 +434,6 @@ const updateProductExpiryDate = async (id, payload = {}) => {
   try {
     const product = await ProductModel.findById(id);
     if (!product) return { status: "ERR", message: "Product does not exist" };
-
-
-    // ✅ Kiểm tra sản phẩm đã có warehouseEntryDate chưa
-    if (!product.warehouseEntryDate) {
-      return {
-        status: "ERR",
-        message: "The product has not been received into inventory, so the expiry date cannot be updated"
       };
     }
 
@@ -470,9 +441,6 @@ const updateProductExpiryDate = async (id, payload = {}) => {
     // ✅ Logic: Khóa việc cập nhật hạn sử dụng sau khi đã set lần đầu (check cả Date và Str)
     const hasExpiry = !!(product.expiryDate || product.expiryDateStr);
     if (hasExpiry) {
-      return {
-        status: "ERR",
-        message: "The expiry date has already been set and cannot be changed. It can only be defined once after the warehouse entry date is available."
       };
     }
 
@@ -521,9 +489,6 @@ const updateProductExpiryDate = async (id, payload = {}) => {
     const diffDays = calculateDaysBetween(warehouseEntryDate, newExpiryDate);
    
     if (diffDays <= 0) {
-      return {
-        status: "ERR",
-        message: "The expiry date must be later than the warehouse entry date"
       };
     }
 
@@ -537,10 +502,6 @@ const updateProductExpiryDate = async (id, payload = {}) => {
 
 
     const populated = await ProductModel.findById(product._id).populate("category", "name");
-    return {
-      status: "OK",
-      message: "Expiry date updated successfully",
-      data: populated
     };
   } catch (error) {
     return { status: "ERR", message: error.message };
@@ -552,8 +513,6 @@ const deleteProduct = async (id) => {
   try {
     const product = await ProductModel.findById(id);
     if (!product) return { status: "ERR", message: "Product does not exist" };
-
-
     // Xóa tất cả ảnh trên Cloudinary nếu có
     if (Array.isArray(product.imagePublicIds) && product.imagePublicIds.length > 0) {
       try {
@@ -574,8 +533,6 @@ const deleteProduct = async (id) => {
     return { status: "ERR", message: error.message };
   }
 };
-
-
 const getProductStats = async () => {
   try {
     // ✅ Cải thiện logic "sắp hết" với ngưỡng thông minh

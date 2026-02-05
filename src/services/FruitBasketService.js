@@ -264,11 +264,6 @@ const getFruitBasketById = async (id) => {
       path: "items.product",
       select: "name price status stockStatus onHandQuantity images",
     });
-
-
-    if (!basket) return { status: "ERR", message: "Fruit basket does not exist" };
-
-
     return {
       status: "OK",
       message: "Fetched fruit basket successfully",
@@ -284,8 +279,6 @@ const updateFruitBasket = async (id, payload = {}) => {
   try {
     const basket = await FruitBasketModel.findById(id);
     if (!basket) return { status: "ERR", message: "Fruit basket does not exist" };
-
-
     const allowed = ["name", "short_desc", "detail_desc", "items", "images", "imagePublicIds", "status"];
     for (const key of Object.keys(payload)) {
       if (!allowed.includes(key)) delete payload[key];
@@ -295,8 +288,6 @@ const updateFruitBasket = async (id, payload = {}) => {
     if (payload.name !== undefined) {
       const newName = (payload.name ?? "").toString().trim();
       if (!newName) return { status: "ERR", message: "Fruit basket name is required" };
-
-
       const existing = await FruitBasketModel.findOne({
         _id: { $ne: id },
         name: { $regex: new RegExp(`^${newName}$`, "i") },
@@ -352,8 +343,6 @@ const deleteFruitBasket = async (id) => {
   try {
     const basket = await FruitBasketModel.findById(id);
     if (!basket) return { status: "ERR", message: "Fruit basket does not exist" };
-
-
     await FruitBasketModel.findByIdAndDelete(id);
     return { status: "OK", message: "Fruit basket deleted successfully" };
   } catch (error) {

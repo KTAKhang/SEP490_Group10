@@ -114,9 +114,7 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
 
 
     if (supplier.cooperationStatus === "TERMINATED" && !isAdmin) {
-      return {
-        status: "ERR",
-        message: "Cannot edit a supplier that has ended cooperation. Only admins can perform this action."
+
       };
     }
 

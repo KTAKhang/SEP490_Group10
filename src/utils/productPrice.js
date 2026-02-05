@@ -1,6 +1,4 @@
 const { getTodayInVietnam } = require("./dateVN");
-
-
 /**
  * Tính số ngày từ referenceDate đến expiry (date-only).
  * @param {Date|String} expiryDate - expiryDate hoặc expiryDateStr
@@ -17,8 +15,6 @@ const getDaysUntilExpiry = (expiryDate, referenceDate) => {
   const diffMs = expiry.getTime() - ref.getTime();
   return Math.floor(diffMs / (1000 * 60 * 60 * 24));
 };
-
-
 /**
  * Tính giá bán hiệu lực cho khách: nếu còn ≤ nearExpiryDaysThreshold ngày thì giảm nearExpiryDiscountPercent%.
  * @param {Object} product - Document product (price, expiryDateStr hoặc expiryDate, nearExpiryDaysThreshold, nearExpiryDiscountPercent)
@@ -32,29 +28,15 @@ const getEffectivePrice = (product, referenceDate) => {
   const expiryDate = product?.expiryDate ?? null;
   const expiry = expiryStr || expiryDate;
   const daysUntil = getDaysUntilExpiry(expiry, refDate);
-
-
-  const threshold = product?.nearExpiryDaysThreshold ?? 7;
-  const discountPercent = product?.nearExpiryDiscountPercent ?? 50;
-
-
-  // Sắp hết hạn: còn từ 0 đến threshold ngày (đã hết hạn = âm không áp giảm giá "sắp hết hạn", vẫn trả về giá gốc hoặc có thể coi đã hết hạn = 0 ngày còn lại và vẫn giảm)
-  const isNearExpiry = daysUntil !== null && daysUntil >= 0 && daysUntil <= threshold;
-
-
   const effectivePrice = isNearExpiry
     ? Math.round(originalPrice * (1 - discountPercent / 100) * 100) / 100
     : originalPrice;
-
-
   return {
     effectivePrice,
     isNearExpiry: !!isNearExpiry,
     originalPrice,
   };
 };
-
-
 module.exports = {
   getDaysUntilExpiry,
   getEffectivePrice,

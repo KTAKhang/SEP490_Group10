@@ -3,8 +3,6 @@ const ProductModel = require("../models/ProductModel");
 const CategoryModel = require("../models/CategoryModel");
 const InventoryTransactionModel = require("../models/InventoryTransactionModel");
 const { getEffectivePrice } = require("../utils/productPrice");
-
-
 // Lấy 6 sản phẩm nổi bật (bán được nhiều nhất)
 const getFeaturedProducts = async () => {
   try {
@@ -93,8 +91,6 @@ const getFeaturedProducts = async () => {
 
     // Chỉ lấy 6 sản phẩm đầu tiên
     const finalProducts = sortedProducts.slice(0, 6);
-
-
     // Format: Chỉ lấy ảnh đầu tiên + giá hiệu lực (sắp hết hạn giảm 50%)
     const formattedProducts = finalProducts.map((product) => {
       const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
@@ -246,8 +242,6 @@ const getProducts = async ({ page = 1, limit = 12, search = "", category, sortBy
     const result = await ProductModel.aggregate(pipeline);
     const data = result[0]?.data || [];
     const total = result[0]?.total[0]?.count || 0;
-
-
     // Format category info, giá hiệu lực (sắp hết hạn giảm 50%), và chỉ lấy ảnh đầu tiên cho list view
     const formattedProducts = data.map((product) => {
       const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
@@ -335,12 +329,6 @@ const getProductById = async (id) => {
     if (!product.category || product.category.status === false) {
       return { status: "ERR", message: "Product does not exist" };
     }
-
-
-    const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
-    const data = { ...product, price: effectivePrice, effectivePrice, isNearExpiry, originalPrice };
-
-
     return {
       status: "OK",
       message: "Fetched product details successfully",

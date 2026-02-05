@@ -207,8 +207,6 @@ const productSchema = new mongoose.Schema(
       default: null,
       match: [/^\d{4}-\d{2}-\d{2}$/, "expiryDateStr phải có format YYYY-MM-DD"],
     },
-
-
     // ✅ Giá sắp hết hạn: còn ≤ nearExpiryDaysThreshold ngày thì bán với giá giảm (effectivePrice = price * (1 - nearExpiryDiscountPercent/100))
     nearExpiryDaysThreshold: {
       type: Number,
@@ -222,8 +220,6 @@ const productSchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
-
-
   },
   {
     timestamps: true,
@@ -231,24 +227,16 @@ const productSchema = new mongoose.Schema(
     toObject: { virtuals: true }, // ✅ Enable virtuals khi convert sang Object
   }
 );
-
-
 // ✅ Unique constraint: không cho phép trùng (name + brand)
 productSchema.index({ name: 1, brand: 1 }, { unique: true });
-
-
 // Virtual: available = onHand - reserved
 productSchema.virtual("availableQuantity").get(function () {
   return Math.max(0, (this.onHandQuantity || 0) - (this.reservedQuantity || 0));
 });
-
-
 // Virtual: profit = price - purchasePrice
 productSchema.virtual("profit").get(function () {
   return Math.max(0, (this.price || 0) - (this.purchasePrice || 0));
 });
-
-
 // Virtual: profitMargin = (price - purchasePrice) / price * 100 (%)
 productSchema.virtual("profitMargin").get(function () {
   const price = this.price || 0;
@@ -256,18 +244,12 @@ productSchema.virtual("profitMargin").get(function () {
   if (price === 0) return 0;
   return Math.round(((price - purchasePrice) / price) * 100 * 100) / 100; // Làm tròn 2 chữ số thập phân
 });
-
-
-
-
 // Tự cập nhật trạng thái khi lưu - Chuẩn hóa logic
 productSchema.pre("save", function (next) {
   const planned = this.plannedQuantity ?? 0;
   const received = this.receivedQuantity ?? 0;
   const onHand = this.onHandQuantity ?? 0;
   const reserved = this.reservedQuantity ?? 0;
-
-
   // ✅ Đảm bảo invariant: 0 ≤ onHandQuantity ≤ receivedQuantity ≤ plannedQuantity
   if (onHand < 0) {
     return next(new Error("onHandQuantity không được âm"));
@@ -281,8 +263,6 @@ productSchema.pre("save", function (next) {
   if (received > planned) {
     return next(new Error("receivedQuantity không được vượt plannedQuantity"));
   }
-
-
   // ✅ Chuẩn hóa receivingStatus
   if (received === 0) {
     this.receivingStatus = "NOT_RECEIVED";
@@ -292,8 +272,6 @@ productSchema.pre("save", function (next) {
     // received === planned
     this.receivingStatus = "RECEIVED";
   }
-
-
   // ✅ Chuẩn hóa stockStatus
   if (onHand > 0) {
     this.stockStatus = "IN_STOCK";

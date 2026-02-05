@@ -95,8 +95,6 @@ const updateCategory = async (id, payload = {}) => {
   try {
     const category = await CategoryModel.findById(id);
     if (!category) return { status: "ERR", message: "Category does not exist" };
-
-
     // Lưu ảnh cũ để xóa sau nếu có ảnh mới
     const oldImagePublicId = category.imagePublicId;
 
@@ -141,11 +139,7 @@ const updateCategory = async (id, payload = {}) => {
     }
    
     if (payload.status !== undefined) category.status = payload.status;
-
-
     await category.save();
-
-
     return { status: "OK", message: "Category updated successfully", data: category };
   } catch (error) {
     return { status: "ERR", message: error.message };
@@ -157,14 +151,9 @@ const deleteCategory = async (id) => {
   try {
     const category = await CategoryModel.findById(id);
     if (!category) return { status: "ERR", message: "Category does not exist" };
-
-
     // Kiểm tra xem có sản phẩm nào đang sử dụng category này không
     const productCount = await ProductModel.countDocuments({ category: id });
     if (productCount > 0) {
-      return {
-        status: "ERR",
-        message: `Cannot delete this category because ${productCount} products are using it. Please remove or reassign those products first.`
       };
     }
 

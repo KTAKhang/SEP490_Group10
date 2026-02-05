@@ -3,8 +3,6 @@ const CartDetailModel = require("../models/CartDetailsModel");
 const ProductModel = require("../models/ProductModel");
 const { default: mongoose } = require("mongoose");
 const { getEffectivePrice } = require("../utils/productPrice");
-
-
 const addItemToCart = async (user_id, product_id, quantity) => {
   const session = await mongoose.startSession();
   session.startTransaction();

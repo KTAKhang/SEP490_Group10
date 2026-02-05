@@ -46,6 +46,3 @@ const orderStatusChangeLogSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-orderStatusChangeLogSchema.index({ order_id: 1, changed_at: -1 });
-orderStatusChangeLogSchema.index({ changed_by: 1, changed_at: -1 });
-module.exports = mongoose.model("order_status_change_logs", orderStatusChangeLogSchema);

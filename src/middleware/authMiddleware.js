@@ -72,9 +72,6 @@ const authAdminMiddleware = async (req, res, next) => {
     }
 };
 
-
-
-
 const authMiddleware = async (req, res, next) => {
     try {
         const authHeader = req.headers?.authorization;
@@ -146,9 +143,6 @@ const authMiddleware = async (req, res, next) => {
         });
     }
 };
-
-
-
 
 const authUserMiddleware = async (req, res, next) => {
     try {
@@ -256,8 +250,6 @@ const authSalesStaffMiddleware = async (req, res, next) => {
         return res.status(401).json({ message: "Invalid token", status: "ERR" });
     }
 };
-
-
 /**
  * Cho phép Admin hoặc Sales-staff quản lý order (danh sách, chi tiết, cập nhật trạng thái).
  * Gắn full user (populate role_id) giống authAdminMiddleware.
@@ -272,30 +264,18 @@ const authAdminOrSalesStaffForOrderMiddleware = async (req, res, next) => {
             });
         }
 
-
-        const token = authHeader.split(" ")[1];
-        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
-
-
-        const user = await UserModel.findById(decoded._id).populate("role_id", "name");
-
-
         if (!user) {
             return res.status(404).json({
                 status: "ERR",
                 message: "User not found",
             });
         }
-
-
         if (user.status === false) {
             return res.status(403).json({
                 status: "ERR",
                 message: "Account is locked",
             });
         }
-
-
         const roleName = user.role_id?.name?.toLowerCase?.();
         if (roleName !== "admin" && roleName !== "sales-staff") {
             return res.status(403).json({
@@ -303,8 +283,6 @@ const authAdminOrSalesStaffForOrderMiddleware = async (req, res, next) => {
                 message: "Access denied",
             });
         }
-
-
         req.user = user;
         next();
     } catch (error) {
@@ -314,24 +292,18 @@ const authAdminOrSalesStaffForOrderMiddleware = async (req, res, next) => {
                 message: "Token has expired",
             });
         }
-
-
         if (error.name === "JsonWebTokenError") {
             return res.status(401).json({
                 status: "ERR",
                 message: "Invalid token",
             });
         }
-
-
         return res.status(500).json({
             status: "ERR",
             message: error.message,
         });
     }
 };
-
-
 const authStaffOrAdminMiddleware = async (req, res, next) => {
     const authHeader = req.headers?.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -358,14 +330,6 @@ const authStaffOrAdminMiddleware = async (req, res, next) => {
         return res.status(401).json({ message: "Invalid token", status: "ERR" });
     }
 };
-
-
-
-
-
-
-
-
 /**
  * Middleware xác thực chỉ Customer (không phải Admin hoặc warehouse_staff)
  * Chỉ cho phép Customer (role = "customer") truy cập
@@ -445,8 +409,6 @@ const customerMiddleware = async (req, res, next) => {
         });
     }
 };
-
-
 module.exports = {
     authMiddleware,
     authAdminMiddleware,

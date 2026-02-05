@@ -14,13 +14,9 @@ const NotificationService = require("../services/NotificationService");
 const CustomerEmailService = require("./CustomerEmailService");
 const UserModel = require("../models/UserModel");
 const ReviewModel = require("../models/ReviewModel");
-
-
 const { default: mongoose } = require("mongoose");
 const { createVnpayUrl } = require("../utils/createVnpayUrl");
 const { getEffectivePrice } = require("../utils/productPrice");
-
-
 const normalizeStatusName = (value) => {
   if (!value) return "";
   return value
@@ -119,8 +115,6 @@ async function pushStatusHistory({
 
 
   await order.save({ session });
-
-
   // Ghi log chi tiết (giống InventoryTransaction có createdBy) để truy vấn nhân viên nào đã cập nhật đơn
   await OrderStatusChangeLogModel.create(
     [
@@ -137,8 +131,6 @@ async function pushStatusHistory({
     session ? { session } : {}
   );
 }
-
-
 /* =====================================================
    CREATE ORDER (PENDING)
 ===================================================== */
@@ -222,8 +214,6 @@ const confirmCheckoutAndCreateOrder = async ({
 
       if (!product || !product.status)
         throw new Error("The product is unavailable");
-
-
       const { effectivePrice, originalPrice } = getEffectivePrice(product);
       totalPrice += item.quantity * effectivePrice;
       orderDetails.push({
@@ -231,8 +221,6 @@ const confirmCheckoutAndCreateOrder = async ({
         quantity: item.quantity,
         price: effectivePrice,
         original_price: originalPrice ?? null,
-
-
         // snapshot
         product_name: product.name,
         product_image: product.images?.[0],
@@ -392,14 +380,6 @@ const confirmCheckoutAndCreateOrder = async ({
       } catch (emailErr) {
         console.error("Failed to send COD order email:", emailErr);
       }
-
-
-      // ✅ Khi tạo đơn không gửi notification (chỉ thông báo khi admin cập nhật trạng thái)
-
-
-      await session.commitTransaction();
-
-
       // ✅ Tự động chốt lô (reset) sản phẩm bán hết sau khi trừ kho (COD)
       const ProductBatchService = require("./ProductBatchService");
       for (const item of cartItems) {
@@ -414,8 +394,6 @@ const confirmCheckoutAndCreateOrder = async ({
           console.error("Auto-reset sold out product failed:", item.product_id, e);
         }
       }
-
-
       return {
         success: true,
         type: "COD",
@@ -423,8 +401,6 @@ const confirmCheckoutAndCreateOrder = async ({
         order_id: order._id,
       };
     }
-
-
     // VNPAY → tạo payment pending + url
     if (payment_method === "VNPAY") {
       await PaymentService.createOnlinePendingPayment({
@@ -440,11 +416,6 @@ const confirmCheckoutAndCreateOrder = async ({
         ip,
         session,
       });
-
-
-      // ✅ Khi tạo đơn không gửi notification (chỉ thông báo khi admin cập nhật trạng thái)
-
-
       await session.commitTransaction();
       return {
         success: true,
@@ -474,22 +445,12 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
   try {
     const order = await OrderModel.findById(order_id).session(session);
     if (!order) throw new Error("Order not found");
-
-
-    const newStatus = await findStatusByName(new_status_name, session);
-
-
-    if (!newStatus) throw new Error("Invalid order status");
-
-
     const currentStatusName = await getOrderStatusName(
       order.order_status_id,
       session,
     );
     const nextStatusName = normalizeStatusName(newStatus.name);
     const paymentMethod = normalizeToken(order.payment_method);
-
-
     if (isReturnedStatus(nextStatusName)) {
       if (role !== "admin") {
         throw new Error(
@@ -504,11 +465,7 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     ) {
       throw new Error("Invalid status transition for this order");
     }
-
-
     const fromStatus = order.order_status_id;
-
-
     /* =======================
        UPDATE ORDER STATUS
     ======================= */
@@ -608,8 +565,6 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
 
 
     await session.commitTransaction();
-
-
     // ✅ Thông báo cho khách hàng khi admin cập nhật trạng thái đơn
     const customerId = order.user_id?.toString?.() || order.user_id;
     if (customerId) {
@@ -630,8 +585,6 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
         // Không throw – trạng thái đơn đã cập nhật thành công
       }
     }
-
-
     return { success: true };
   } catch (err) {
     await session.abortTransaction();
@@ -656,12 +609,6 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
     ======================= */
     const order = await OrderModel.findById(order_id).session(session);
     if (!order) throw new Error("Order not found");
-
-
-    if (order.user_id.toString() !== user_id.toString())
-      throw new Error("You do not have permission to cancel this order");
-
-
     const status = await OrderStatusModel.findById(
       order.order_status_id,
     ).session(session);
@@ -669,8 +616,6 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
 
     if (status.name !== "PENDING")
       throw new Error("You can only cancel when the order is in PENDING status");
-
-
     /* =======================
        2️⃣ HOÀN KHO
     ======================= */
@@ -693,11 +638,6 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
       order_id,
       type: "PAYMENT",
     }).session(session);
-
-
-    if (!payment) throw new Error("Order payment not found");
-
-
     if (payment.method !== "COD") {
       throw new Error("Only COD orders can be cancelled");
     }
@@ -767,13 +707,9 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
     ======================= */
     const order = await OrderModel.findById(order_id).session(session);
     if (!order) throw new Error("Order not found");
-
-
     if (order.user_id.toString() !== user_id.toString()) {
       throw new Error("You do not have permission to pay for this order");
     }
-
-
     /* =======================
        2️⃣ CHECK ORDER STATUS
     ======================= */
@@ -907,8 +843,6 @@ const getOrdersByUser = async (user_id, filters = {}) => {
 
 
     const query = { user_id: new mongoose.Types.ObjectId(user_id) };
-
-
     // ✅ Search: khách hàng tìm theo ID đơn hàng — chấp nhận đủ 24 ký tự hex (khớp chính xác) hoặc một phần (ID kết thúc bằng chuỗi nhập)
     const searchValue = search?.toString().trim();
     if (searchValue && /^[a-fA-F0-9]+$/.test(searchValue)) {
@@ -919,8 +853,6 @@ const getOrdersByUser = async (user_id, filters = {}) => {
         query.$expr = { $regexMatch: { input: { $toString: "$_id" }, regex: `${searchValue}$` } };
       }
     }
-
-
     const normalizedStatusNames = parseStatusNames(status_names || status_name);
     if (normalizedStatusNames.length > 0) {
       const statusDocs = await OrderStatusModel.find({
@@ -1232,8 +1164,6 @@ const getOrderStatusCounts = async () => {
     return { status: "ERR", message: error.message };
   }
 };
-
-
 /**
  * Lấy danh sách log thay đổi trạng thái đơn hàng với search, sort, filter, pagination.
  * Dùng cho admin/sales-staff xem "nhân viên nào đã cập nhật đơn".
@@ -1256,16 +1186,9 @@ const getOrderStatusLogs = async (filters = {}) => {
       page = 1,
       limit = 20,
     } = filters;
-
-
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
-
-
-    const query = {};
-
-
     // Filter: order_id (bắt buộc nếu cần xem log của 1 đơn)
     if (order_id) {
       if (!mongoose.Types.ObjectId.isValid(order_id)) {
@@ -1273,14 +1196,10 @@ const getOrderStatusLogs = async (filters = {}) => {
       }
       query.order_id = new mongoose.Types.ObjectId(order_id);
     }
-
-
     // Filter: nhân viên đã thay đổi
     if (changed_by && mongoose.Types.ObjectId.isValid(changed_by)) {
       query.changed_by = new mongoose.Types.ObjectId(changed_by);
     }
-
-
     // Filter: role (admin, sales-staff, customer)
     if (changed_by_role) {
       const role = String(changed_by_role).trim().toLowerCase();
@@ -1288,20 +1207,14 @@ const getOrderStatusLogs = async (filters = {}) => {
         query.changed_by_role = role;
       }
     }
-
-
     // Filter: từ trạng thái
     if (from_status && mongoose.Types.ObjectId.isValid(from_status)) {
       query.from_status = new mongoose.Types.ObjectId(from_status);
     }
-
-
     // Filter: sang trạng thái
     if (to_status && mongoose.Types.ObjectId.isValid(to_status)) {
       query.to_status = new mongoose.Types.ObjectId(to_status);
     }
-
-
     // Filter: khoảng thời gian thay đổi
     if (changedAtFrom || changedAtTo) {
       query.changed_at = {};
@@ -1321,22 +1234,16 @@ const getOrderStatusLogs = async (filters = {}) => {
       }
       if (Object.keys(query.changed_at).length === 0) delete query.changed_at;
     }
-
-
     // Search: theo nội dung note
     if (search && String(search).trim()) {
       const escaped = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       query.note = { $regex: escaped, $options: "i" };
     }
-
-
     // Sort
     const allowedSortFields = ["changed_at", "changed_by_role", "order_id", "createdAt"];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "changed_at";
     const sortDirection = sortOrder === "asc" ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
-
-
     const [data, total] = await Promise.all([
       OrderStatusChangeLogModel.find(query)
         .populate("from_status", "name")
@@ -1349,8 +1256,6 @@ const getOrderStatusLogs = async (filters = {}) => {
         .lean(),
       OrderStatusChangeLogModel.countDocuments(query),
     ]);
-
-
     return {
       status: "OK",
       message: "Fetched order status change logs successfully",
@@ -1366,8 +1271,6 @@ const getOrderStatusLogs = async (filters = {}) => {
     return { status: "ERR", message: error.message };
   }
 };
-
-
 module.exports = {
   confirmCheckoutAndCreateOrder,
   updateOrder,

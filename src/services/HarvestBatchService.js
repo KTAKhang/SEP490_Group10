@@ -51,7 +51,6 @@ const createHarvestBatch = async (payload = {}) => {
       };
     }
 
-
     // Kiểm tra supplier và product tồn tại
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {
@@ -81,7 +80,6 @@ const createHarvestBatch = async (payload = {}) => {
         message: `Product "${product.name}" does not belong to supplier "${supplier.name}". Please choose a product from this supplier.`,
       };
     }
-
 
     // ✅ Validation: cùng supplier + product + ngày thu hoạch thì batchNumber không được trùng
     const harvestDateNormalized = new Date(harvestDate);
@@ -225,8 +223,6 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
         harvestBatch.location = newLocation;
       }
     }
-
-
     if (payload.notes !== undefined) {
       const newNotes = payload.notes?.toString().trim() || "";
       if (harvestBatch.notes !== newNotes) {
@@ -234,18 +230,12 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
         harvestBatch.notes = newNotes;
       }
     }
-
-
     if (payload.receiptEligible !== undefined) {
       harvestBatch.receiptEligible = payload.receiptEligible === true || payload.receiptEligible === "true";
     }
-
-
     if (payload.visibleInReceipt !== undefined) {
       harvestBatch.visibleInReceipt = payload.visibleInReceipt === true || payload.visibleInReceipt === "true";
     }
-
-
     await harvestBatch.save();
 
 
@@ -371,8 +361,6 @@ const getHarvestBatches = async (filters = {}) => {
     if (productId && mongoose.isValidObjectId(productId)) {
       query.product = new mongoose.Types.ObjectId(productId);
     }
-
-
     if (minReceivedQuantity !== undefined || maxReceivedQuantity !== undefined) {
       query.receivedQuantity = {};
       if (minReceivedQuantity !== undefined && !Number.isNaN(Number(minReceivedQuantity))) {
@@ -457,20 +445,14 @@ const getHarvestBatches = async (filters = {}) => {
       const hasTx = hasInventoryTransactions === "true" || hasInventoryTransactions === true;
       query.inventoryTransactionIds = hasTx ? { $exists: true, $ne: [] } : { $in: [null, []] };
     }
-
-
     // Filter by receipt eligibility (only batches eligible for warehouse receipt)
     if (receiptEligible !== undefined) {
       query.receiptEligible = receiptEligible === "true" || receiptEligible === true;
     }
-
-
     // Filter by visibility in receipt selection (hide batches already used)
     if (visibleInReceipt !== undefined) {
       query.visibleInReceipt = visibleInReceipt === "true" || visibleInReceipt === true;
     }
-
-
     // Sort
     const allowedSortFields = [
       "batchNumber",

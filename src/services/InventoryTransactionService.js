@@ -150,8 +150,6 @@ const createReceipt = async (userId, payload = {}) => {
           throw new Error("Harvest batch does not belong to the product's supplier");
         }
       }
-
-
       // ✅ Ràng buộc (theo từng kỳ nhập kho): Trong cùng một kỳ (cùng ngày nhập warehouseEntryDateStr),
       // nếu đã có phiếu nhập chọn lô thu hoạch thì các phiếu sau phải dùng cùng lô.
       // Sau khi sản phẩm reset (bán hết/hết hạn), warehouseEntryDateStr = null → kỳ mới → được chọn lô thu hoạch khác.
@@ -297,7 +295,6 @@ const createReceipt = async (userId, payload = {}) => {
       if (!updatedProduct) {
         throw new Error("Inbound quantity exceeds the plannedQuantity");
       }
-
 
       // ✅ Cập nhật receivedQuantity và ẩn lô khỏi danh sách chọn (visibleInReceipt = false)
       if (harvestBatchIdValue) {
