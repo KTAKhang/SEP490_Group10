@@ -3,11 +3,14 @@ const StockLockModel = require("../models/StockLockModel");
 const CartDetailModel = require("../models/CartDetailsModel");
 const CartModel = require("../models/CartsModel");
 const ProductModel = require("../models/ProductModel");
+const { getEffectivePrice } = require("../utils/productPrice");
+
 
 const HOLD_MINUTES = 15;
 const COOLDOWN_MINUTES = 30;
-const MAX_HOLD_PERCENT = 0.8;
+const MAX_HOLD_PERCENT = 1;
 const MAX_HOLD_PER_DAY = 3;
+
 
 /**
  * HOLD STOCK for selected cart items
@@ -20,20 +23,25 @@ const checkoutHold = async (
   const session = await mongoose.startSession();
   session.startTransaction();
 
+
   try {
     /* =======================
        0️⃣ LOAD CART
     ======================= */
     const cart = await CartModel.findOne({ user_id }).session(session);
 
-    if (!cart) throw new Error("Giỏ hàng trống");
+
+    if (!cart) throw new Error("Cart is empty");
+
 
     const cartItems = await CartDetailModel.find({
       cart_id: cart._id,
       product_id: { $in: selected_product_ids },
     }).session(session);
 
-    if (!cartItems.length) throw new Error("Không có sản phẩm được chọn");
+
+    if (!cartItems.length) throw new Error("No products were selected");
+
 
     /* =======================
        LOOP ITEMS
@@ -43,14 +51,17 @@ const checkoutHold = async (
         session,
       );
 
+
       if (!product || !product.status)
-        throw new Error(`Sản phẩm ${product?.name || ""} không khả dụng`);
+        throw new Error(`Product ${product?.name || ""} is not available`);
+
 
       /* =======================
          1️⃣ CHECK KHO THỰC TẾ
       ======================= */
       if (product.onHandQuantity < item.quantity)
-        throw new Error(`Không đủ hàng cho ${product.name}`);
+        throw new Error(`Not enough stock for ${product.name}`);
+
 
       /* =======================
          2️⃣ RESUME CHECKOUT CŨ
@@ -62,7 +73,9 @@ const checkoutHold = async (
         expiresAt: { $gt: new Date() },
       }).session(session);
 
+
       if (existingLock) continue;
+
 
       /* =======================
          3️⃣ CHECK COOLDOWN
@@ -73,10 +86,12 @@ const checkoutHold = async (
         cooldownUntil: { $gt: new Date() },
       }).session(session);
 
+
       if (cooldown)
         throw new Error(
-          `Bạn vừa giữ sản phẩm ${product.name}, vui lòng thử lại sau`,
+          `You recently reserved ${product.name}, please try again later`,
         );
+
 
       /* =======================
          4️⃣ CHECK LIMIT / DAY
@@ -84,16 +99,19 @@ const checkoutHold = async (
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
 
+
       const todayCount = await StockLockModel.countDocuments({
         user_id,
         product_id: product._id,
         createdAt: { $gte: startOfDay },
       }).session(session);
 
+
       if (todayCount >= MAX_HOLD_PER_DAY)
         throw new Error(
-          `Bạn đã giữ sản phẩm ${product.name} quá nhiều lần hôm nay`,
+          `You have reserved ${product.name} too many times today`,
         );
+
 
       /* =======================
          5️⃣ CHECK % KHO (LOCK CHƯA HẾT HẠN)
@@ -113,16 +131,19 @@ const checkoutHold = async (
         },
       ]).session(session);
 
+
       const lockedQty = lockedAgg[0]?.total || 0;
       const maxLock = Math.max(
         1,
         Math.floor(product.onHandQuantity * MAX_HOLD_PERCENT),
       );
 
+
       if (lockedQty + item.quantity > maxLock)
         throw new Error(
-          `Sản phẩm ${product.name} đang được nhiều người thanh toán`,
+          `Product ${product.name} is being checked out by too many users`,
         );
+
 
       /* =======================
          6️⃣ XOÁ LOCK CŨ (KHÁC SESSION)
@@ -135,6 +156,7 @@ const checkoutHold = async (
         },
         { session },
       );
+
 
       /* =======================
          7️⃣ CREATE STOCK LOCK
@@ -154,11 +176,13 @@ const checkoutHold = async (
       );
     }
 
+
     /* =======================
        COMMIT TRANSACTION
     ======================= */
     await session.commitTransaction();
     session.endSession();
+
 
     /* =======================
        🔥 RETURN CHỈ ITEM ĐƯỢC SELECT
@@ -166,27 +190,34 @@ const checkoutHold = async (
     const checkoutItems = await CartDetailModel.find({
       cart_id: cart._id,
       product_id: { $in: selected_product_ids },
-    }).populate("product_id", "name images price onHandQuantity status");
+    }).populate("product_id", "name images price onHandQuantity status expiryDateStr expiryDate nearExpiryDaysThreshold nearExpiryDiscountPercent");
 
-    const formattedItems = checkoutItems.map((item) => ({
-      product_id: item.product_id._id,
-      name: item.product_id.name,
-      image: item.product_id.images?.[0],
-      price: item.price,
-      quantity: item.quantity,
-      in_stock: item.product_id.onHandQuantity,
-      status: item.product_id.status,
-      warning: !item.product_id.status
-        ? "Sản phẩm đã ngừng bán"
-        : item.product_id.onHandQuantity <= 0
-          ? "Sản phẩm tạm hết hàng"
-          : "Còn hàng",
-      subtotal: item.quantity * item.price,
-    }));
+
+    const formattedItems = checkoutItems.map((item) => {
+      const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(item.product_id);
+      return {
+        product_id: item.product_id._id,
+        name: item.product_id.name,
+        image: item.product_id.images?.[0],
+        price: effectivePrice,
+        originalPrice: isNearExpiry ? originalPrice : null,
+        isNearExpiry,
+        quantity: item.quantity,
+        in_stock: item.product_id.onHandQuantity,
+        status: item.product_id.status,
+        warning: !item.product_id.status
+          ? "Product is no longer for sale"
+          : item.product_id.onHandQuantity <= 0
+            ? "Product is temporarily out of stock"
+            : "In stock",
+        subtotal: item.quantity * effectivePrice,
+      };
+    });
+
 
     return {
       status: "OK",
-      message: "Đã giữ hàng, vui lòng thanh toán trong 15 phút",
+      message: "Items reserved, please complete payment within 15 minutes",
       checkout_session_id,
       item_count: formattedItems.length,
       items: formattedItems,
@@ -195,9 +226,10 @@ const checkoutHold = async (
     await session.abortTransaction();
     session.endSession();
 
+
     return {
       status: "ERR",
-      message: error.message || "Checkout hold thất bại",
+      message: error.message || "Failed to reserve checkout items",
       checkout_session_id,
       item_count: 0,
       items: [],
@@ -205,10 +237,12 @@ const checkoutHold = async (
   }
 };
 
+
 const cancelCheckout = async (user_id, checkout_session_id) => {
   if (!checkout_session_id) {
-    throw new Error("Thiếu checkout_session_id");
+    throw new Error("Missing checkout_session_id");
   }
+
 
   await StockLockModel.deleteMany({
     user_id,
@@ -217,7 +251,7 @@ const cancelCheckout = async (user_id, checkout_session_id) => {
 
   return {
     status: "OK",
-    message: "Đã huỷ checkout, hàng đã được trả lại kho",
+    message: "Checkout cancelled, inventory released",
   };
 };
 module.exports = {

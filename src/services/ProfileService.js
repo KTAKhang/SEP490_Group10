@@ -3,12 +3,14 @@ const RoleModel = require("../models/RolesModel");
 const cloudinary = require("../config/cloudinaryConfig");
 const bcrypt = require("bcrypt");
 
+
 const updateProfile = async (id, { user_name, phone, address, birthday, gender }, file) => {
     try {
         const user = await UserModel.findById(id);
         if (!user) {
             return { status: "ERR", message: "The user does not exist." };
         }
+
 
         // Kiểm tra trùng tên người dùng
         const existingUserName = await UserModel.findOne({
@@ -19,6 +21,7 @@ const updateProfile = async (id, { user_name, phone, address, birthday, gender }
             return { status: "ERR", message: "The username is already in use!" };
         }
 
+
         const updateFields = {
             user_name: user_name || user.user_name,
             phone: phone || user.phone,
@@ -27,6 +30,7 @@ const updateProfile = async (id, { user_name, phone, address, birthday, gender }
             gender:  gender || user.gender,
             avatar: user.avatar,
         };
+
 
         // Upload avatar nếu có
         if (file) {
@@ -39,6 +43,7 @@ const updateProfile = async (id, { user_name, phone, address, birthday, gender }
                 }
             }
 
+
             const uploadResult = await new Promise((resolve, reject) => {
                 const uploadStream = cloudinary.uploader.upload_stream(
                     { folder: "avatars" },
@@ -47,17 +52,21 @@ const updateProfile = async (id, { user_name, phone, address, birthday, gender }
                 uploadStream.end(file.buffer);
             });
 
+
             updateFields.avatar = uploadResult.secure_url;
         }
+
 
         // Cập nhật user
         const updatedUser = await UserModel.findByIdAndUpdate(id, updateFields, {
             new: true,
         }).populate("role_id", "name -_id");
 
+
         if (!updatedUser) {
             return { status: "ERR", message: "Update failed" };
         }
+
 
         const dataOutput = {
             _id: updatedUser._id,
@@ -74,6 +83,7 @@ const updateProfile = async (id, { user_name, phone, address, birthday, gender }
             updatedAt: updatedUser.updatedAt,
         };
 
+
         return { status: "OK", message: "Information updated successfully!", data: dataOutput };
     } catch (error) {
         console.error("UpdateProfile Service Error:", error);
@@ -87,13 +97,14 @@ const getUserById = (id) => {
             if (!userDetail) {
                 resolve({
                     status: "ERR",
-                    message: "Người dùng không tồn tại",
+                    message: "User does not exist",
                 });
             }
             const dataUser = await UserModel.findById(userDetail._id).populate(
                 "role_id",
                 "name -_id"
             );
+
 
             const dataOutput = {
                 _id: dataUser._id,
@@ -112,12 +123,12 @@ const getUserById = (id) => {
             if (!userDetail) {
                 resolve({
                     status: "ERR",
-                    message: "Người dùng không tồn tại",
+                    message: "User does not exist",
                 });
             }
             resolve({
                 status: "OK",
-                message: "Nhận thông tin người dùng thành công!",
+                message: "Fetched user information successfully!",
                 data: dataOutput,
             });
         } catch (error) {
@@ -129,14 +140,14 @@ const changePassword = async (userID, old_password, new_password) => {
     try {
         const checkUser = await UserModel.findById(userID);
         if (!checkUser) {
-            return { status: "ERR", message: "Người dùng không tồn tại!" };
+            return { status: "ERR", message: "User does not exist!" };
         }
         if (checkUser.isGoogleAccount === true) {
-            return { status: "ERR", message: "Không thể đổi mật khẩu cho tài khoản Google." };
+            return { status: "ERR", message: "Cannot change the password for a Google account." };
         }
         const checkPassword = bcrypt.compareSync(old_password, checkUser.password);
         if (!checkPassword) {
-            return { status: "ERR", message: "Mật khẩu cũ không đúng!" };
+            return { status: "ERR", message: "Incorrect current password!" };
         }
         const hash = bcrypt.hashSync(new_password, 10);
         const updateData = await UserModel.findByIdAndUpdate(
@@ -163,7 +174,7 @@ const changePassword = async (userID, old_password, new_password) => {
         };
         return {
             status: "OK",
-            message: "Thay đổi mật khẩu thành công!",
+            message: "Password changed successfully!",
             data: dataOutput,
         };
     } catch (error) {
@@ -171,9 +182,9 @@ const changePassword = async (userID, old_password, new_password) => {
     }
 };
 
+
 module.exports = {
     updateProfile,
     getUserById,
     changePassword,
 };
-
