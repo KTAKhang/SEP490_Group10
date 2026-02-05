@@ -342,6 +342,80 @@ Smart Fruit Shop
             console.error("PreOrder ready email error:", error);
             return { status: "ERR", message: `Failed to send email: ${error.message}` };
         }
+    },
+
+    /**
+     * Send pre-order delayed email (WAITING_FOR_NEXT_BATCH): supplier delivered less than planned,
+     * order will be allocated in the next receive batch; no payment required at this step.
+     *
+     * @param {String} customerEmail
+     * @param {String} customerName
+     * @param {String} fruitTypeName - Fruit type name
+     * @param {Number} quantityKg
+     */
+    async sendPreOrderDelayedEmail(customerEmail, customerName, fruitTypeName = "pre-order product", quantityKg = 0) {
+        try {
+            const transporter = createTransporter();
+            const fruitLabel = fruitTypeName ? `${fruitTypeName} (${quantityKg} kg)` : `pre-order (${quantityKg} kg)`;
+
+            const mailOptions = {
+                from: {
+                    name: "Smart Fruit Shop",
+                    address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn"
+                },
+                to: customerEmail,
+                subject: "Pre-order delayed – Priority in next batch – Smart Fruit Shop",
+                html: `
+                    <!DOCTYPE html>
+                    <html lang="en">
+                    <head>
+                        <meta charset="UTF-8">
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                        <style>
+                            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+                            .container { background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 8px; padding: 30px; }
+                            .header { background-color: #f0ad4e; color: white; padding: 15px; border-radius: 8px 8px 0 0; text-align: center; margin: -30px -30px 20px -30px; }
+                            .content { margin: 20px 0; }
+                            .highlight { background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 20px 0; }
+                            .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; font-size: 14px; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="header"><h2>Pre-order delayed – Next batch priority</h2></div>
+                            <div class="content">
+                                <p>Hello <strong>${customerName || "Customer"}</strong>,</p>
+                                <p>Your pre-order <strong>${fruitLabel}</strong> could not be allocated this round because the supplier delivered less or later than planned.</p>
+                                <div class="highlight">
+                                    <strong>Current status:</strong> Waiting for the next receive batch.<br>
+                                    Your order will be <strong>prioritized for allocation</strong> in the next receive batch (FIFO order).
+                                </div>
+                                <p><strong>You do not need to pay anything more</strong> at this time. When stock arrives and your order is allocated, we will notify you to pay the remaining 50%.</p>
+                                <p>Thank you for your patience.</p>
+                            </div>
+                            <div class="footer">
+                                <p>Best regards,<br><strong>Smart Fruit Shop</strong></p>
+                            </div>
+                        </div>
+                    </body>
+                    </html>
+                `,
+                text: `
+Hello ${customerName || "Customer"},
+
+Your pre-order ${fruitLabel} could not be allocated this round because the supplier delivered less or later than planned. Your order will be prioritized in the next receive batch. You do not need to pay anything more at this time.
+
+Best regards,
+Smart Fruit Shop
+                `.trim()
+            };
+
+            const info = await transporter.sendMail(mailOptions);
+            return { status: "OK", message: "Email sent successfully", messageId: info.messageId };
+        } catch (error) {
+            console.error("PreOrder delayed email error:", error);
+            return { status: "ERR", message: `Failed to send email: ${error.message}` };
+        }
     }
 };
 

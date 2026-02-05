@@ -27,12 +27,15 @@ const preOrderSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
-        "WAITING_FOR_PRODUCT",
+        "WAITING_FOR_ALLOCATION",
+        "WAITING_FOR_NEXT_BATCH",
+        "ALLOCATED_WAITING_PAYMENT",
         "READY_FOR_FULFILLMENT",
         "COMPLETED",
         "CANCELLED",
+        "WAITING_FOR_PRODUCT", // legacy; treat as WAITING_FOR_ALLOCATION in demand/allocation
       ],
-      default: "WAITING_FOR_PRODUCT",
+      default: "WAITING_FOR_ALLOCATION",
       index: true,
     },
     paymentStatus: {

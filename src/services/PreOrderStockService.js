@@ -1,9 +1,8 @@
 /**
  * Pre-order Stock Service
  *
- * Business logic for pre-order stock (PreOrderStock) and receive records (PreOrderReceive).
- * Warehouse staff receive stock by fruit type or by pre-order harvest batch; Admin and Warehouse view stock list
- * (receivedKg, allocatedKg, availableKg per fruit type) and receive history.
+ * Total received across ALL batches MUST NOT exceed total demand.
+ * Each receive: quantity > 0 and <= (remaining demand not yet received). Requires explicit confirmation flag.
  */
 
 const mongoose = require("mongoose");
@@ -11,7 +10,25 @@ const PreOrderStockModel = require("../models/PreOrderStockModel");
 const PreOrderReceiveModel = require("../models/PreOrderReceiveModel");
 const PreOrderHarvestBatchModel = require("../models/PreOrderHarvestBatchModel");
 const PreOrderAllocationModel = require("../models/PreOrderAllocationModel");
+const PreOrderModel = require("../models/PreOrderModel");
 const FruitTypeModel = require("../models/FruitTypeModel");
+
+/** Statuses that count toward demand. */
+const DEMAND_STATUSES = ["WAITING_FOR_ALLOCATION", "WAITING_FOR_NEXT_BATCH", "ALLOCATED_WAITING_PAYMENT", "WAITING_FOR_PRODUCT"];
+
+async function getDemandKgForFruitType(fruitTypeId) {
+  const agg = await PreOrderModel.aggregate([
+    { $match: { fruitTypeId: new mongoose.Types.ObjectId(fruitTypeId), status: { $in: DEMAND_STATUSES } } },
+    { $group: { _id: null, demandKg: { $sum: "$quantityKg" } } },
+  ]);
+  return agg[0]?.demandKg ?? 0;
+}
+
+/** Allocated kg for this fruit type (from PreOrderAllocation). Used to compute available = received - allocated. */
+async function getAllocatedKgForFruitType(fruitTypeId) {
+  const a = await PreOrderAllocationModel.findOne({ fruitTypeId }).lean();
+  return a?.allocatedKg ?? 0;
+}
 
 /**
  * List pre-order stock by fruit type: receivedKg, allocatedKg, availableKg (receivedKg - allocatedKg).
@@ -63,26 +80,31 @@ async function listStock() {
 }
 
 /**
- * Warehouse staff: record a receive into pre-order stock by fruit type. Creates PreOrderReceive and increments PreOrderStock.receivedKg.
- *
- * Flow:
- * 1. Validate fruit type exists and quantityKg > 0
- * 2. Create PreOrderReceive (fruitTypeId, quantityKg, receivedBy, note)
- * 3. FindOneAndUpdate PreOrderStock for fruitTypeId: $inc receivedKg by quantityKg (upsert: true)
- * 4. Return created receive and updated stock
+ * Warehouse staff: record a receive into pre-order stock by fruit type.
+ * Total received must not exceed demand. Requires confirmed: true.
  *
  * @param {Object} params - Input parameters
  * @param {string} params.fruitTypeId - Fruit type document ID
  * @param {number} params.quantityKg - Quantity received (kg)
  * @param {string} params.receivedBy - User ID of warehouse staff
+ * @param {boolean} params.confirmed - Must be true (business confirmation)
  * @param {string} [params.note] - Optional note
  * @returns {Promise<{ status: string, data: Object, stock: Object }>}
  */
-async function createReceive({ fruitTypeId, quantityKg, receivedBy, note }) {
+async function createReceive({ fruitTypeId, quantityKg, receivedBy, confirmed, note }) {
+  if (confirmed !== true) throw new Error("Receive requires explicit confirmation (confirmed: true)");
   const ft = await FruitTypeModel.findById(fruitTypeId).lean();
   if (!ft) throw new Error("Fruit type not found");
   const qty = Number(quantityKg);
   if (isNaN(qty) || qty <= 0) throw new Error("Quantity (kg) must be greater than 0");
+
+  const demandKg = await getDemandKgForFruitType(fruitTypeId);
+  const stock = await PreOrderStockModel.findOne({ fruitTypeId }).lean();
+  const totalReceived = stock?.receivedKg ?? 0;
+  const remainingToReceive = Math.max(0, demandKg - totalReceived);
+  if (qty > remainingToReceive) {
+    throw new Error(`Receive quantity (${qty} kg) exceeds remaining demand (${remainingToReceive} kg). Total demand: ${demandKg} kg, already received: ${totalReceived} kg.`);
+  }
 
   const [receive] = await Promise.all([
     PreOrderReceiveModel.create({
@@ -102,48 +124,45 @@ async function createReceive({ fruitTypeId, quantityKg, receivedBy, note }) {
 }
 
 /**
- * Warehouse staff: receive pre-order stock by batch (PreOrderHarvestBatch). One-time receive only per batch; quantity must equal planned (batch.quantityKg).
+ * Warehouse staff: receive pre-order stock by batch (PreOrderHarvestBatch).
+ * Partial receives allowed. Total received must not exceed demand. Requires confirmed: true.
  *
  * Business rules:
- * - Batch must exist; batch must not already have receivedKg > 0 or any PreOrderReceive record
- * - quantityKg must equal batch.quantityKg (planned)
- *
- * Flow:
- * 1. Load batch; validate not already received (batch.receivedKg === 0, no PreOrderReceive for this batch)
- * 2. Validate quantityKg === batch.quantityKg
- * 3. Create PreOrderReceive (preOrderHarvestBatchId, fruitTypeId, quantityKg, receivedBy, note)
- * 4. Update PreOrderHarvestBatch: $inc receivedKg by quantityKg
- * 5. Update PreOrderStock for fruitTypeId: $inc receivedKg by quantityKg (upsert)
- * 6. Return created receive, updated batch, and updated stock
+ * - Batch must exist
+ * - quantityKg > 0 and <= min(batch.quantityKg - batch.receivedKg, demand - totalReceivedForFruitType)
+ * - confirmed must be true
  *
  * @param {Object} params - Input parameters
  * @param {string} params.preOrderHarvestBatchId - PreOrderHarvestBatch document ID
- * @param {number} params.quantityKg - Quantity received (must equal batch.quantityKg)
+ * @param {number} params.quantityKg - Quantity received (kg)
  * @param {string} params.receivedBy - User ID of warehouse staff
+ * @param {boolean} params.confirmed - Must be true (business confirmation)
  * @param {string} [params.note] - Optional note
  * @returns {Promise<{ status: string, data: Object, batch: Object, stock: Object }>}
  */
-async function createReceiveByBatch({ preOrderHarvestBatchId, quantityKg, receivedBy, note }) {
+async function createReceiveByBatch({ preOrderHarvestBatchId, quantityKg, receivedBy, confirmed, note }) {
+  if (confirmed !== true) throw new Error("Receive requires explicit confirmation (confirmed: true)");
   if (!mongoose.isValidObjectId(preOrderHarvestBatchId)) {
     throw new Error("Invalid preOrderHarvestBatchId");
   }
   const batch = await PreOrderHarvestBatchModel.findById(preOrderHarvestBatchId).lean();
   if (!batch) throw new Error("Pre-order receive batch not found");
   const planned = batch.quantityKg ?? 0;
-  const received = batch.receivedKg ?? 0;
-  if (received > 0) {
-    throw new Error("This batch was already received. Each batch can only be received once.");
-  }
-  const existingReceives = await PreOrderReceiveModel.countDocuments({ preOrderHarvestBatchId: batch._id });
-  if (existingReceives > 0) {
-    throw new Error("This batch already has a receive record. Each batch can only be received once.");
-  }
+  const batchReceived = batch.receivedKg ?? 0;
   const qty = Number(quantityKg);
   if (!Number.isFinite(qty) || qty <= 0) throw new Error("Quantity (kg) must be greater than 0");
-  if (Math.abs(qty - planned) > 0.001) {
-    throw new Error(`Received quantity must equal planned quantity (${planned} kg). One-time receive only.`);
+  if (qty > planned - batchReceived) {
+    throw new Error(`Receive quantity (${qty} kg) exceeds batch remaining (${Math.max(0, planned - batchReceived)} kg). Batch planned: ${planned} kg, already received: ${batchReceived} kg.`);
   }
+
   const fruitTypeId = batch.fruitTypeId;
+  const demandKg = await getDemandKgForFruitType(fruitTypeId);
+  const stockDoc = await PreOrderStockModel.findOne({ fruitTypeId }).lean();
+  const totalReceived = stockDoc?.receivedKg ?? 0;
+  const remainingToReceive = Math.max(0, demandKg - totalReceived);
+  if (qty > remainingToReceive) {
+    throw new Error(`Receive quantity (${qty} kg) exceeds remaining demand (${remainingToReceive} kg). Total demand: ${demandKg} kg, already received: ${totalReceived} kg.`);
+  }
 
   const receive = await PreOrderReceiveModel.create({
     preOrderHarvestBatchId: batch._id,

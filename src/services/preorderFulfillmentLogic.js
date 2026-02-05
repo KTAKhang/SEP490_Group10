@@ -19,21 +19,18 @@ const CustomerEmailService = require("./CustomerEmailService");
 const DAYS_TO_PAY = 7;
 
 /**
- * After allocation: verify stock is fully received for this fruit type, then send email and FCM to all customers
- * with WAITING_FOR_PRODUCT pre-orders for that fruit type, asking them to pay the remaining 50%. Does NOT update
- * pre-order status (READY_FOR_FULFILLMENT is set only when customer pays remaining via fulfillRemainingPayment).
+ * After allocation: send email and FCM to all customers with ALLOCATED_WAITING_PAYMENT pre-orders for that fruit type,
+ * asking them to pay the remaining 50%. Does NOT update pre-order status (READY_FOR_FULFILLMENT is set only when
+ * customer pays remaining via fulfillRemainingPayment).
  *
  * Flow:
  * 1. Load allocation for fruitTypeId; if allocatedKg <= 0, return { updated: 0 }
  * 2. Load PreOrderStock for fruitTypeId; if receivedKg < allocatedKg, return { updated: 0 }
- * 3. Load all pre-orders for this fruitTypeId with status WAITING_FOR_PRODUCT (cursor = list of pre-orders)
- * 4. Collect unique userIds and fruitTypeIds; load User and FruitType for email/notification
- * 5. For each pre-order: send PreOrderReady email (customer email, name, fruit name, quantityKg, DAYS_TO_PAY)
- * 6. For each unique userId: send FCM notification (title/body/data) to pay remaining balance
- * 7. Return { updated: ids.length }
+ * 3. Load all pre-orders for this fruitTypeId with status ALLOCATED_WAITING_PAYMENT
+ * 4. For each: send PreOrderReady email and FCM to pay remaining balance
  *
  * @param {string} fruitTypeIdStr - Fruit type ObjectId as string
- * @returns {Promise<{ updated: number }>} Number of pre-orders notified (0 if allocation/stock not ready)
+ * @returns {Promise<{ updated: number }>} Number of pre-orders notified (0 if none)
  */
 async function triggerReadyAndNotifyForFruitType(fruitTypeIdStr) {
   const allocation = await PreOrderAllocationModel.findOne({
@@ -51,7 +48,7 @@ async function triggerReadyAndNotifyForFruitType(fruitTypeIdStr) {
   const fruitTypeObjId = new mongoose.Types.ObjectId(fruitTypeIdStr);
   const cursor = await PreOrderModel.find({
     fruitTypeId: fruitTypeObjId,
-    status: "WAITING_FOR_PRODUCT",
+    status: "ALLOCATED_WAITING_PAYMENT",
   })
     .select("_id userId fruitTypeId quantityKg")
     .lean();
@@ -105,4 +102,54 @@ async function triggerReadyAndNotifyForFruitType(fruitTypeIdStr) {
   return { updated: ids.length };
 }
 
-module.exports = { triggerReadyAndNotifyForFruitType, DAYS_TO_PAY };
+/**
+ * Notify customer when their pre-order is moved to WAITING_FOR_NEXT_BATCH (allocation attempted but
+ * insufficient stock). Triggered ONLY from PreOrderAllocationService.upsertAllocation when we set
+ * status from WAITING_FOR_ALLOCATION/WAITING_FOR_PRODUCT → WAITING_FOR_NEXT_BATCH (one order per run).
+ * Sends FCM + Email: reason (supplier delivered less), status, commitment to allocate next batch,
+ * no payment required at this step.
+ *
+ * @param {Object} preOrder - PreOrder document (or lean) with _id, userId, fruitTypeId, quantityKg
+ * @returns {Promise<{ sent: boolean }>}
+ */
+async function notifyPreOrderDelayed(preOrder) {
+  if (!preOrder || !preOrder.userId || !preOrder.fruitTypeId) return { sent: false };
+  const userIdStr = preOrder.userId.toString();
+  const fruitTypeIdStr = preOrder.fruitTypeId.toString();
+
+  const [user, fruitType] = await Promise.all([
+    UserModel.findById(preOrder.userId).select("email user_name").lean(),
+    FruitTypeModel.findById(preOrder.fruitTypeId).select("name").lean(),
+  ]);
+  if (!user) return { sent: false };
+
+  const fruitName = fruitType?.name || "sản phẩm đặt trước";
+  const qty = preOrder.quantityKg ?? 0;
+
+  if (user.email) {
+    try {
+      await CustomerEmailService.sendPreOrderDelayedEmail(
+        user.email,
+        user.user_name,
+        fruitName,
+        qty
+      );
+    } catch (e) {
+      console.warn("PreOrder delayed email skip:", e.message);
+    }
+  }
+
+  try {
+    await NotificationService.sendToUser(userIdStr, {
+      title: "Pre-order delayed – Next batch priority",
+      body: "Your pre-order could not be allocated this round (supplier delivered less). Your order will be prioritized in the next receive batch. No payment needed now.",
+      data: { type: "preorder", action: "view_my_preorders", status: "WAITING_FOR_NEXT_BATCH" },
+    });
+  } catch (e) {
+    console.warn("PreOrder delayed FCM skip:", e.message);
+  }
+
+  return { sent: true };
+}
+
+module.exports = { triggerReadyAndNotifyForFruitType, notifyPreOrderDelayed, DAYS_TO_PAY };

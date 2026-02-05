@@ -20,6 +20,7 @@ const createReceive = async (req, res) => {
       fruitTypeId,
       quantityKg: Number(quantityKg),
       receivedBy,
+      confirmed: true,
       note: note || "",
     });
     return res.status(200).json(response);
@@ -39,6 +40,7 @@ const createReceiveByBatch = async (req, res) => {
       preOrderHarvestBatchId,
       quantityKg: Number(quantityKg),
       receivedBy,
+      confirmed: true,
       note: note || "",
     });
     return res.status(200).json(response);

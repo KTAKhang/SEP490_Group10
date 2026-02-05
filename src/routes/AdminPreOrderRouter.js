@@ -18,5 +18,6 @@ router.get("/fruit-types", authAdminMiddleware, FruitTypeController.listAdmin);
 router.get("/fruit-types/:id", authAdminMiddleware, FruitTypeController.getById);
 router.post("/fruit-types", authAdminMiddleware, uploadFruitTypeImage, FruitTypeController.create);
 router.put("/fruit-types/:id", authAdminMiddleware, uploadFruitTypeImage, FruitTypeController.update);
+router.delete("/fruit-types/:id", authAdminMiddleware, FruitTypeController.remove);
 
 module.exports = router;
