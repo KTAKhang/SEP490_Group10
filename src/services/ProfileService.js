@@ -3,12 +3,14 @@ const RoleModel = require("../models/RolesModel");
 const cloudinary = require("../config/cloudinaryConfig");
 const bcrypt = require("bcrypt");
 
+
 const updateProfile = async (id, { user_name, phone, address, birthday, gender }, file) => {
     try {
         const user = await UserModel.findById(id);
         if (!user) {
             return { status: "ERR", message: "The user does not exist." };
         }
+
 
         // Kiểm tra trùng tên người dùng
         const existingUserName = await UserModel.findOne({
@@ -19,6 +21,7 @@ const updateProfile = async (id, { user_name, phone, address, birthday, gender }
             return { status: "ERR", message: "The username is already in use!" };
         }
 
+
         const updateFields = {
             user_name: user_name || user.user_name,
             phone: phone || user.phone,
@@ -27,6 +30,7 @@ const updateProfile = async (id, { user_name, phone, address, birthday, gender }
             gender:  gender || user.gender,
             avatar: user.avatar,
         };
+
 
         // Upload avatar nếu có
         if (file) {
@@ -39,6 +43,7 @@ const updateProfile = async (id, { user_name, phone, address, birthday, gender }
                 }
             }
 
+
             const uploadResult = await new Promise((resolve, reject) => {
                 const uploadStream = cloudinary.uploader.upload_stream(
                     { folder: "avatars" },
@@ -47,17 +52,21 @@ const updateProfile = async (id, { user_name, phone, address, birthday, gender }
                 uploadStream.end(file.buffer);
             });
 
+
             updateFields.avatar = uploadResult.secure_url;
         }
+
 
         // Cập nhật user
         const updatedUser = await UserModel.findByIdAndUpdate(id, updateFields, {
             new: true,
         }).populate("role_id", "name -_id");
 
+
         if (!updatedUser) {
             return { status: "ERR", message: "Update failed" };
         }
+
 
         const dataOutput = {
             _id: updatedUser._id,
@@ -73,6 +82,7 @@ const updateProfile = async (id, { user_name, phone, address, birthday, gender }
             createdAt: updatedUser.createdAt,
             updatedAt: updatedUser.updatedAt,
         };
+
 
         return { status: "OK", message: "Information updated successfully!", data: dataOutput };
     } catch (error) {
@@ -94,6 +104,7 @@ const getUserById = (id) => {
                 "role_id",
                 "name -_id"
             );
+
 
             const dataOutput = {
                 _id: dataUser._id,
@@ -171,9 +182,9 @@ const changePassword = async (userID, old_password, new_password) => {
     }
 };
 
+
 module.exports = {
     updateProfile,
     getUserById,
     changePassword,
 };
-

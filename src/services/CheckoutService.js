@@ -4,11 +4,11 @@ const CartDetailModel = require("../models/CartDetailsModel");
 const CartModel = require("../models/CartsModel");
 const ProductModel = require("../models/ProductModel");
 const { getEffectivePrice } = require("../utils/productPrice");
-
 const HOLD_MINUTES = 15;
 const COOLDOWN_MINUTES = 30;
 const MAX_HOLD_PERCENT = 1;
 const MAX_HOLD_PER_DAY = 3;
+
 
 /**
  * HOLD STOCK for selected cart items
@@ -21,21 +21,16 @@ const checkoutHold = async (
   const session = await mongoose.startSession();
   session.startTransaction();
 
+
   try {
     /* =======================
        0️⃣ LOAD CART
     ======================= */
     const cart = await CartModel.findOne({ user_id }).session(session);
-
-    if (!cart) throw new Error("Cart is empty");
-
     const cartItems = await CartDetailModel.find({
       cart_id: cart._id,
       product_id: { $in: selected_product_ids },
     }).session(session);
-
-    if (!cartItems.length) throw new Error("No products were selected");
-
     /* =======================
        LOOP ITEMS
     ======================= */
@@ -44,15 +39,14 @@ const checkoutHold = async (
         session,
       );
 
+
       if (!product || !product.status)
         throw new Error(`Product ${product?.name || ""} is not available`);
-
       /* =======================
          1️⃣ CHECK KHO THỰC TẾ
       ======================= */
       if (product.onHandQuantity < item.quantity)
         throw new Error(`Not enough stock for ${product.name}`);
-
       /* =======================
          2️⃣ RESUME CHECKOUT CŨ
       ======================= */
@@ -63,7 +57,9 @@ const checkoutHold = async (
         expiresAt: { $gt: new Date() },
       }).session(session);
 
+
       if (existingLock) continue;
+
 
       /* =======================
          3️⃣ CHECK COOLDOWN
@@ -74,10 +70,12 @@ const checkoutHold = async (
         cooldownUntil: { $gt: new Date() },
       }).session(session);
 
+
       if (cooldown)
         throw new Error(
           `You recently reserved ${product.name}, please try again later`,
         );
+
 
       /* =======================
          4️⃣ CHECK LIMIT / DAY
@@ -85,16 +83,19 @@ const checkoutHold = async (
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
 
+
       const todayCount = await StockLockModel.countDocuments({
         user_id,
         product_id: product._id,
         createdAt: { $gte: startOfDay },
       }).session(session);
 
+
       if (todayCount >= MAX_HOLD_PER_DAY)
         throw new Error(
           `You have reserved ${product.name} too many times today`,
         );
+
 
       /* =======================
          5️⃣ CHECK % KHO (LOCK CHƯA HẾT HẠN)
@@ -114,16 +115,19 @@ const checkoutHold = async (
         },
       ]).session(session);
 
+
       const lockedQty = lockedAgg[0]?.total || 0;
       const maxLock = Math.max(
         1,
         Math.floor(product.onHandQuantity * MAX_HOLD_PERCENT),
       );
 
+
       if (lockedQty + item.quantity > maxLock)
         throw new Error(
           `Product ${product.name} is being checked out by too many users`,
         );
+
 
       /* =======================
          6️⃣ XOÁ LOCK CŨ (KHÁC SESSION)
@@ -136,6 +140,7 @@ const checkoutHold = async (
         },
         { session },
       );
+
 
       /* =======================
          7️⃣ CREATE STOCK LOCK
@@ -155,11 +160,13 @@ const checkoutHold = async (
       );
     }
 
+
     /* =======================
        COMMIT TRANSACTION
     ======================= */
     await session.commitTransaction();
     session.endSession();
+
 
     /* =======================
        🔥 RETURN CHỈ ITEM ĐƯỢC SELECT
@@ -168,7 +175,6 @@ const checkoutHold = async (
       cart_id: cart._id,
       product_id: { $in: selected_product_ids },
     }).populate("product_id", "name images price onHandQuantity status expiryDateStr expiryDate nearExpiryDaysThreshold nearExpiryDiscountPercent");
-
     const formattedItems = checkoutItems.map((item) => {
       const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(item.product_id);
       return {
@@ -189,7 +195,6 @@ const checkoutHold = async (
         subtotal: item.quantity * effectivePrice,
       };
     });
-
     return {
       status: "OK",
       message: "Items reserved, please complete payment within 15 minutes",
@@ -201,6 +206,7 @@ const checkoutHold = async (
     await session.abortTransaction();
     session.endSession();
 
+
     return {
       status: "ERR",
       message: error.message || "Failed to reserve checkout items",
@@ -211,10 +217,12 @@ const checkoutHold = async (
   }
 };
 
+
 const cancelCheckout = async (user_id, checkout_session_id) => {
   if (!checkout_session_id) {
     throw new Error("Missing checkout_session_id");
   }
+
 
   await StockLockModel.deleteMany({
     user_id,

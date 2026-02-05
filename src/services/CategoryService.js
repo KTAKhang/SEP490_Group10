@@ -2,11 +2,13 @@ const CategoryModel = require("../models/CategoryModel");
 const ProductModel = require("../models/ProductModel");
 const cloudinary = require("../config/cloudinaryConfig");
 
+
 const createCategory = async ({ name, description, image, imagePublicId, status }) => {
   try {
     if (!name || !name.trim()) {
       return { status: "ERR", message: "Category name is required" };
     }
+
 
     const normalizedName = name.trim();
     const existing = await CategoryModel.findOne({
@@ -16,6 +18,7 @@ const createCategory = async ({ name, description, image, imagePublicId, status 
       return { status: "ERR", message: "Category name already exists" };
     }
 
+
     const category = new CategoryModel({
       name: normalizedName,
       description: (description ?? "").toString(),
@@ -24,7 +27,9 @@ const createCategory = async ({ name, description, image, imagePublicId, status 
       status: status ?? true,
     });
 
+
     await category.save();
+
 
     return { status: "OK", message: "Category created successfully", data: category };
   } catch (error) {
@@ -32,15 +37,18 @@ const createCategory = async ({ name, description, image, imagePublicId, status 
   }
 };
 
+
 const getCategories = async ({ page = 1, limit = 20, search = "", status, sortBy = "createdAt", sortOrder = "desc" } = {}) => {
   try {
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
 
+
     const query = {};
     if (search) query.name = { $regex: search, $options: "i" };
     if (status !== undefined) query.status = status === "true" || status === true;
+
 
     // Sort options
     const allowedSortFields = ["name", "createdAt", "updatedAt", "status"];
@@ -48,10 +56,12 @@ const getCategories = async ({ page = 1, limit = 20, search = "", status, sortBy
     const sortDirection = sortOrder === "asc" ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
 
+
     const [data, total] = await Promise.all([
       CategoryModel.find(query).sort(sortObj).skip(skip).limit(limitNum),
       CategoryModel.countDocuments(query),
     ]);
+
 
     return {
       status: "OK",
@@ -69,6 +79,7 @@ const getCategories = async ({ page = 1, limit = 20, search = "", status, sortBy
   }
 };
 
+
 const getCategoryById = async (id) => {
   try {
     const category = await CategoryModel.findById(id);
@@ -79,13 +90,14 @@ const getCategoryById = async (id) => {
   }
 };
 
+
 const updateCategory = async (id, payload = {}) => {
   try {
     const category = await CategoryModel.findById(id);
     if (!category) return { status: "ERR", message: "Category does not exist" };
-
     // Lưu ảnh cũ để xóa sau nếu có ảnh mới
     const oldImagePublicId = category.imagePublicId;
+
 
     if (payload.name !== undefined) {
       const newName = (payload.name ?? "").toString().trim();
@@ -98,8 +110,9 @@ const updateCategory = async (id, payload = {}) => {
       category.name = newName;
     }
 
+
     if (payload.description !== undefined) category.description = (payload.description ?? "").toString();
-    
+   
     // Xử lý ảnh: nếu có ảnh mới, xóa ảnh cũ trên Cloudinary
     if (payload.image !== undefined && payload.imagePublicId !== undefined) {
       // Nếu có ảnh cũ và ảnh mới khác ảnh cũ, xóa ảnh cũ
@@ -124,30 +137,26 @@ const updateCategory = async (id, payload = {}) => {
       category.image = "";
       category.imagePublicId = "";
     }
-    
+   
     if (payload.status !== undefined) category.status = payload.status;
-
     await category.save();
-
     return { status: "OK", message: "Category updated successfully", data: category };
   } catch (error) {
     return { status: "ERR", message: error.message };
   }
 };
 
+
 const deleteCategory = async (id) => {
   try {
     const category = await CategoryModel.findById(id);
     if (!category) return { status: "ERR", message: "Category does not exist" };
-
     // Kiểm tra xem có sản phẩm nào đang sử dụng category này không
     const productCount = await ProductModel.countDocuments({ category: id });
     if (productCount > 0) {
-      return { 
-        status: "ERR", 
-        message: `Cannot delete this category because ${productCount} products are using it. Please remove or reassign those products first.` 
       };
     }
+
 
     // Xóa ảnh trên Cloudinary nếu có
     if (category.imagePublicId) {
@@ -158,12 +167,14 @@ const deleteCategory = async (id) => {
       }
     }
 
+
     await CategoryModel.findByIdAndDelete(id);
     return { status: "OK", message: "Category deleted successfully" };
   } catch (error) {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 const getCategoryStats = async () => {
   try {
@@ -172,6 +183,7 @@ const getCategoryStats = async () => {
       CategoryModel.countDocuments({ status: true }),
       CategoryModel.countDocuments({ status: false }),
     ]);
+
 
     return {
       status: "OK",
@@ -187,6 +199,7 @@ const getCategoryStats = async () => {
   }
 };
 
+
 module.exports = {
   createCategory,
   getCategories,
@@ -195,4 +208,3 @@ module.exports = {
   deleteCategory,
   getCategoryStats,
 };
-

@@ -3,6 +3,7 @@ const HarvestBatchModel = require("../models/HarvestBatchModel");
 const SupplierModel = require("../models/SupplierModel");
 const ProductModel = require("../models/ProductModel");
 
+
 /**
  * Tạo lô thu hoạch (Admin)
  */
@@ -17,21 +18,26 @@ const createHarvestBatch = async (payload = {}) => {
       notes,
     } = payload;
 
+
     if (!mongoose.isValidObjectId(supplierId)) {
       return { status: "ERR", message: "Invalid supplierId" };
     }
+
 
     if (!mongoose.isValidObjectId(productId)) {
       return { status: "ERR", message: "Invalid productId" };
     }
 
+
     if (!batchNumber || !batchNumber.toString().trim()) {
       return { status: "ERR", message: "Batch number is required" };
     }
 
+
     if (!harvestDate) {
       return { status: "ERR", message: "Harvest date is required" };
     }
+
 
     // ✅ BR-SUP-12: Validation harvestDate không được lớn hơn ngày hiện tại
     const harvestDateObj = new Date(harvestDate);
@@ -51,18 +57,21 @@ const createHarvestBatch = async (payload = {}) => {
       return { status: "ERR", message: "Supplier does not exist" };
     }
 
+
     const product = await ProductModel.findById(productId);
     if (!product) {
       return { status: "ERR", message: "Product does not exist" };
     }
 
+
     // ✅ BR-SUP-26: Không cho tạo harvest batch với supplier SUSPENDED/TERMINATED
     if (supplier.cooperationStatus !== "ACTIVE") {
-      return { 
-        status: "ERR", 
-        message: `Không thể tạo lô thu hoạch cho nhà cung cấp có trạng thái ${supplier.cooperationStatus}. Chỉ nhà cung cấp ACTIVE mới được phép.` 
+      return {
+        status: "ERR",
+        message: `Không thể tạo lô thu hoạch cho nhà cung cấp có trạng thái ${supplier.cooperationStatus}. Chỉ nhà cung cấp ACTIVE mới được phép.`
       };
     }
+
 
     // ✅ Validation: product phải có supplier trùng với supplierId
     if (!product.supplier || product.supplier.toString() !== supplierId) {
@@ -89,6 +98,7 @@ const createHarvestBatch = async (payload = {}) => {
       };
     }
 
+
     const harvestBatch = new HarvestBatchModel({
       supplier: new mongoose.Types.ObjectId(supplierId),
       product: new mongoose.Types.ObjectId(productId),
@@ -98,16 +108,20 @@ const createHarvestBatch = async (payload = {}) => {
       notes: notes?.toString().trim() || "",
     });
 
+
     await harvestBatch.save();
+
 
     // Cập nhật thống kê supplier
     supplier.totalBatches = (supplier.totalBatches || 0) + 1;
     await supplier.save();
 
+
     const populated = await HarvestBatchModel.findById(harvestBatch._id)
       .populate("supplier", "name type")
       .populate("product", "name brand")
       .lean();
+
 
     return {
       status: "OK",
@@ -119,6 +133,7 @@ const createHarvestBatch = async (payload = {}) => {
   }
 };
 
+
 /**
  * Cập nhật lô thu hoạch (Admin)
  */
@@ -128,10 +143,12 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
       return { status: "ERR", message: "Invalid harvestBatchId" };
     }
 
+
     const harvestBatch = await HarvestBatchModel.findById(harvestBatchId);
     if (!harvestBatch) {
       return { status: "ERR", message: "Harvest batch does not exist" };
     }
+
 
     // Không cho sửa nếu đã nhập kho (receivedQuantity > 0)
     if (harvestBatch.receivedQuantity > 0) {
@@ -141,13 +158,16 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
       };
     }
 
+
     // Whitelist fields có thể sửa
     const allowed = ["batchNumber", "harvestDate", "location", "notes", "receiptEligible", "visibleInReceipt"];
     for (const key of Object.keys(payload)) {
       if (!allowed.includes(key)) delete payload[key];
     }
 
+
     const changes = new Map();
+
 
     if (payload.batchNumber !== undefined) {
       const newBatchNumber = payload.batchNumber?.toString().trim() || "";
@@ -179,6 +199,7 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
       }
     }
 
+
     if (payload.harvestDate !== undefined) {
       const harvestDateObj = new Date(payload.harvestDate);
       harvestDateObj.setHours(0, 0, 0, 0);
@@ -194,6 +215,7 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
       harvestBatch.harvestDate = harvestDateObj;
     }
 
+
     if (payload.location !== undefined) {
       const newLocation = payload.location?.toString().trim() || "";
       if (harvestBatch.location !== newLocation) {
@@ -201,7 +223,6 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
         harvestBatch.location = newLocation;
       }
     }
-
     if (payload.notes !== undefined) {
       const newNotes = payload.notes?.toString().trim() || "";
       if (harvestBatch.notes !== newNotes) {
@@ -209,21 +230,20 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
         harvestBatch.notes = newNotes;
       }
     }
-
     if (payload.receiptEligible !== undefined) {
       harvestBatch.receiptEligible = payload.receiptEligible === true || payload.receiptEligible === "true";
     }
-
     if (payload.visibleInReceipt !== undefined) {
       harvestBatch.visibleInReceipt = payload.visibleInReceipt === true || payload.visibleInReceipt === "true";
     }
-
     await harvestBatch.save();
+
 
     const populated = await HarvestBatchModel.findById(harvestBatch._id)
       .populate("supplier", "name type")
       .populate("product", "name brand")
       .lean();
+
 
     return {
       status: "OK",
@@ -235,6 +255,7 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
   }
 };
 
+
 /**
  * Xóa lô thu hoạch (Admin)
  */
@@ -244,10 +265,12 @@ const deleteHarvestBatch = async (harvestBatchId) => {
       return { status: "ERR", message: "Invalid harvestBatchId" };
     }
 
+
     const harvestBatch = await HarvestBatchModel.findById(harvestBatchId);
     if (!harvestBatch) {
       return { status: "ERR", message: "Harvest batch does not exist" };
     }
+
 
     // Không cho xóa nếu đã nhập kho
     if (harvestBatch.receivedQuantity > 0) {
@@ -257,8 +280,10 @@ const deleteHarvestBatch = async (harvestBatchId) => {
       };
     }
 
+
     const supplierId = harvestBatch.supplier;
     await harvestBatch.deleteOne();
+
 
     // Cập nhật thống kê supplier
     const supplier = await SupplierModel.findById(supplierId);
@@ -266,6 +291,7 @@ const deleteHarvestBatch = async (harvestBatchId) => {
       supplier.totalBatches = Math.max(0, supplier.totalBatches - 1);
       await supplier.save();
     }
+
 
     return {
       status: "OK",
@@ -275,6 +301,7 @@ const deleteHarvestBatch = async (harvestBatchId) => {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 /**
  * Lấy danh sách lô thu hoạch (Admin)
@@ -302,11 +329,14 @@ const getHarvestBatches = async (filters = {}) => {
       sortOrder = "desc",
     } = filters;
 
+
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
 
+
     const query = {};
+
 
     // Search
     const searchValue = search?.toString().trim();
@@ -321,15 +351,16 @@ const getHarvestBatches = async (filters = {}) => {
       ];
     }
 
+
     // Filter
     if (supplierId && mongoose.isValidObjectId(supplierId)) {
       query.supplier = new mongoose.Types.ObjectId(supplierId);
     }
 
+
     if (productId && mongoose.isValidObjectId(productId)) {
       query.product = new mongoose.Types.ObjectId(productId);
     }
-
     if (minReceivedQuantity !== undefined || maxReceivedQuantity !== undefined) {
       query.receivedQuantity = {};
       if (minReceivedQuantity !== undefined && !Number.isNaN(Number(minReceivedQuantity))) {
@@ -342,6 +373,7 @@ const getHarvestBatches = async (filters = {}) => {
         delete query.receivedQuantity;
       }
     }
+
 
     if (harvestDateFrom || harvestDateTo) {
       const range = {};
@@ -364,6 +396,7 @@ const getHarvestBatches = async (filters = {}) => {
       }
     }
 
+
     if (createdFrom || createdTo) {
       const range = {};
       if (createdFrom) {
@@ -384,6 +417,7 @@ const getHarvestBatches = async (filters = {}) => {
         query.createdAt = range;
       }
     }
+
 
     if (updatedFrom || updatedTo) {
       const range = {};
@@ -406,21 +440,19 @@ const getHarvestBatches = async (filters = {}) => {
       }
     }
 
+
     if (hasInventoryTransactions !== undefined) {
       const hasTx = hasInventoryTransactions === "true" || hasInventoryTransactions === true;
       query.inventoryTransactionIds = hasTx ? { $exists: true, $ne: [] } : { $in: [null, []] };
     }
-
     // Filter by receipt eligibility (only batches eligible for warehouse receipt)
     if (receiptEligible !== undefined) {
       query.receiptEligible = receiptEligible === "true" || receiptEligible === true;
     }
-
     // Filter by visibility in receipt selection (hide batches already used)
     if (visibleInReceipt !== undefined) {
       query.visibleInReceipt = visibleInReceipt === "true" || visibleInReceipt === true;
     }
-
     // Sort
     const allowedSortFields = [
       "batchNumber",
@@ -436,6 +468,7 @@ const getHarvestBatches = async (filters = {}) => {
     const sortDirection = sortOrder === "asc" || sortOrder === "1" || sortOrder === 1 ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
 
+
     const [data, total] = await Promise.all([
       HarvestBatchModel.find(query)
         .populate("supplier", "name type")
@@ -446,6 +479,7 @@ const getHarvestBatches = async (filters = {}) => {
         .lean(),
       HarvestBatchModel.countDocuments(query),
     ]);
+
 
     return {
       status: "OK",
@@ -463,6 +497,7 @@ const getHarvestBatches = async (filters = {}) => {
   }
 };
 
+
 /**
  * Lấy chi tiết lô thu hoạch
  */
@@ -472,14 +507,17 @@ const getHarvestBatchById = async (harvestBatchId) => {
       return { status: "ERR", message: "Invalid harvest batch ID" };
     }
 
+
     const harvestBatch = await HarvestBatchModel.findById(harvestBatchId)
       .populate("supplier", "name type cooperationStatus")
       .populate("product", "name brand")
       .lean();
 
+
     if (!harvestBatch) {
       return { status: "ERR", message: "Harvest batch does not exist" };
     }
+
 
     return {
       status: "OK",
@@ -490,6 +528,7 @@ const getHarvestBatchById = async (harvestBatchId) => {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 module.exports = {
   createHarvestBatch,

@@ -1,12 +1,14 @@
 const OrderService = require("../services/OrderService");
 
+
 /* =====================================================
    CREATE ORDER (PENDING)
 ===================================================== */
 const createOrder = async (req, res) => {
   try {
     const user_id = req.user._id;
-    const { selected_product_ids, receiverInfo, payment_method,city } = req.body;
+    const { selected_product_ids, receiverInfo, payment_method, city } = req.body;
+
 
     if (
       !Array.isArray(selected_product_ids) ||
@@ -17,6 +19,7 @@ const createOrder = async (req, res) => {
         message: "Please select at least one product",
       });
     }
+
 
     if (
       !receiverInfo ||
@@ -38,12 +41,14 @@ const createOrder = async (req, res) => {
       });
     }
 
+
     if (!/^0\d{9}$/.test(receiverInfo.receiver_phone)) {
       return res.status(400).json({
         success: false,
         message: "Invalid phone number",
       });
     }
+
 
     if (!["COD", "VNPAY"].includes(payment_method)) {
       return res.status(400).json({
@@ -52,12 +57,14 @@ const createOrder = async (req, res) => {
       });
     }
 
+
     const normalizedReceiver = {
       receiver_name: receiverInfo.receiver_name.trim(),
       receiver_phone: receiverInfo.receiver_phone.trim(),
       receiver_address: receiverInfo.receiver_address.trim(),
       note: receiverInfo.note?.trim(),
     };
+
 
     const result = await OrderService.confirmCheckoutAndCreateOrder({
       user_id,
@@ -68,9 +75,11 @@ const createOrder = async (req, res) => {
       city
     });
 
+
     if (!result.success) {
       return res.status(400).json(result);
     }
+
 
     return res.status(201).json(result);
   } catch (error) {
@@ -81,6 +90,7 @@ const createOrder = async (req, res) => {
   }
 };
 
+
 /* =====================================================
    UPDATE ORDER STATUS (ADMIN / STAFF)
 ===================================================== */
@@ -89,17 +99,16 @@ const updateOrder = async (req, res) => {
     const order_id = req.params.id;
     const { status_name, note } = req.body;
 
+
     if (!order_id || !status_name) {
       return res.status(400).json({
         success: false,
         message: "Thiếu order_id hoặc status_name",
       });
     }
-
     // Order schema enum: "admin" | "sales-staff" | "customer". User có role_id (populate → name).
     const roleName = req.user.role_id?.name?.toLowerCase?.() || "admin";
     const roleForHistory = ["admin", "sales-staff", "customer"].includes(roleName) ? roleName : "admin";
-
     const result = await OrderService.updateOrder(
       order_id,
       status_name,
@@ -107,6 +116,7 @@ const updateOrder = async (req, res) => {
       roleForHistory,
       note || "",
     );
+
 
     return res.status(200).json({
       success: true,
@@ -121,6 +131,7 @@ const updateOrder = async (req, res) => {
   }
 };
 
+
 /* =====================================================
    CANCEL ORDER (CUSTOMER – PENDING ONLY)
 ===================================================== */
@@ -129,6 +140,7 @@ const cancelOrder = async (req, res) => {
     const order_id = req.params.id;
     const user_id = req.user._id;
 
+
     if (req.user.role !== "customer") {
       return res.status(403).json({
         success: false,
@@ -136,7 +148,9 @@ const cancelOrder = async (req, res) => {
       });
     }
 
+
     const result = await OrderService.cancelOrderByCustomer(order_id, user_id);
+
 
     return res.status(200).json({
       success: true,
@@ -154,8 +168,7 @@ const cancelOrder = async (req, res) => {
 const retryVnpayPayment = async (req, res) => {
   try {
     const user_id = req.user._id;
-    const {order_id} = req.body;
-
+    const { order_id } = req.body;
     if (!order_id) {
       return res.status(400).json({
         success: false,
@@ -167,11 +180,9 @@ const retryVnpayPayment = async (req, res) => {
       order_id,
       ip: req.ip,
     });
-
     if (!result.success) {
       return res.status(400).json(result);
     }
-
     return res.status(201).json(result);
   } catch (error) {
     return res.status(500).json({
@@ -196,7 +207,6 @@ const getMyOrders = async (req, res) => {
     });
   }
 };
-
 const getMyOrderById = async (req, res) => {
   try {
     const user_id = req.user._id;
@@ -210,7 +220,6 @@ const getMyOrderById = async (req, res) => {
     });
   }
 };
-
 /* =====================================================
    ADMIN ORDER MANAGEMENT
 ===================================================== */
@@ -227,6 +236,7 @@ const getOrdersAdmin = async (req, res) => {
   }
 };
 
+
 const getOrderDetailAdmin = async (req, res) => {
   try {
     const response = await OrderService.getOrderDetailForAdmin(req.params.id);
@@ -240,6 +250,7 @@ const getOrderDetailAdmin = async (req, res) => {
   }
 };
 
+
 const getOrderStatusStatsAdmin = async (req, res) => {
   try {
     const response = await OrderService.getOrderStatusCounts();
@@ -252,7 +263,6 @@ const getOrderStatusStatsAdmin = async (req, res) => {
     });
   }
 };
-
 const getOrderStatusLogs = async (req, res) => {
   try {
     const filters = { ...req.query };
@@ -269,7 +279,6 @@ const getOrderStatusLogs = async (req, res) => {
     });
   }
 };
-
 module.exports = {
   createOrder,
   updateOrder,

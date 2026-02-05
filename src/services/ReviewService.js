@@ -5,8 +5,10 @@ const OrderDetailModel = require("../models/OrderDetailModel");
 const OrderStatusModel = require("../models/OrderStatusModel");
 const ProductModel = require("../models/ProductModel");
 
+
 const normalizeStatus = (value) => (value ? value.toString().trim().toUpperCase() : "");
 const EDIT_WINDOW_DAYS = 3;
+
 
 const coerceArray = (value) => {
   if (Array.isArray(value)) return value;
@@ -21,9 +23,11 @@ const coerceArray = (value) => {
   return [];
 };
 
+
 const validateImages = (images, imagePublicIds) => {
   const imageArray = coerceArray(images);
   const imagePublicIdArray = coerceArray(imagePublicIds);
+
 
   if (imageArray.length > 3) {
     return { status: "ERR", message: "Review images must not exceed 3" };
@@ -35,8 +39,10 @@ const validateImages = (images, imagePublicIds) => {
     return { status: "ERR", message: "The number of images and imagePublicIds must match" };
   }
 
+
   return { status: "OK", imageArray, imagePublicIdArray };
 };
+
 
 const updateProductReviewStats = async (productId) => {
   const productObjectId = new mongoose.Types.ObjectId(productId);
@@ -56,8 +62,10 @@ const updateProductReviewStats = async (productId) => {
     },
   ]);
 
+
   const avgRating = stats[0]?.avgRating ? Math.round(stats[0].avgRating * 100) / 100 : 0;
   const reviewCount = stats[0]?.reviewCount || 0;
+
 
   await ProductModel.updateOne(
     { _id: productObjectId },
@@ -65,9 +73,11 @@ const updateProductReviewStats = async (productId) => {
   );
 };
 
+
 const createReview = async (userId, payload = {}) => {
   try {
     const { orderId, productId, rating, comment, images, imagePublicIds } = payload;
+
 
     if (!mongoose.isValidObjectId(orderId)) {
       return { status: "ERR", message: "Invalid orderId" };
@@ -76,10 +86,12 @@ const createReview = async (userId, payload = {}) => {
       return { status: "ERR", message: "Invalid productId" };
     }
 
+
     const ratingValue = Number(rating);
     if (!Number.isInteger(ratingValue) || ratingValue < 1 || ratingValue > 5) {
       return { status: "ERR", message: "Rating must be an integer between 1 and 5" };
     }
+
 
     const completedStatus = await OrderStatusModel.findOne({
       name: { $regex: /^COMPLETED$/i },
@@ -87,6 +99,7 @@ const createReview = async (userId, payload = {}) => {
     if (!completedStatus) {
       return { status: "ERR", message: "Missing COMPLETED status" };
     }
+
 
     const order = await OrderModel.findOne({
       _id: new mongoose.Types.ObjectId(orderId),
@@ -97,6 +110,7 @@ const createReview = async (userId, payload = {}) => {
       return { status: "ERR", message: "Only COMPLETED orders can be reviewed" };
     }
 
+
     const detail = await OrderDetailModel.findOne({
       order_id: order._id,
       product_id: new mongoose.Types.ObjectId(productId),
@@ -104,6 +118,7 @@ const createReview = async (userId, payload = {}) => {
     if (!detail) {
       return { status: "ERR", message: "The product does not belong to this order" };
     }
+
 
     const existed = await ReviewModel.findOne({
       order_id: order._id,
@@ -114,8 +129,10 @@ const createReview = async (userId, payload = {}) => {
       return { status: "ERR", message: "You have already reviewed this product for this order" };
     }
 
+
     const imageCheck = validateImages(images, imagePublicIds);
     if (imageCheck.status === "ERR") return imageCheck;
+
 
     const review = await ReviewModel.create({
       order_id: order._id,
@@ -127,7 +144,9 @@ const createReview = async (userId, payload = {}) => {
       imagePublicIds: imageCheck.imagePublicIdArray,
     });
 
+
     await updateProductReviewStats(productId);
+
 
     return {
       status: "OK",
@@ -139,11 +158,13 @@ const createReview = async (userId, payload = {}) => {
   }
 };
 
+
 const updateReview = async (reviewId, userId, payload = {}) => {
   try {
     if (!mongoose.isValidObjectId(reviewId)) {
       return { status: "ERR", message: "Invalid reviewId" };
     }
+
 
     const review = await ReviewModel.findOne({
       _id: new mongoose.Types.ObjectId(reviewId),
@@ -153,9 +174,11 @@ const updateReview = async (reviewId, userId, payload = {}) => {
       return { status: "ERR", message: "Review does not exist" };
     }
 
+
     if ((review.editedCount || 0) >= 1) {
       return { status: "ERR", message: "A review can only be edited once" };
     }
+
 
     const createdAt = new Date(review.createdAt);
     const now = new Date();
@@ -163,6 +186,7 @@ const updateReview = async (reviewId, userId, payload = {}) => {
     if (diffDays > EDIT_WINDOW_DAYS) {
       return { status: "ERR", message: "Reviews can only be edited within the first 3 days" };
     }
+
 
     if (payload.rating !== undefined) {
       const ratingValue = Number(payload.rating);
@@ -172,9 +196,11 @@ const updateReview = async (reviewId, userId, payload = {}) => {
       review.rating = ratingValue;
     }
 
+
     if (payload.comment !== undefined) {
       review.comment = payload.comment ? payload.comment.toString().trim() : "";
     }
+
 
     if (payload.images !== undefined || payload.imagePublicIds !== undefined) {
       const imageCheck = validateImages(payload.images ?? review.images, payload.imagePublicIds ?? review.imagePublicIds);
@@ -183,10 +209,13 @@ const updateReview = async (reviewId, userId, payload = {}) => {
       review.imagePublicIds = imageCheck.imagePublicIdArray;
     }
 
+
     review.editedCount = (review.editedCount || 0) + 1;
+
 
     await review.save();
     await updateProductReviewStats(review.product_id);
+
 
     return {
       status: "OK",
@@ -198,11 +227,13 @@ const updateReview = async (reviewId, userId, payload = {}) => {
   }
 };
 
+
 const deleteReview = async (reviewId, userId) => {
   try {
     if (!mongoose.isValidObjectId(reviewId)) {
       return { status: "ERR", message: "Invalid reviewId" };
     }
+
 
     const review = await ReviewModel.findOneAndDelete({
       _id: new mongoose.Types.ObjectId(reviewId),
@@ -212,7 +243,9 @@ const deleteReview = async (reviewId, userId) => {
       return { status: "ERR", message: "Review does not exist" };
     }
 
+
     await updateProductReviewStats(review.product_id);
+
 
     return {
       status: "OK",
@@ -223,11 +256,13 @@ const deleteReview = async (reviewId, userId) => {
   }
 };
 
+
 const getProductReviews = async (productId, filters = {}) => {
   try {
     if (!mongoose.isValidObjectId(productId)) {
       return { status: "ERR", message: "Invalid productId" };
     }
+
 
     const {
       page = 1,
@@ -237,14 +272,17 @@ const getProductReviews = async (productId, filters = {}) => {
       sortOrder = "desc",
     } = filters;
 
+
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 10));
     const skip = (pageNum - 1) * limitNum;
+
 
     const allowedSortFields = ["createdAt", "rating"];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
     const sortDirection = sortOrder === "asc" ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
+
 
     const query = {
       product_id: new mongoose.Types.ObjectId(productId),
@@ -255,6 +293,7 @@ const getProductReviews = async (productId, filters = {}) => {
       query.comment = { $regex: escaped, $options: "i" };
     }
 
+
     const [data, total] = await Promise.all([
       ReviewModel.find(query)
         .populate("user_id", "user_name")
@@ -264,6 +303,7 @@ const getProductReviews = async (productId, filters = {}) => {
         .lean(),
       ReviewModel.countDocuments(query),
     ]);
+
 
     return {
       status: "OK",
@@ -281,11 +321,13 @@ const getProductReviews = async (productId, filters = {}) => {
   }
 };
 
+
 const getProductReviewStats = async (productId) => {
   try {
     if (!mongoose.isValidObjectId(productId)) {
       return { status: "ERR", message: "Invalid productId" };
     }
+
 
     const productObjectId = new mongoose.Types.ObjectId(productId);
     const stats = await ReviewModel.aggregate([
@@ -304,6 +346,7 @@ const getProductReviewStats = async (productId) => {
       },
     ]);
 
+
     const data = stats[0] || {
       avgRating: 0,
       reviewCount: 0,
@@ -314,7 +357,9 @@ const getProductReviewStats = async (productId) => {
       rating5: 0,
     };
 
+
     data.avgRating = data.avgRating ? Math.round(data.avgRating * 100) / 100 : 0;
+
 
     return {
       status: "OK",
@@ -325,6 +370,7 @@ const getProductReviewStats = async (productId) => {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 const getReviewsForAdmin = async (filters = {}) => {
   try {
@@ -340,9 +386,11 @@ const getReviewsForAdmin = async (filters = {}) => {
       sortOrder = "desc",
     } = filters;
 
+
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
+
 
     const query = {};
     if (search) {
@@ -362,6 +410,7 @@ const getReviewsForAdmin = async (filters = {}) => {
       }
     }
 
+
     if (rating !== undefined) {
       const ratingValue = Number(rating);
       if (!Number.isInteger(ratingValue) || ratingValue < 1 || ratingValue > 5) {
@@ -370,10 +419,12 @@ const getReviewsForAdmin = async (filters = {}) => {
       query.rating = ratingValue;
     }
 
+
     const allowedSortFields = ["createdAt", "rating"];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
     const sortDirection = sortOrder === "asc" ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
+
 
     const [data, total] = await Promise.all([
       ReviewModel.find(query)
@@ -385,6 +436,7 @@ const getReviewsForAdmin = async (filters = {}) => {
         .lean(),
       ReviewModel.countDocuments(query),
     ]);
+
 
     return {
       status: "OK",
@@ -402,25 +454,30 @@ const getReviewsForAdmin = async (filters = {}) => {
   }
 };
 
+
 const updateReviewVisibility = async (reviewId, status) => {
   try {
     if (!mongoose.isValidObjectId(reviewId)) {
       return { status: "ERR", message: "Invalid reviewId" };
     }
 
+
     const normalized = normalizeStatus(status);
     if (!["VISIBLE", "HIDDEN"].includes(normalized)) {
       return { status: "ERR", message: "Invalid review status" };
     }
+
 
     const review = await ReviewModel.findById(reviewId);
     if (!review) {
       return { status: "ERR", message: "Review does not exist" };
     }
 
+
     review.status = normalized;
     await review.save();
     await updateProductReviewStats(review.product_id);
+
 
     return {
       status: "OK",
@@ -431,6 +488,7 @@ const updateReviewVisibility = async (reviewId, status) => {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 module.exports = {
   createReview,

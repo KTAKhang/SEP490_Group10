@@ -3,8 +3,10 @@ const SupplierModel = require("../models/SupplierModel");
 const HarvestBatchModel = require("../models/HarvestBatchModel");
 const ProductModel = require("../models/ProductModel");
 
+
 // Import các service đã tách
 const HarvestBatchService = require("./HarvestBatchService");
+
 
 /**
  * Tạo nhà cung cấp mới (Admin)
@@ -22,9 +24,11 @@ const createSupplier = async (userId, payload = {}) => {
       status = true,
     } = payload;
 
+
     if (!name || !name.toString().trim()) {
       return { status: "ERR", message: "Supplier name is required" };
     }
+
 
     if (!type || !["FARM", "COOPERATIVE", "BUSINESS"].includes(type)) {
       return {
@@ -32,6 +36,7 @@ const createSupplier = async (userId, payload = {}) => {
         message: "Supplier type must be FARM, COOPERATIVE, or BUSINESS",
       };
     }
+
 
     // ✅ BR-SUP-02: Phải có phone hoặc email (ít nhất 1)
     const normalizedPhone = phone?.toString().trim() || "";
@@ -43,8 +48,10 @@ const createSupplier = async (userId, payload = {}) => {
       };
     }
 
+
     // ✅ BR-SUP-03: Kiểm tra trùng (name + phone)
     const normalizedName = name.toString().trim();
+
 
     if (normalizedPhone) {
       const existingByNamePhone = await SupplierModel.findOne({
@@ -59,6 +66,7 @@ const createSupplier = async (userId, payload = {}) => {
       }
     }
 
+
     const supplier = new SupplierModel({
       name: normalizedName,
       type,
@@ -72,7 +80,9 @@ const createSupplier = async (userId, payload = {}) => {
       createdBy: new mongoose.Types.ObjectId(userId),
     });
 
+
     await supplier.save();
+
 
     return {
       status: "OK",
@@ -84,6 +94,7 @@ const createSupplier = async (userId, payload = {}) => {
   }
 };
 
+
 /**
  * Cập nhật thông tin nhà cung cấp (Admin)
  */
@@ -94,20 +105,22 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
       return { status: "ERR", message: "Supplier does not exist" };
     }
 
+
     // ✅ BR-SUP-04: Không cho chỉnh sửa Supplier TERMINATED trừ Admin
     const UserModel = require("../models/UserModel");
     const user = await UserModel.findById(userId).populate("role_id", "name");
     const userRole = user?.role_id?.name || "customer";
     const isAdmin = userRole === "admin";
 
+
     if (supplier.cooperationStatus === "TERMINATED" && !isAdmin) {
-      return { 
-        status: "ERR", 
-        message: "Cannot edit a supplier that has ended cooperation. Only admins can perform this action." 
+
       };
     }
 
+
     const changes = new Map();
+
 
     // Whitelist fields
     const allowed = [
@@ -121,9 +134,11 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
       "status",
     ];
 
+
     for (const key of Object.keys(payload)) {
       if (!allowed.includes(key)) delete payload[key];
     }
+
 
     // ✅ BR-SUP-02: Validate phone hoặc email (nếu cập nhật)
     const newPhone = payload.phone !== undefined ? payload.phone?.toString().trim() || "" : supplier.phone || "";
@@ -135,11 +150,12 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
       };
     }
 
+
     // Track changes
     if (payload.name !== undefined && payload.name !== supplier.name) {
       changes.set("name", { old: supplier.name, new: payload.name });
       const normalizedName = payload.name.toString().trim();
-      
+     
       // ✅ BR-SUP-03: Kiểm tra trùng (name + phone) nếu phone có
       if (newPhone) {
         const existingByNamePhone = await SupplierModel.findOne({
@@ -157,6 +173,7 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
       supplier.name = normalizedName;
     }
 
+
     if (payload.type !== undefined && payload.type !== supplier.type) {
       if (!["FARM", "COOPERATIVE", "BUSINESS"].includes(payload.type)) {
         return {
@@ -168,38 +185,46 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
       supplier.type = payload.type;
     }
 
+
     if (payload.contactPerson !== undefined) {
       changes.set("contactPerson", { old: supplier.contactPerson, new: payload.contactPerson });
       supplier.contactPerson = payload.contactPerson?.toString().trim() || "";
     }
+
 
     if (payload.phone !== undefined) {
       changes.set("phone", { old: supplier.phone, new: payload.phone });
       supplier.phone = payload.phone?.toString().trim() || "";
     }
 
+
     if (payload.email !== undefined) {
       changes.set("email", { old: supplier.email, new: payload.email });
       supplier.email = payload.email?.toString().trim() || "";
     }
+
 
     if (payload.address !== undefined) {
       changes.set("address", { old: supplier.address, new: payload.address });
       supplier.address = payload.address?.toString().trim() || "";
     }
 
+
     if (payload.notes !== undefined) {
       changes.set("notes", { old: supplier.notes, new: payload.notes });
       supplier.notes = payload.notes?.toString().trim() || "";
     }
+
 
     if (payload.status !== undefined && payload.status !== supplier.status) {
       changes.set("status", { old: supplier.status, new: payload.status });
       supplier.status = payload.status;
     }
 
+
     supplier.updatedBy = new mongoose.Types.ObjectId(userId);
     await supplier.save();
+
 
     return {
       status: "OK",
@@ -210,6 +235,7 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 /**
  * Lấy danh sách nhà cung cấp (có search, sort, filter, pagination)
@@ -238,11 +264,14 @@ const getSuppliers = async (filters = {}) => {
       sortOrder = "desc",
     } = filters;
 
+
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
 
+
     const query = {};
+
 
     // Search theo nhiều trường
     const searchValue = search?.toString().trim();
@@ -259,18 +288,22 @@ const getSuppliers = async (filters = {}) => {
       ];
     }
 
+
     // Filter
     if (type && ["FARM", "COOPERATIVE", "BUSINESS"].includes(type)) {
       query.type = type;
     }
 
+
     if (cooperationStatus && ["ACTIVE", "SUSPENDED", "TERMINATED"].includes(cooperationStatus)) {
       query.cooperationStatus = cooperationStatus;
     }
 
+
     if (status !== undefined) {
       query.status = status === "true" || status === true;
     }
+
 
     // Filter theo tổng lô và tổng sản phẩm
     if (minTotalBatches !== undefined || maxTotalBatches !== undefined) {
@@ -286,6 +319,7 @@ const getSuppliers = async (filters = {}) => {
       }
     }
 
+
     if (minTotalProductsSupplied !== undefined || maxTotalProductsSupplied !== undefined) {
       query.totalProductsSupplied = {};
       if (minTotalProductsSupplied !== undefined && !Number.isNaN(Number(minTotalProductsSupplied))) {
@@ -298,6 +332,7 @@ const getSuppliers = async (filters = {}) => {
         delete query.totalProductsSupplied;
       }
     }
+
 
     // Filter theo thời gian tạo/cập nhật
     if (createdFrom || createdTo) {
@@ -321,6 +356,7 @@ const getSuppliers = async (filters = {}) => {
       }
     }
 
+
     if (updatedFrom || updatedTo) {
       const updatedRange = {};
       if (updatedFrom) {
@@ -342,6 +378,7 @@ const getSuppliers = async (filters = {}) => {
       }
     }
 
+
     // Filter theo email/phone tồn tại
     if (hasEmail !== undefined) {
       const hasEmailBool = hasEmail === "true" || hasEmail === true;
@@ -352,10 +389,12 @@ const getSuppliers = async (filters = {}) => {
       query.phone = hasPhoneBool ? { $exists: true, $ne: "" } : { $in: [null, ""] };
     }
 
+
     // Filter theo sản phẩm cung cấp
     if (productId && mongoose.isValidObjectId(productId)) {
       query["suppliedProducts.product"] = new mongoose.Types.ObjectId(productId);
     }
+
 
     // Sort
     const allowedSortFields = [
@@ -373,6 +412,7 @@ const getSuppliers = async (filters = {}) => {
     const sortDirection = sortOrder === "asc" || sortOrder === "1" || sortOrder === 1 ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
 
+
     const [data, total] = await Promise.all([
       SupplierModel.find(query)
         .populate("createdBy", "user_name email")
@@ -383,6 +423,7 @@ const getSuppliers = async (filters = {}) => {
         .lean(),
       SupplierModel.countDocuments(query),
     ]);
+
 
     return {
       status: "OK",
@@ -400,6 +441,7 @@ const getSuppliers = async (filters = {}) => {
   }
 };
 
+
 /**
  * Xóa nhà cung cấp (Admin) - chỉ cho phép xóa nếu không có dữ liệu liên quan
  */
@@ -409,10 +451,12 @@ const deleteSupplier = async (supplierId, userId) => {
       return { status: "ERR", message: "Invalid supplierId" };
     }
 
+
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {
       return { status: "ERR", message: "Supplier does not exist" };
     }
+
 
     // Kiểm tra có products đang sử dụng supplier này không
     const productsCount = await ProductModel.countDocuments({ supplier: supplier._id });
@@ -423,6 +467,7 @@ const deleteSupplier = async (supplierId, userId) => {
       };
     }
 
+
     // Kiểm tra có harvest batches không
     const harvestBatchesCount = await HarvestBatchModel.countDocuments({ supplier: supplier._id });
     if (harvestBatchesCount > 0) {
@@ -432,7 +477,9 @@ const deleteSupplier = async (supplierId, userId) => {
       };
     }
 
+
     await supplier.deleteOne();
+
 
     return {
       status: "OK",
@@ -443,6 +490,7 @@ const deleteSupplier = async (supplierId, userId) => {
   }
 };
 
+
 /**
  * Lấy chi tiết nhà cung cấp
  */
@@ -452,14 +500,17 @@ const getSupplierById = async (supplierId) => {
       return { status: "ERR", message: "Invalid supplier ID" };
     }
 
+
     const supplier = await SupplierModel.findById(supplierId)
       .populate("createdBy", "user_name email")
       .populate("updatedBy", "user_name email")
       .lean();
 
+
     if (!supplier) {
       return { status: "ERR", message: "Supplier does not exist" };
     }
+
 
     return {
       status: "OK",
@@ -470,6 +521,7 @@ const getSupplierById = async (supplierId) => {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 /**
  * Lấy danh sách suppliers đơn giản (chỉ name, _id) để admin chọn làm brand
@@ -484,6 +536,7 @@ const getSuppliersForBrand = async () => {
       .sort({ name: 1 })
       .lean();
 
+
     return {
       status: "OK",
       message: "Fetched supplier list successfully",
@@ -494,6 +547,7 @@ const getSuppliersForBrand = async () => {
   }
 };
 
+
 /**
  * Cập nhật giá mua từ nhà cung cấp (Admin)
  */
@@ -501,13 +555,16 @@ const updatePurchaseCost = async (supplierId, userId, payload = {}) => {
   try {
     const { productId, cost } = payload;
 
+
     if (!mongoose.isValidObjectId(supplierId)) {
       return { status: "ERR", message: "Invalid supplierId" };
     }
 
+
     if (!mongoose.isValidObjectId(productId)) {
       return { status: "ERR", message: "Invalid productId" };
     }
+
 
     const costValue = Number(cost);
     if (!Number.isFinite(costValue) || costValue < 0) {
@@ -517,17 +574,21 @@ const updatePurchaseCost = async (supplierId, userId, payload = {}) => {
       };
     }
 
+
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {
       return { status: "ERR", message: "Supplier does not exist" };
     }
+
 
     const product = await ProductModel.findById(productId);
     if (!product) {
       return { status: "ERR", message: "Product does not exist" };
     }
 
+
     const oldCost = supplier.purchaseCosts?.get(productId.toString()) || 0;
+
 
     // Cập nhật purchaseCosts
     if (!supplier.purchaseCosts) {
@@ -536,9 +597,11 @@ const updatePurchaseCost = async (supplierId, userId, payload = {}) => {
     supplier.purchaseCosts.set(productId.toString(), costValue);
     await supplier.save();
 
+
     // ✅ Sync purchasePrice vào ProductModel
     product.purchasePrice = costValue;
     await product.save();
+
 
     return {
       status: "OK",
@@ -554,12 +617,14 @@ const updatePurchaseCost = async (supplierId, userId, payload = {}) => {
   }
 };
 
+
 /**
  * Cập nhật trạng thái hợp tác (Admin)
  */
 const updateCooperationStatus = async (supplierId, userId, payload = {}) => {
   try {
     const { cooperationStatus, notes } = payload;
+
 
     if (!cooperationStatus || !["ACTIVE", "SUSPENDED", "TERMINATED"].includes(cooperationStatus)) {
       return {
@@ -568,15 +633,18 @@ const updateCooperationStatus = async (supplierId, userId, payload = {}) => {
       };
     }
 
+
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {
       return { status: "ERR", message: "Supplier does not exist" };
     }
 
+
     const oldStatus = supplier.cooperationStatus;
     if (oldStatus === cooperationStatus) {
       return { status: "OK", message: "Status unchanged", data: supplier };
     }
+
 
     supplier.cooperationStatus = cooperationStatus;
     if (notes) {
@@ -584,6 +652,7 @@ const updateCooperationStatus = async (supplierId, userId, payload = {}) => {
     }
     supplier.updatedBy = new mongoose.Types.ObjectId(userId);
     await supplier.save();
+
 
     return {
       status: "OK",
@@ -594,6 +663,7 @@ const updateCooperationStatus = async (supplierId, userId, payload = {}) => {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 // ✅ Re-export các service đã tách để giữ backward compatibility
 module.exports = {
@@ -606,7 +676,7 @@ module.exports = {
   getSuppliersForBrand,
   updatePurchaseCost,
   updateCooperationStatus,
-  
+ 
   // Harvest Batch Management (re-export từ HarvestBatchService)
   createHarvestBatch: HarvestBatchService.createHarvestBatch,
   updateHarvestBatch: HarvestBatchService.updateHarvestBatch,
