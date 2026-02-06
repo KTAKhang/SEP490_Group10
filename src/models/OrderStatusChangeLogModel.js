@@ -46,3 +46,6 @@ const orderStatusChangeLogSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+const OrderStatusChangeLogModel = mongoose.model("order_status_change_logs", orderStatusChangeLogSchema);
+module.exports = OrderStatusChangeLogModel;

@@ -11,8 +11,8 @@ const {
 
 routerProfile.put(
     "/update-user",
-    upload.single("avatar"),
     authUserMiddleware,
+    upload.single("avatar"),
     profileController.updateProfile
 );
 

@@ -125,56 +125,68 @@ const addItemToCart = async (user_id, product_id, quantity) => {
 
 
 const updateItemInCart = async (user_id, product_id, newQuantity) => {
-  const product = await ProductModel.findById(product_id);
-  if (!product || !product.status) {
-    throw new Error("The product does not exist or has been discontinued.");
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const product = await ProductModel.findById(product_id).session(session);
+    if (!product || !product.status) {
+      throw new Error("The product does not exist or has been discontinued.");
+    }
+
+
+    if (newQuantity > product.onHandQuantity) {
+      throw new Error(`Only one left ${product.onHandQuantity} products in stock`);
+    }
+
+
+    const cart = await CartModel.findOne({ user_id }).session(session);
+    if (!cart) throw new Error("Shopping cart not found");
+
+
+    const cartDetail = await CartDetailModel.findOne({
+      cart_id: cart._id,
+      product_id,
+    }).session(session);
+
+
+    if (!cartDetail) {
+      throw new Error("The product is not in the shopping cart.");
+    }
+
+
+    if (newQuantity <= 0) {
+      await cartDetail.deleteOne({ session });
+    } else {
+      cartDetail.quantity = newQuantity;
+      await cartDetail.save({ session });
+    }
+
+
+    const allItems = await CartDetailModel.find({ cart_id: cart._id }).session(session);
+    const newSum = allItems.reduce(
+      (total, item) => total + item.quantity * item.price,
+      0
+    );
+
+
+    cart.sum = allItems.length;
+    await cart.save({ session });
+
+
+    await session.commitTransaction();
+
+    return {
+      message: "Shopping cart updated successfully",
+      total_price: newSum,
+      total_items: allItems.length,
+    };
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
   }
-
-
-  if (newQuantity > product.onHandQuantity) {
-    throw new Error(`Only one left ${product.onHandQuantity} products in stock`);
-  }
-
-
-  const cart = await CartModel.findOne({ user_id });
-  if (!cart) throw new Error("Shopping cart not found");
-
-
-  const cartDetail = await CartDetailModel.findOne({
-    cart_id: cart._id,
-    product_id,
-  });
-
-
-  if (!cartDetail) {
-    throw new Error("The product is not in the shopping cart.");
-  }
-
-
-  if (newQuantity <= 0) {
-    await cartDetail.remove();
-  } else {
-    cartDetail.quantity = newQuantity;
-    await cartDetail.save();
-  }
-
-
-  const allItems = await CartDetailModel.find({ cart_id: cart._id });
-  const newSum = allItems.reduce(
-    (total, item) => total + item.quantity * item.price,
-    0
-  );
-
-
-  cart.sum = allItems.length;
-  await cart.save();
-
-
-  return {
-    message: "Shopping cart updated successfully",
-    total_price: newSum,
-    total_items: allItems.length,
-  };
 };
 
 
@@ -215,15 +227,6 @@ const removeItemFromCart = async (user_id, product_ids) => {
 
 
     /* ==========================
-       2️⃣ Tính tổng quantity cần trừ
-    ========================== */
-    const minusQuantity = itemsToDelete.reduce(
-      (total, item) => total + item.quantity,
-      0
-    );
-
-
-    /* ==========================
        3️⃣ Xóa nhiều item 1 lần
     ========================== */
     await CartDetailModel.deleteMany(
@@ -236,9 +239,13 @@ const removeItemFromCart = async (user_id, product_ids) => {
 
 
     /* ==========================
-       4️⃣ Update cart.sum (quantity)
+       4️⃣ Update cart.sum = số loại sản phẩm còn lại (đồng bộ với addItemToCart)
     ========================== */
-    cart.sum = Math.max(cart.sum - minusQuantity, 0);
+    const distinctItemsCount = await CartDetailModel.countDocuments(
+      { cart_id: cart._id },
+      { session }
+    );
+    cart.sum = distinctItemsCount;
     await cart.save({ session });
 
 
@@ -250,7 +257,7 @@ const removeItemFromCart = async (user_id, product_ids) => {
       status: "OK",
       message: "The product has been removed from the shopping cart",
       removed_items: itemsToDelete.length,
-      sum: cart.sum, // tổng quantity còn lại
+      sum: cart.sum, // số loại sản phẩm còn lại trong giỏ
     };
   } catch (error) {
     await session.abortTransaction();

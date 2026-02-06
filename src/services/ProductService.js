@@ -434,14 +434,11 @@ const updateProductExpiryDate = async (id, payload = {}) => {
   try {
     const product = await ProductModel.findById(id);
     if (!product) return { status: "ERR", message: "Product does not exist" };
-      };
-    }
-
 
     // ✅ Logic: Khóa việc cập nhật hạn sử dụng sau khi đã set lần đầu (check cả Date và Str)
     const hasExpiry = !!(product.expiryDate || product.expiryDateStr);
     if (hasExpiry) {
-      };
+      return { status: "ERR", message: "Expiry date has already been set and cannot be updated." };
     }
 
 
@@ -483,13 +480,16 @@ const updateProductExpiryDate = async (id, payload = {}) => {
 
 
     // ✅ Validate: expiryDate phải sau warehouseEntryDate
-    const warehouseEntryDate = new Date(product.warehouseEntryDate);
+    if (!product.warehouseEntryDate && !product.warehouseEntryDateStr) {
+      return { status: "ERR", message: "Product has no warehouse entry date. Cannot set expiry date before receiving inventory." };
+    }
+    const warehouseEntryDate = new Date(product.warehouseEntryDate || product.warehouseEntryDateStr);
     warehouseEntryDate.setHours(0, 0, 0, 0);
    
     const diffDays = calculateDaysBetween(warehouseEntryDate, newExpiryDate);
    
     if (diffDays <= 0) {
-      };
+      return { status: "ERR", message: "Hạn sử dụng phải sau ngày nhập kho." };
     }
 
 
@@ -502,7 +502,7 @@ const updateProductExpiryDate = async (id, payload = {}) => {
 
 
     const populated = await ProductModel.findById(product._id).populate("category", "name");
-    };
+    return { status: "OK", message: "Expiry date updated successfully", data: populated };
   } catch (error) {
     return { status: "ERR", message: error.message };
   }

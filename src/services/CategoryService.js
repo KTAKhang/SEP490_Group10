@@ -154,7 +154,7 @@ const deleteCategory = async (id) => {
     // Kiểm tra xem có sản phẩm nào đang sử dụng category này không
     const productCount = await ProductModel.countDocuments({ category: id });
     if (productCount > 0) {
-      };
+      return { status: "ERR", message: "Cannot delete category. There are products using this category." };
     }
 
 
