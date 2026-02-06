@@ -27,6 +27,9 @@ const checkoutHold = async (
        0️⃣ LOAD CART
     ======================= */
     const cart = await CartModel.findOne({ user_id }).session(session);
+    if (!cart) {
+      throw new Error("Shopping cart not found");
+    }
     const cartItems = await CartDetailModel.find({
       cart_id: cart._id,
       product_id: { $in: selected_product_ids },

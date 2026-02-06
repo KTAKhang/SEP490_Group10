@@ -93,6 +93,11 @@ const refundVNPaySync = async ({ order_id, session }) => {
     type: "PAYMENT",
     status: "SUCCESS",
   }).session(session);
+
+  if (!payment) {
+    throw new Error("No successful VNPay payment found for this order");
+  }
+
   const result = await refund({
     order_id,
     amount: payment.amount,

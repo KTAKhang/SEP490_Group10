@@ -45,7 +45,8 @@ const getSupplierById = async (req, res) => {
   try {
     const { id } = req.params;
     const response = await SupplierService.getSupplierById(id);
-    return res.status(response.status === "OK" ? 200 : 400).json(response);
+    const statusCode = response.status === "OK" ? 200 : (response.message?.toLowerCase().includes("does not exist") ? 404 : 400);
+    return res.status(statusCode).json(response);
   } catch (error) {
     return res.status(500).json({
       status: "ERR",

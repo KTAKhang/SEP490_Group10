@@ -72,7 +72,7 @@ const loginUser = async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(404).json({ message: error.message });
+    return res.status(401).json({ status: "ERR", message: error.message });
   }
 };
 
@@ -304,9 +304,9 @@ const forgotPassword = async (req, res) => {
       );
     }
 
-    res.status(200).json(response);
+    return res.status(200).json(response);
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       status: "ERR",
       message: error.message,
     });
@@ -343,9 +343,9 @@ const resetPassword = async (req, res) => {
       return res.status(400).json(response);
     }
 
-    res.status(200).json(response);
+    return res.status(200).json(response);
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       status: "ERR",
       message: error.message,
     });

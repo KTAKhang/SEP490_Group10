@@ -137,80 +137,6 @@ const aggregateOrderRevenueByBatch = async (productId, warehouseEntryDate, compl
 
 
 /**
- * Tổng hợp doanh thu từ đơn hàng trong kỳ lô: doanh thu thực tế, số lượng & doanh thu bán xả kho (giảm giá).
- * @param {String} productId - Product ID
- * @param {Date|String} warehouseEntryDate - Ngày nhập kho
- * @param {Date|String} completedDate - Ngày hoàn thành lô
- * @returns {Promise<{ actualRevenue: number, clearanceQuantity: number, clearanceRevenue: number, fullPriceQuantity: number, fullPriceRevenue: number }>}
- */
-const aggregateOrderRevenueByBatch = async (productId, warehouseEntryDate, completedDate) => {
-  const defaultResult = {
-    actualRevenue: 0,
-    clearanceQuantity: 0,
-    clearanceRevenue: 0,
-    fullPriceQuantity: 0,
-    fullPriceRevenue: 0,
-  };
-  try {
-    const entryDate = warehouseEntryDate instanceof Date ? warehouseEntryDate : new Date(warehouseEntryDate);
-    const completeDate = completedDate instanceof Date ? completedDate : new Date(completedDate);
-    const startDate = new Date(entryDate);
-    startDate.setHours(0, 0, 0, 0);
-    const endDate = new Date(completeDate);
-    endDate.setHours(23, 59, 59, 999);
-
-    const result = await OrderDetailModel.aggregate([
-      { $match: { product_id: new mongoose.Types.ObjectId(productId) } },
-      { $lookup: { from: "orders", localField: "order_id", foreignField: "_id", as: "order" } },
-      { $unwind: "$order" },
-      { $match: { "order.createdAt": { $gte: startDate, $lte: endDate } } },
-      {
-        $addFields: {
-          itemRevenue: { $multiply: ["$quantity", "$price"] },
-          isClearance: {
-            $and: [
-              { $ne: ["$original_price", null] },
-              { $lt: ["$price", "$original_price"] },
-            ],
-          },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          actualRevenue: { $sum: "$itemRevenue" },
-          clearanceQuantity: { $sum: { $cond: ["$isClearance", "$quantity", 0] } },
-          clearanceRevenue: { $sum: { $cond: ["$isClearance", "$itemRevenue", 0] } },
-          totalQuantity: { $sum: "$quantity" },
-        },
-      },
-      {
-        $project: {
-          actualRevenue: 1,
-          clearanceQuantity: 1,
-          clearanceRevenue: 1,
-          fullPriceQuantity: { $subtract: ["$totalQuantity", "$clearanceQuantity"] },
-          fullPriceRevenue: { $subtract: ["$actualRevenue", "$clearanceRevenue"] },
-        },
-      },
-    ]);
-
-    if (!result.length) return defaultResult;
-    const r = result[0];
-    return {
-      actualRevenue: Math.round((r.actualRevenue || 0) * 100) / 100,
-      clearanceQuantity: r.clearanceQuantity || 0,
-      clearanceRevenue: Math.round((r.clearanceRevenue || 0) * 100) / 100,
-      fullPriceQuantity: r.fullPriceQuantity || 0,
-      fullPriceRevenue: Math.round((r.fullPriceRevenue || 0) * 100) / 100,
-    };
-  } catch (error) {
-    console.error("Error aggregateOrderRevenueByBatch:", error);
-    return defaultResult;
-  }
-};
-
-/**
  * Reset product để nhập lô mới (tạo batch history + reset fields)
  * @param {String} productId - Product ID
  * @param {String} completionReason - "SOLD_OUT" | "EXPIRED"
@@ -279,6 +205,8 @@ const resetProductForNewBatch = async (productId, completionReason = "SOLD_OUT")
     // ✅ SOLD_OUT: Số đã xuất (bán/đã giao) = received - onHand. Số vứt bỏ = onHand (thường = 0).
     //    (Đơn hàng trừ kho qua OrderService/PaymentController không tạo phiếu ISSUE, nên không chỉ dựa vào calculateSoldQuantity.)
     // ✅ EXPIRED: Số đã bán = tổng ISSUE; số vứt bỏ = onHand (còn lại hết hạn).
+    const onHand = batchSnapshot.onHandQuantity || 0;
+    const received = batchSnapshot.receivedQuantity || 0;
     let soldQuantity = 0;
     let discardedQuantity = 0;
     if (completionReason === "EXPIRED") {
@@ -691,60 +619,6 @@ const autoResetSoldOutProductsCatchUp = async () => {
       }
     }
 
-    return {
-      status: "OK",
-      message: `Đã chốt lô ${resetResults.length} sản phẩm bán hết (catch-up)`,
-      data: {
-        resetCount: resetResults.length,
-        resetProducts: resetResults,
-      },
-    };
-  } catch (error) {
-    console.error("Error in autoResetSoldOutProductsCatchUp:", error);
-    return { status: "ERR", message: error.message };
-  }
-};
-
-/**
- * Bắt lại: tìm tất cả sản phẩm đã bán hết (onHand = 0) nhưng chưa chốt lô (còn warehouseEntryDate)
- * Gọi khi server khởi động để chốt các sản phẩm đã bán hết trước khi có logic auto-reset trong order/payment
- * @returns {Promise<Object>} { status, message, data: { resetCount, resetProducts } }
- */
-const autoResetSoldOutProductsCatchUp = async () => {
-  try {
-    const soldOutNotReset = await ProductModel.find({
-      onHandQuantity: 0,
-      $or: [
-        { warehouseEntryDateStr: { $exists: true, $ne: null, $ne: "" } },
-        { warehouseEntryDate: { $exists: true, $ne: null } },
-      ],
-    }).lean();
-
-
-    if (soldOutNotReset.length === 0) {
-      return {
-        status: "OK",
-        message: "Không có sản phẩm bán hết cần chốt lô",
-        data: { resetCount: 0, resetProducts: [] },
-      };
-    }
-
-
-    const resetResults = [];
-    for (const product of soldOutNotReset) {
-      try {
-        const result = await autoResetSoldOutProduct(product._id.toString());
-        if (result.status === "OK" && result.data) {
-          resetResults.push({
-            productId: product._id.toString(),
-            productName: product.name,
-            batchNumber: result.data.batchNumber,
-          });
-        }
-      } catch (error) {
-        console.error(`Error catch-up reset product ${product._id}:`, error);
-      }
-    }
     return {
       status: "OK",
       message: `Đã chốt lô ${resetResults.length} sản phẩm bán hết (catch-up)`,
