@@ -424,6 +424,10 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
   try {
     const order = await OrderModel.findById(order_id).session(session);
     if (!order) throw new Error("Order not found");
+
+    const newStatus = await findStatusByName(new_status_name, session);
+    if (!newStatus) throw new Error("Invalid order status");
+
     const currentStatusName = await getOrderStatusName(
       order.order_status_id,
       session,
@@ -1146,6 +1150,7 @@ const getOrderStatusLogs = async (filters = {}) => {
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
+    const query = {};
     // Filter: order_id (bắt buộc nếu cần xem log của 1 đơn)
     if (order_id) {
       if (!mongoose.Types.ObjectId.isValid(order_id)) {
