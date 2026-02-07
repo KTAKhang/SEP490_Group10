@@ -87,29 +87,49 @@ cron.schedule("*/1 * * * *", async () => {
 });
 console.log("🟢 Auto delete pending order cron loaded");
 
-cron.schedule("*/1 * * * *", async () => {
+cron.schedule("*/1 * * * * *", async () => {
+  
+
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const expiredTime = new Date(Date.now() - 1 * 60 * 1000); // 15 phút
+    /* =========================
+       🔍 GET PENDING ORDER STATUS
+    ========================= */
+    const pendingStatus = await OrderStatusModel.findOne({ name: "PENDING" });
+    if (!pendingStatus) {
+      await session.abortTransaction();
+      return;
+    }
+
+    const expiredTime = new Date(Date.now() - 15 * 60 * 1000); // ⏱️ 15 minutes ago
 
     /* =========================
-       🔍 FIND EXPIRED VNPAY PAYMENTS
+       🔍 FIND PENDING VNPAY ORDERS
+       (KHÔNG CHECK createdAt của order)
     ========================= */
-    const expiredPayments = await PaymentModel.find({
-      type: "PAYMENT",
-      method: "VNPAY",
-      status: "PENDING",
-      createdAt: { $lt: expiredTime },
+    const pendingOrders = await OrderModel.find({
+      order_status_id: pendingStatus._id,
+      payment_method: "VNPAY",
+      auto_delete: true,
     }).session(session);
 
-    for (const payment of expiredPayments) {
-      const order = await OrderModel.findById(payment.order_id).session(session);
-      if (!order) continue;
+    for (const order of pendingOrders) {
+      /* =========================
+         🔍 CHECK PAYMENT EXPIRED
+         (DÙNG payment.createdAt)
+      ========================= */
+      const payment = await PaymentModel.findOne({
+        order_id: order._id,
+        status: "PENDING",
+        createdAt: { $lt: expiredTime },
+      }).session(session);
+
+      if (!payment) continue; // chưa quá 15 phút hoặc đã xử lý
 
       /* =========================
-         🔄 RELEASE RESERVED STOCK
+         🔄 ROLLBACK STOCK
       ========================= */
       const orderDetails = await OrderDetailModel.find({
         order_id: order._id,
@@ -119,40 +139,40 @@ cron.schedule("*/1 * * * *", async () => {
         await ProductModel.updateOne(
           { _id: item.product_id },
           { $inc: { onHandQuantity: item.quantity } },
-          { session },
+          { session }
         );
       }
 
       /* =========================
-         ⏰ MARK PAYMENT TIMEOUT
+         🧹 DELETE ORDER DETAILS
       ========================= */
-      payment.status = "TIMEOUT";
-      payment.note = "Payment timeout after 15 minutes";
-
-      await payment.save({ session });
+      await OrderDetailModel.deleteMany(
+        { order_id: order._id },
+        { session }
+      );
 
       /* =========================
-         🔔 NOTIFY USER
+         💳 DELETE PAYMENT
       ========================= */
-      // await NotificationService.sendToUser(order.user_id, {
-      //   title: "Payment timeout",
-      //   body: `Payment for order ${order._id.toString()} has expired after 15 minutes. Products were released back to stock.`,
-      //   data: {
-      //     type: "payment",
-      //     orderId: order._id.toString(),
-      //     action: "payment_timeout",
-      //   },
-      // });
+      await PaymentModel.deleteMany(
+        { order_id: order._id },
+        { session }
+      );
+
+      /* =========================
+         🗑️ DELETE ORDER
+      ========================= */
+      await order.deleteOne({ session });
 
       console.log(
-        `⏰ Payment ${payment._id.toString()} marked TIMEOUT`,
+        `🗑️ Auto deleted order ${order._id.toString()} (payment pending > 15 minutes)`
       );
     }
 
     await session.commitTransaction();
   } catch (error) {
     await session.abortTransaction();
-    console.error("❌ Payment timeout cron error:", error.message);
+    console.error("❌ Auto delete pending order job error:", error.message);
   } finally {
     session.endSession();
   }

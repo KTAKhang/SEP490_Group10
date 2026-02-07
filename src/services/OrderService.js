@@ -118,22 +118,6 @@ const confirmCheckoutAndCreateOrder = async ({
   const session = await mongoose.startSession();
   session.startTransaction();
 
-  // 🚫 CHECK USER SPAM TIMEOUT ORDER (24H)
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-  const timeoutOrdersCount = await PaymentModel.countDocuments({
-    user_id,
-    method: "VNPAY",
-    status: "TIMEOUT",
-    createdAt: { $gte: since },
-  });
-
-  if (timeoutOrdersCount >= 5) {
-    throw new Error(
-      "Bạn tạo quá nhiều đơn thanh toán không thành công. Vui lòng thử lại sau 24 giờ",
-    );
-  }
-
   try {
     /* =======================
        1️⃣ LOAD CART
@@ -664,30 +648,19 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
     }
 
     // TIMEOUT → KHÔNG check retry_expired_at
-    if (!["FAILED", "TIMEOUT"].includes(payment.status)) {
+    if (!["FAILED"].includes(payment.status)) {
       throw new Error("Trạng thái thanh toán không hợp lệ để retry");
     }
 
-    if (payment.status === "TIMEOUT") {
-      // ❌ BLOCK RETRY NẾU QUÁ SỐ LẦN
-      if (order.retry_count >= 3) {
-        throw new Error("Đơn hàng đã vượt quá số lần thanh toán cho phép");
-      }
-      order.retry_count += 1;
+    /* ===== CHECK RETRY PER PAYMENT STATUS ===== */
+    if (!order.allow_retry) {
+      throw new Error("Đơn hàng không cho phép thanh toán lại");
     }
-
-    // FAILED → có retry window
-    if (payment.status === "FAILED") {
-      /* ===== CHECK RETRY PER PAYMENT STATUS ===== */
-      if (!order.allow_retry) {
-        throw new Error("Đơn hàng không cho phép thanh toán lại");
-      }
-      if (!order.retry_expired_at || order.retry_expired_at < new Date()) {
-        throw new Error("Đơn hàng đã quá thời gian thanh toán lại");
-      }
-      order.allow_retry = false;
-      order.auto_delete = false;
+    if (!order.retry_expired_at || order.retry_expired_at < new Date()) {
+      throw new Error("Đơn hàng đã quá thời gian thanh toán lại");
     }
+    order.allow_retry = false;
+    order.auto_delete = false;
 
     await order.save({ session });
 

@@ -266,56 +266,6 @@ const vnpayReturn = async (req, res) => {
       /* =====================
      PAYMENT SUCCESS
   ===================== */
-
-      if (payment.status === "TIMEOUT") {
-        const isOutOfStock = await isOrderOutOfStock(order._id, session);
-
-        if (isOutOfStock) {
-          // ❌ PAID BUT NO STOCK
-          payment.status = "TIMEOUT"; // tiền vẫn đã thanh toán
-          await payment.save({ session });
-
-          order.status_history.push({
-            from_status: order.order_status_id,
-            to_status: paidNoStockStatus._id,
-            changed_by: order.user_id,
-            changed_by_role: "customer",
-            note: "Payment successful, but the product is out of stock",
-          });
-
-          order.order_status_id = paidNoStockStatus._id;
-          await order.save({ session });
-
-          await session.commitTransaction();
-
-          return res.redirect(
-            `http://localhost:5173/customer/payment-success-nostock?status=paid_no_stock&orderId=${orderId}`,
-          );
-        }
-        // ✅ CÒN HÀNG → TRỪ KHO TRƯỚC
-        await deductStock(order._id, session);
-        // ✅ CÒN HÀNG → coi như SUCCESS
-        payment.status = "SUCCESS";
-        await payment.save({ session });
-
-        order.status_history.push({
-          from_status: order.order_status_id,
-          to_status: paidStatus._id,
-          changed_by: order.user_id,
-          changed_by_role: "customer",
-          note: "VNPAY payment successful (TIMEOUT will reprocess)",
-        });
-
-        order.order_status_id = paidStatus._id;
-        await order.save({ session });
-
-        await session.commitTransaction();
-
-        return res.redirect(
-          `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
-        );
-      }
-
       payment.status = "SUCCESS";
       payment.provider_txn_id = transactionNo;
       payment.provider_response = sortedParams;
