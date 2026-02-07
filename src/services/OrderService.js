@@ -845,11 +845,18 @@ const getOrdersByUser = async (user_id, filters = {}) => {
       OrderModel.countDocuments(query),
     ]);
 
+    // Attach payment (PAYMENT) info for each order
+    const orderIds = data.map((o) => o._id);
+    let paymentMap = new Map();
+    if (orderIds.length > 0) {
+      const payments = await PaymentModel.find({ order_id: { $in: orderIds }, type: "PAYMENT" }).lean();
+      paymentMap = new Map(payments.map((p) => [p.order_id.toString(), p]));
+    }
 
     return {
       status: "OK",
       message: "Retrieved order history successfully",
-      data,
+      data: data.map((order) => ({ ...order, payment: paymentMap.get(order._id.toString()) || null })),
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -897,6 +904,9 @@ const getOrderByUser = async (order_id, user_id) => {
       }).lean(),
     ]);
 
+    // Get payment info (PAYMENT) for this order
+    const payment = await PaymentModel.findOne({ order_id: order._id, type: "PAYMENT" }).lean();
+
 
     const reviewMap = new Map(
       reviews.map((review) => [review.product_id?.toString(), review]),
@@ -916,6 +926,7 @@ const getOrderByUser = async (order_id, user_id) => {
         order,
         details: detailsWithReview,
         reviews,
+        payment: payment || null,
       },
     };
   } catch (error) {
