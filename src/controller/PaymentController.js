@@ -15,7 +15,6 @@ const CustomerEmailService = require("../services/CustomerEmailService");
 const UserModel = require("../models/UserModel");
 const ProductModel = require("../models/ProductModel");
 
-
 /* =============================
    CREATE VNPAY URL
 ============================= */
@@ -24,14 +23,11 @@ const createVnpayPaymentUrl = async (req, res) => {
     const { order_id } = req.body;
     const user_id = req.user._id;
 
-
     const order = await OrderModel.findById(order_id);
     if (!order) throw new Error("No order found");
 
-
     if (order.user_id.toString() !== user_id.toString())
       throw new Error("Không có quyền");
-
 
     const payment = await PaymentModel.findOne({
       order_id,
@@ -39,13 +35,10 @@ const createVnpayPaymentUrl = async (req, res) => {
       type: "PAYMENT",
     });
 
-
     if (!payment || payment.status !== "PENDING")
       throw new Error("Đơn không hợp lệ để thanh toán");
 
-
     const payUrl = createVnpayUrl(order._id, payment.amount, req.ip);
-
 
     res.json({ success: true, payUrl });
   } catch (err) {
@@ -53,12 +46,10 @@ const createVnpayPaymentUrl = async (req, res) => {
   }
 };
 
-
 async function isOrderOutOfStock(orderId, session) {
   const orderDetails = await OrderDetailModel.find({
     order_id: orderId,
   }).session(session);
-
 
   for (const item of orderDetails) {
     const product = await ProductModel.findById(item.product_id).session(
@@ -67,22 +58,18 @@ async function isOrderOutOfStock(orderId, session) {
     console.log("product", product.onHandQuantity);
     console.log("item", item.quantity);
 
-
     if (!product || product.onHandQuantity < item.quantity) {
       return true;
     }
   }
 
-
   return false;
 }
-
 
 async function deductStock(orderId, session) {
   const orderDetails = await OrderDetailModel.find({
     order_id: orderId,
   }).session(session);
-
 
   for (const item of orderDetails) {
     const result = await ProductModel.updateOne(
@@ -96,13 +83,11 @@ async function deductStock(orderId, session) {
       { session },
     );
 
-
     if (result.modifiedCount === 0) {
       throw new Error("Insufficient inventory when deducting");
     }
   }
 }
-
 
 /* =============================
    VNPAY RETURN URL
@@ -110,7 +95,6 @@ async function deductStock(orderId, session) {
 const vnpayReturn = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
 
   try {
     /* =======================
@@ -120,7 +104,6 @@ const vnpayReturn = async (req, res) => {
     if (!rawQuery) {
       return res.status(400).send("Missing query params");
     }
-
 
     /* =======================
        2️⃣ PARSE QUERY (NO DECODE +)
@@ -132,11 +115,9 @@ const vnpayReturn = async (req, res) => {
       },
     });
 
-
     const secureHash = vnpParams.vnp_SecureHash;
     delete vnpParams.vnp_SecureHash;
     delete vnpParams.vnp_SecureHashType;
-
 
     /* =======================
        3️⃣ SORT PARAMS
@@ -148,23 +129,19 @@ const vnpayReturn = async (req, res) => {
         sortedParams[key] = vnpParams[key];
       });
 
-
     /* =======================
        4️⃣ VERIFY SIGNATURE
     ======================= */
     const signData = qs.stringify(sortedParams, { encode: false });
-
 
     const checkHash = crypto
       .createHmac("sha512", vnpConfig.hashSecret)
       .update(signData, "utf-8")
       .digest("hex");
 
-
     if (checkHash !== secureHash) {
       return res.status(400).send("Invalid VNPay signature");
     }
-
 
     /* =======================
        5️⃣ EXTRACT DATA
@@ -173,11 +150,9 @@ const vnpayReturn = async (req, res) => {
     const responseCode = sortedParams.vnp_ResponseCode;
     const transactionNo = sortedParams.vnp_TransactionNo;
 
-
     if (!orderIdStr || !transactionNo) {
       throw new Error("Missing orderId or transactionNo");
     }
-
 
     /* =======================
        PRE-ORDER: intent id as vnp_TxnRef
@@ -195,7 +170,6 @@ const vnpayReturn = async (req, res) => {
       return res.redirect("http://localhost:5173/customer/preorder-payment-result?status=failed");
     }
 
-
     const remainingIntent = await PreOrderRemainingPaymentModel.findById(orderIdStr).session(session);
     if (remainingIntent) {
       if (responseCode === "00") {
@@ -209,9 +183,7 @@ const vnpayReturn = async (req, res) => {
       return res.redirect("http://localhost:5173/customer/my-pre-orders?remaining=failed");
     }
 
-
     const orderId = new mongoose.Types.ObjectId(orderIdStr);
-
 
     /* =======================
        6️⃣ LOAD PAYMENT
@@ -222,11 +194,9 @@ const vnpayReturn = async (req, res) => {
       type: "PAYMENT",
     }).session(session);
 
-
     if (!payment) {
       throw new Error("Payment not found");
     }
-
 
     /* =======================
        🔒 ANTI-REPLAY #1
@@ -239,7 +209,6 @@ const vnpayReturn = async (req, res) => {
       );
     }
 
-
     /* =======================
        🔒 ANTI-REPLAY #2
        DUPLICATE TXN (OTHER PAYMENT)
@@ -249,12 +218,10 @@ const vnpayReturn = async (req, res) => {
       _id: { $ne: payment._id },
     }).session(session);
 
-
     if (existedTxn) {
       await session.abortTransaction();
       return res.status(409).send("Duplicate transaction");
     }
-
 
     /* =======================
        7️⃣ LOAD ORDER
@@ -264,26 +231,21 @@ const vnpayReturn = async (req, res) => {
       throw new Error("Order not found");
     }
 
-
     const paidStatus = await OrderStatusModel.findOne({
       name: "PAID",
     }).session(session);
-
 
     if (!paidStatus) {
       throw new Error("PAID status not found");
     }
 
-
     const paidNoStockStatus = await OrderStatusModel.findOne({
       name: "PAID_NO_STOCK",
     }).session(session);
 
-
     if (!paidNoStockStatus) {
       throw new Error("PAID_NO_STOCK status not found");
     }
-
 
     /* =======================
        🔒 ANTI-REPLAY #3
@@ -296,7 +258,6 @@ const vnpayReturn = async (req, res) => {
       );
     }
 
-
     /* =======================
        8️⃣ HANDLE RESULT
     ======================= */
@@ -305,81 +266,10 @@ const vnpayReturn = async (req, res) => {
       /* =====================
      PAYMENT SUCCESS
   ===================== */
-
-
-      if (payment.status === "TIMEOUT") {
-        const isOutOfStock = await isOrderOutOfStock(order._id, session);
-
-
-        if (isOutOfStock) {
-          // ❌ PAID BUT NO STOCK
-          payment.status = "TIMEOUT"; // tiền vẫn đã thanh toán
-          await payment.save({ session });
-
-
-          order.status_history.push({
-            from_status: order.order_status_id,
-            to_status: paidNoStockStatus._id,
-            changed_by: order.user_id,
-            changed_by_role: "customer",
-            note: "Payment successful, but the product is out of stock",
-          });
-
-
-          order.order_status_id = paidNoStockStatus._id;
-          await order.save({ session });
-
-
-          await session.commitTransaction();
-
-
-          return res.redirect(
-            `http://localhost:5173/customer/payment-success-nostock?status=paid_no_stock&orderId=${orderId}`,
-          );
-        }
-        // ✅ CÒN HÀNG → TRỪ KHO TRƯỚC
-        await deductStock(order._id, session);
-        // ✅ CÒN HÀNG → coi như SUCCESS
-        payment.status = "SUCCESS";
-        await payment.save({ session });
-
-
-        order.status_history.push({
-          from_status: order.order_status_id,
-          to_status: paidStatus._id,
-          changed_by: order.user_id,
-          changed_by_role: "customer",
-          note: "VNPAY payment successful (TIMEOUT will reprocess)",
-        });
-
-
-        order.order_status_id = paidStatus._id;
-        await order.save({ session });
-        await session.commitTransaction();
-        // ✅ Tự động chốt lô (reset) sản phẩm bán hết sau khi trừ kho (VNPAY)
-        const orderDetailsForReset = await OrderDetailModel.find({ order_id: order._id }).select("product_id").lean();
-        const ProductBatchService = require("../services/ProductBatchService");
-        for (const item of orderDetailsForReset) {
-          try {
-            const product = await ProductModel.findById(item.product_id)
-              .select("onHandQuantity warehouseEntryDate warehouseEntryDateStr")
-              .lean();
-            if (product && product.onHandQuantity === 0 && (product.warehouseEntryDate || product.warehouseEntryDateStr)) {
-              await ProductBatchService.autoResetSoldOutProduct(item.product_id.toString());
-            }
-          } catch (e) {
-            console.error("Auto-reset sold out product failed:", item.product_id, e);
-          }
-        }
-        return res.redirect(
-          `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
-        );
-      }
       payment.status = "SUCCESS";
       payment.provider_txn_id = transactionNo;
       payment.provider_response = sortedParams;
       await payment.save({ session });
-
 
       order.status_history.push({
         from_status: order.order_status_id,
@@ -389,55 +279,35 @@ const vnpayReturn = async (req, res) => {
         note: "VNPAY payment successful",
       });
 
-
       order.order_status_id = paidStatus._id;
       await order.save({ session });
+
       await session.commitTransaction();
-      // ✅ Tự động chốt lô (reset) sản phẩm bán hết sau khi trừ kho (VNPAY - lần đầu)
-      const orderDetailsFirstPay = await OrderDetailModel.find({ order_id: order._id }).select("product_id").lean();
-      const ProductBatchServiceFirst = require("../services/ProductBatchService");
-      for (const item of orderDetailsFirstPay) {
-        try {
-          const product = await ProductModel.findById(item.product_id)
-            .select("onHandQuantity warehouseEntryDate warehouseEntryDateStr")
-            .lean();
-          if (product && product.onHandQuantity === 0 && (product.warehouseEntryDate || product.warehouseEntryDateStr)) {
-            await ProductBatchServiceFirst.autoResetSoldOutProduct(item.product_id.toString());
-          }
-        } catch (e) {
-          console.error("Auto-reset sold out product failed:", item.product_id, e);
-        }
-      }
+
       return res.redirect(
         `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
       );
     }
 
-
     /* =====================
    PAYMENT TIMEOUT
 ===================== */
-
 
     /* ===== PAYMENT FAILED ===== */
     payment.status = "FAILED";
     payment.provider_response = sortedParams;
     await payment.save({ session });
 
-
     /* ===== ORDER → FAILED + RETRY 10 PHÚT ===== */
     const TEN_MINUTES = 10 * 60 * 1000;
-
 
     const status = await OrderStatusModel.findOne({ name: "PENDING" }).session(
       session,
     );
 
-
     order.allow_retry = true;
     order.auto_delete = true;
     order.retry_expired_at = new Date(Date.now() + TEN_MINUTES);
-
 
     // ghi history
     order.status_history.push({
@@ -448,10 +318,8 @@ const vnpayReturn = async (req, res) => {
       note: "VNPAY payment failed – allow re-payment within 10 minutes",
     });
 
-
     order.order_status_id = status._id;
     await order.save({ session });
-
 
     /* ===== COMMIT ===== */
     await session.commitTransaction();
@@ -469,7 +337,6 @@ const vnpayReturn = async (req, res) => {
       console.error("Failed to send payment failure notification:", notifErr);
     }
 
-
     try {
       const user = await UserModel.findById(order.user_id)
         .select("email user_name")
@@ -485,7 +352,6 @@ const vnpayReturn = async (req, res) => {
       console.error("Failed to send payment failure email:", emailErr);
     }
 
-
     /* ===== REDIRECT ===== */
     return res.redirect(
       `http://localhost:5173/customer/payment-fail?status=failed&orderId=${orderId}`,
@@ -499,15 +365,12 @@ const vnpayReturn = async (req, res) => {
   }
 };
 
-
 const refundVNPay = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
-
   try {
     const { order_id } = req.body;
-
 
     const payment = await PaymentModel.findOne({
       order_id,
@@ -516,10 +379,8 @@ const refundVNPay = async (req, res) => {
       status: "SUCCESS",
     }).session(session);
 
-
     if (!payment)
       throw new Error("Không tìm thấy giao dịch hợp lệ để hoàn tiền");
-
 
     const result = await refund({
       order_id,
@@ -527,11 +388,9 @@ const refundVNPay = async (req, res) => {
       provider_txn_id: payment.provider_txn_id,
     });
 
-
     if (result.vnp_ResponseCode !== "00") {
       throw new Error(`Refund thất bại: ${result.vnp_Message}`);
     }
-
 
     await PaymentModel.create(
       [
@@ -548,7 +407,6 @@ const refundVNPay = async (req, res) => {
       { session },
     );
 
-
     await session.commitTransaction();
     res.json({ success: true, message: "Hoàn tiền thành công" });
   } catch (err) {
@@ -561,7 +419,6 @@ const refundVNPay = async (req, res) => {
     session.endSession();
   }
 };
-
 
 module.exports = {
   createVnpayPaymentUrl,

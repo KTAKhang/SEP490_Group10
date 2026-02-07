@@ -1,14 +1,12 @@
 const cron = require("node-cron");
 const mongoose = require("mongoose");
 
-
 const OrderModel = require("../models/OrderModel");
 const OrderDetailModel = require("../models/OrderDetailModel");
 const OrderStatusModel = require("../models/OrderStatusModel");
 const PaymentModel = require("../models/PaymentModel");
 const ProductModel = require("../models/ProductModel");
 const NotificationService = require("../services/NotificationService");
-
 
 /**
  * ⏱️ Chạy mỗi 1 phút
@@ -18,7 +16,6 @@ cron.schedule("*/1 * * * *", async () => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
-
   try {
     const failedStatus = await OrderStatusModel.findOne({ name: "PENDING" });
     if (!failedStatus) {
@@ -26,9 +23,7 @@ cron.schedule("*/1 * * * *", async () => {
       return;
     }
 
-
     const now = new Date();
-
 
     const expiredOrders = await OrderModel.find({
       order_status_id: failedStatus._id,
@@ -36,7 +31,6 @@ cron.schedule("*/1 * * * *", async () => {
       allow_retry: true,
       retry_expired_at: { $lt: now },
     }).session(session);
-
 
     for (const order of expiredOrders) {
       /* =========================
@@ -46,7 +40,6 @@ cron.schedule("*/1 * * * *", async () => {
         order_id: order._id,
       }).session(session);
 
-
       for (const item of orderDetails) {
         await ProductModel.updateOne(
           { _id: item.product_id },
@@ -55,18 +48,15 @@ cron.schedule("*/1 * * * *", async () => {
         );
       }
 
-
       /* =========================
          🧹 DELETE ORDER DETAILS
       ========================= */
       await OrderDetailModel.deleteMany({ order_id: order._id }, { session });
 
-
       /* =========================
          💳 DELETE PAYMENTS
       ========================= */
       await PaymentModel.deleteMany({ order_id: order._id }, { session });
-
 
       /* =========================
          🗑️ DELETE ORDER
@@ -82,12 +72,10 @@ cron.schedule("*/1 * * * *", async () => {
         },
       });
 
-
       console.log(
         `🗑️ Auto deleted order ${order._id.toString()} + rollback stock`,
       );
     }
-
 
     await session.commitTransaction();
   } catch (err) {
@@ -99,82 +87,96 @@ cron.schedule("*/1 * * * *", async () => {
 });
 console.log("🟢 Auto delete pending order cron loaded");
 
+cron.schedule("*/1 * * * * *", async () => {
+  
 
-cron.schedule("*/1 * * * *", async () => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
-
   try {
-    const expiredTime = new Date(Date.now() - 1 * 60 * 1000); // 15 phút
+    /* =========================
+       🔍 GET PENDING ORDER STATUS
+    ========================= */
+    const pendingStatus = await OrderStatusModel.findOne({ name: "PENDING" });
+    if (!pendingStatus) {
+      await session.abortTransaction();
+      return;
+    }
 
+    const expiredTime = new Date(Date.now() - 16 * 60 * 1000); // ⏱️ 15 minutes ago
 
     /* =========================
-       🔍 FIND EXPIRED VNPAY PAYMENTS
+       🔍 FIND PENDING VNPAY ORDERS
+       (KHÔNG CHECK createdAt của order)
     ========================= */
-    const expiredPayments = await PaymentModel.find({
-      type: "PAYMENT",
-      method: "VNPAY",
-      status: "PENDING",
-      createdAt: { $lt: expiredTime },
+    const pendingOrders = await OrderModel.find({
+      order_status_id: pendingStatus._id,
+      payment_method: "VNPAY",
+      auto_delete: true,
     }).session(session);
 
+    for (const order of pendingOrders) {
+      /* =========================
+         🔍 CHECK PAYMENT EXPIRED
+         (DÙNG payment.createdAt)
+      ========================= */
+      const payment = await PaymentModel.findOne({
+        order_id: order._id,
+        status: "PENDING",
+        createdAt: { $lt: expiredTime },
+      }).session(session);
 
-    for (const payment of expiredPayments) {
-      const order = await OrderModel.findById(payment.order_id).session(session);
-      if (!order) continue;
-
+      if (!payment) continue; // chưa quá 15 phút hoặc đã xử lý
 
       /* =========================
-         🔄 RELEASE RESERVED STOCK
+         🔄 ROLLBACK STOCK
       ========================= */
       const orderDetails = await OrderDetailModel.find({
         order_id: order._id,
       }).session(session);
 
-
       for (const item of orderDetails) {
         await ProductModel.updateOne(
           { _id: item.product_id },
           { $inc: { onHandQuantity: item.quantity } },
-          { session },
+          { session }
         );
       }
 
+      /* =========================
+         🧹 DELETE ORDER DETAILS
+      ========================= */
+      await OrderDetailModel.deleteMany(
+        { order_id: order._id },
+        { session }
+      );
 
       /* =========================
-         ⏰ MARK PAYMENT TIMEOUT
+         💳 DELETE PAYMENT
       ========================= */
-      payment.status = "TIMEOUT";
-      payment.note = "Payment timeout after 15 minutes";
-
-
-      await payment.save({ session });
-
+      await PaymentModel.deleteMany(
+        { order_id: order._id },
+        { session }
+      );
 
       /* =========================
-         🔔 NOTIFY USER
+         🗑️ DELETE ORDER
       ========================= */
-      // await NotificationService.sendToUser(order.user_id, {
-      //   title: "Payment timeout",
-      //   body: `Payment for order ${order._id.toString()} has expired after 15 minutes. Products were released back to stock.`,
-      //   data: {
-      //     type: "payment",
-      //     orderId: order._id.toString(),
-      //     action: "payment_timeout",
-      //   },
-      // });
+      await order.deleteOne({ session });
+
       console.log(
-        `⏰ Payment ${payment._id.toString()} marked TIMEOUT`,
+        `🗑️ Auto deleted order ${order._id.toString()} (payment pending > 15 minutes)`
       );
     }
+
     await session.commitTransaction();
   } catch (error) {
     await session.abortTransaction();
-    console.error("❌ Payment timeout cron error:", error.message);
+    console.error("❌ Auto delete pending order job error:", error.message);
   } finally {
     session.endSession();
   }
 });
-module.exports = {};
 
+
+module.exports = {};

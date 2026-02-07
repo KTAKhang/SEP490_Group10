@@ -144,27 +144,6 @@ const confirmCheckoutAndCreateOrder = async ({
 }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
-
-  // 🚫 CHECK USER SPAM TIMEOUT ORDER (24H)
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-
-  const timeoutOrdersCount = await PaymentModel.countDocuments({
-    user_id,
-    method: "VNPAY",
-    status: "TIMEOUT",
-    createdAt: { $gte: since },
-  });
-
-
-  if (timeoutOrdersCount >= 5) {
-    throw new Error(
-      "You have created too many failed payment orders. Please try again in 24 hours.",
-    );
-  }
-
-
   try {
     /* =======================
        1️⃣ LOAD CART
@@ -728,45 +707,23 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
       method: "VNPAY",
       type: "PAYMENT",
     }).session(session);
-
-
     if (!payment) {
       throw new Error("Payment information not found");
     }
-
-
-    // TIMEOUT → KHÔNG check retry_expired_at
-    if (!["FAILED", "TIMEOUT"].includes(payment.status)) {
-      throw new Error("The payment status is not eligible for retry");
+    if (!["FAILED"].includes(payment.status)) {
+      throw new Error("Trạng thái thanh toán không hợp lệ để retry");
     }
-
-
-    if (payment.status === "TIMEOUT") {
-      // ❌ BLOCK RETRY NẾU QUÁ SỐ LẦN
-      if (order.retry_count >= 3) {
-        throw new Error("The order has exceeded the allowed payment attempts");
-      }
-      order.retry_count += 1;
+    /* ===== CHECK RETRY PER PAYMENT STATUS ===== */
+    if (!order.allow_retry) {
+      throw new Error("Đơn hàng không cho phép thanh toán lại");
     }
+    if (!order.retry_expired_at || order.retry_expired_at < new Date()) {
+      throw new Error("Đơn hàng đã quá thời gian thanh toán lại");
 
-
-    // FAILED → có retry window
-    if (payment.status === "FAILED") {
-      /* ===== CHECK RETRY PER PAYMENT STATUS ===== */
-      if (!order.allow_retry) {
-        throw new Error("This order does not allow payment retries");
-      }
-      if (!order.retry_expired_at || order.retry_expired_at < new Date()) {
-        throw new Error("The payment retry window has expired");
-      }
-      order.allow_retry = false;
-      order.auto_delete = false;
     }
-
-
+    order.allow_retry = false;
+    order.auto_delete = false;
     await order.save({ session });
-
-
     /* =======================
        4️⃣ RESET PAYMENT
     ======================= */
