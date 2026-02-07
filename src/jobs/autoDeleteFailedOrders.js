@@ -103,7 +103,7 @@ cron.schedule("*/1 * * * * *", async () => {
       return;
     }
 
-    const expiredTime = new Date(Date.now() - 15 * 60 * 1000); // ⏱️ 15 minutes ago
+    const expiredTime = new Date(Date.now() - 16 * 60 * 1000); // ⏱️ 15 minutes ago
 
     /* =========================
        🔍 FIND PENDING VNPAY ORDERS

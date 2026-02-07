@@ -23,12 +23,12 @@ const listAllocations = async (req, res) => {
 const upsertAllocation = async (req, res) => {
   try {
     const { fruitTypeId, allocatedKg } = req.body;
-    if (!fruitTypeId || allocatedKg == null) {
-      return res.status(400).json({ status: "ERR", message: "Missing fruitTypeId or allocatedKg" });
+    if (!fruitTypeId) {
+      return res.status(400).json({ status: "ERR", message: "Missing fruitTypeId" });
     }
     const response = await PreOrderAllocationService.upsertAllocation({
       fruitTypeId,
-      allocatedKg,
+      allocatedKg: allocatedKg != null ? Number(allocatedKg) : undefined,
     });
     return res.status(200).json(response);
   } catch (err) {

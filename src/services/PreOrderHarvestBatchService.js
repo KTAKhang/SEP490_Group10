@@ -1,9 +1,8 @@
 /**
  * Pre-order Harvest Batch Service
  *
- * Business logic for admin creation and listing of pre-order receive batches (PreOrderHarvestBatch).
- * Each fruit type can have only one batch; quantity must equal pre-order demand. Warehouse staff then
- * receive stock against these batches (PreOrderStock / PreOrderReceive).
+ * A fruit type can have MULTIPLE harvest batches. Warehouse can receive stock MULTIPLE TIMES (partial deliveries).
+ * Demand = sum(quantityKg) of PreOrders with status WAITING_FOR_ALLOCATION, WAITING_FOR_NEXT_BATCH, ALLOCATED_WAITING_PAYMENT.
  */
 
 const mongoose = require("mongoose");
@@ -13,27 +12,22 @@ const FruitTypeModel = require("../models/FruitTypeModel");
 const SupplierModel = require("../models/SupplierModel");
 const PreOrderModel = require("../models/PreOrderModel");
 
+/** Statuses that count toward demand. */
+const DEMAND_STATUSES = ["WAITING_FOR_ALLOCATION", "WAITING_FOR_NEXT_BATCH", "ALLOCATED_WAITING_PAYMENT"];
+
 /**
- * Admin: create a pre-order receive batch for a fruit type. One batch per fruit type only; quantity must equal demand.
+ * Admin: create a pre-order receive batch for a fruit type. Multiple batches per fruit type allowed.
  *
  * Business rules:
  * - Fruit type must exist; quantityKg must be a positive number
- * - No existing PreOrderHarvestBatch for this fruitTypeId
- * - quantityKg must equal demand (sum of quantityKg from pre-orders with status WAITING_FOR_PRODUCT or READY_FOR_FULFILLMENT)
+ * - quantityKg can be any positive (receive-time validation: total received must not exceed demand)
  * - Either harvestBatchId (linked harvest batch) or supplierId + harvestDate + batchNumber must be provided; supplier must be ACTIVE
- *
- * Flow:
- * 1. Validate fruitTypeId and quantityKg; load fruit type
- * 2. Check no existing batch for fruitTypeId
- * 3. Aggregate demand for this fruit type; validate quantityKg === demandKg
- * 4. Resolve supplierId, harvestDate, batchNumber: from HarvestBatch if harvestBatchId given, else from params (supplierId, harvestDate, batchNumber)
- * 5. Create PreOrderHarvestBatch; return populated document (fruitTypeId, supplierId, harvestBatchId)
  *
  * @param {Object} params - Input parameters
  * @param {string} [params.harvestBatchId] - Optional linked harvest batch ID (supplier/date/number taken from it)
  * @param {string} params.fruitTypeId - Fruit type document ID
  * @param {string} [params.supplierId] - Required if no harvestBatchId; supplier must be ACTIVE
- * @param {number} params.quantityKg - Planned quantity (must equal demand)
+ * @param {number} params.quantityKg - Planned quantity (kg)
  * @param {string} [params.harvestDate] - Required if no harvestBatchId
  * @param {string} [params.batchNumber] - Required if no harvestBatchId
  * @param {string} [params.notes] - Optional notes (max 500 chars)
@@ -56,20 +50,6 @@ async function createBatch({
   const qty = Number(quantityKg);
   if (!Number.isFinite(qty) || qty <= 0) {
     throw new Error("Quantity (kg) must be greater than 0");
-  }
-
-  const existing = await PreOrderHarvestBatchModel.findOne({ fruitTypeId }).lean();
-  if (existing) {
-    throw new Error("This fruit type already has a pre-order receive batch. One batch per fruit type only.");
-  }
-
-  const demandAgg = await PreOrderModel.aggregate([
-    { $match: { fruitTypeId: ft._id, status: { $in: ["WAITING_FOR_PRODUCT", "READY_FOR_FULFILLMENT"] } } },
-    { $group: { _id: null, demandKg: { $sum: "$quantityKg" } } },
-  ]);
-  const demandKg = demandAgg[0]?.demandKg ?? 0;
-  if (Math.abs(qty - demandKg) > 0.001) {
-    throw new Error(`Quantity must equal demand (${demandKg} kg). Current: ${qty} kg.`);
   }
 
   let finalSupplierId, finalHarvestDate, finalBatchNumber, finalHarvestBatchId = null;
@@ -98,6 +78,18 @@ async function createBatch({
     finalSupplierId = supplierId;
     finalHarvestDate = new Date(harvestDate);
     finalBatchNumber = String(batchNumber).trim();
+  }
+
+  const harvestDayStart = new Date(finalHarvestDate);
+  harvestDayStart.setUTCHours(0, 0, 0, 0);
+  const harvestDayEnd = new Date(harvestDayStart);
+  harvestDayEnd.setUTCDate(harvestDayEnd.getUTCDate() + 1);
+  const existingBatch = await PreOrderHarvestBatchModel.findOne({
+    fruitTypeId: new mongoose.Types.ObjectId(fruitTypeId),
+    harvestDate: { $gte: harvestDayStart, $lt: harvestDayEnd },
+  }).lean();
+  if (existingBatch) {
+    throw new Error("A pre-order receive batch already exists for this fruit type and harvest date.");
   }
 
   const batch = await PreOrderHarvestBatchModel.create({

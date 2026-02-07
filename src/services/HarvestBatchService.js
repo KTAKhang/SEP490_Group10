@@ -3,6 +3,7 @@ const HarvestBatchModel = require("../models/HarvestBatchModel");
 const SupplierModel = require("../models/SupplierModel");
 const ProductModel = require("../models/ProductModel");
 
+
 /**
  * Tạo lô thu hoạch (Admin)
  */
@@ -13,27 +14,30 @@ const createHarvestBatch = async (payload = {}) => {
       productId,
       batchNumber,
       harvestDate,
-      quantity,
       location,
-      qualityGrade = "A",
       notes,
     } = payload;
 
+
     if (!mongoose.isValidObjectId(supplierId)) {
-      return { status: "ERR", message: "supplierId không hợp lệ" };
+      return { status: "ERR", message: "Invalid supplierId" };
     }
+
 
     if (!mongoose.isValidObjectId(productId)) {
-      return { status: "ERR", message: "productId không hợp lệ" };
+      return { status: "ERR", message: "Invalid productId" };
     }
+
 
     if (!batchNumber || !batchNumber.toString().trim()) {
-      return { status: "ERR", message: "Số lô thu hoạch là bắt buộc" };
+      return { status: "ERR", message: "Batch number is required" };
     }
 
+
     if (!harvestDate) {
-      return { status: "ERR", message: "Ngày thu hoạch là bắt buộc" };
+      return { status: "ERR", message: "Harvest date is required" };
     }
+
 
     // ✅ BR-SUP-12: Validation harvestDate không được lớn hơn ngày hiện tại
     const harvestDateObj = new Date(harvestDate);
@@ -41,66 +45,87 @@ const createHarvestBatch = async (payload = {}) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     if (harvestDateObj > today) {
-      return { status: "ERR", message: "Ngày thu hoạch không được lớn hơn ngày hiện tại" };
-    }
-
-    const qty = Number(quantity);
-    if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
-      return { status: "ERR", message: "Số lượng phải là số nguyên lớn hơn 0" };
+      return {
+        status: "ERR",
+        message: "Harvest date cannot be later than today",
+      };
     }
 
     // Kiểm tra supplier và product tồn tại
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {
-      return { status: "ERR", message: "Nhà cung cấp không tồn tại" };
+      return { status: "ERR", message: "Supplier does not exist" };
     }
+
 
     const product = await ProductModel.findById(productId);
     if (!product) {
-      return { status: "ERR", message: "Sản phẩm không tồn tại" };
+      return { status: "ERR", message: "Product does not exist" };
     }
+
 
     // ✅ BR-SUP-26: Không cho tạo harvest batch với supplier SUSPENDED/TERMINATED
     if (supplier.cooperationStatus !== "ACTIVE") {
-      return { 
-        status: "ERR", 
-        message: `Không thể tạo lô thu hoạch cho nhà cung cấp có trạng thái ${supplier.cooperationStatus}. Chỉ nhà cung cấp ACTIVE mới được phép.` 
+      return {
+        status: "ERR",
+        message: `Không thể tạo lô thu hoạch cho nhà cung cấp có trạng thái ${supplier.cooperationStatus}. Chỉ nhà cung cấp ACTIVE mới được phép.`
       };
     }
+
 
     // ✅ Validation: product phải có supplier trùng với supplierId
     if (!product.supplier || product.supplier.toString() !== supplierId) {
       return {
         status: "ERR",
-        message: `Sản phẩm "${product.name}" không thuộc nhà cung cấp "${supplier.name}". Vui lòng chọn đúng sản phẩm của nhà cung cấp này.`,
+        message: `Product "${product.name}" does not belong to supplier "${supplier.name}". Please choose a product from this supplier.`,
       };
     }
+
+    // ✅ Validation: cùng supplier + product + ngày thu hoạch thì batchNumber không được trùng
+    const harvestDateNormalized = new Date(harvestDate);
+    harvestDateNormalized.setHours(0, 0, 0, 0);
+    const batchNumberTrimmed = batchNumber.toString().trim();
+    const existingSameDay = await HarvestBatchModel.findOne({
+      supplier: new mongoose.Types.ObjectId(supplierId),
+      product: new mongoose.Types.ObjectId(productId),
+      batchNumber: batchNumberTrimmed,
+      harvestDate: { $gte: harvestDateNormalized, $lt: new Date(harvestDateNormalized.getTime() + 24 * 60 * 60 * 1000) },
+    });
+    if (existingSameDay) {
+      return {
+        status: "ERR",
+        message: `Số lô "${batchNumberTrimmed}" đã tồn tại cho sản phẩm này trong cùng ngày thu hoạch. Vui lòng chọn số lô khác.`,
+      };
+    }
+
 
     const harvestBatch = new HarvestBatchModel({
       supplier: new mongoose.Types.ObjectId(supplierId),
       product: new mongoose.Types.ObjectId(productId),
-      batchNumber: batchNumber.toString().trim(),
+      batchNumber: batchNumberTrimmed,
       harvestDate: new Date(harvestDate),
-      quantity: qty, // ✅ Mặc định tính theo kilogram (KG)
       location: location?.toString().trim() || "",
-      qualityGrade,
       notes: notes?.toString().trim() || "",
     });
 
+
     await harvestBatch.save();
+
 
     // Cập nhật thống kê supplier
     supplier.totalBatches = (supplier.totalBatches || 0) + 1;
     await supplier.save();
+
 
     const populated = await HarvestBatchModel.findById(harvestBatch._id)
       .populate("supplier", "name type")
       .populate("product", "name brand")
       .lean();
 
+
     return {
       status: "OK",
-      message: "Tạo lô thu hoạch thành công",
+      message: "Harvest batch created successfully",
       data: populated,
     };
   } catch (error) {
@@ -108,46 +133,72 @@ const createHarvestBatch = async (payload = {}) => {
   }
 };
 
+
 /**
  * Cập nhật lô thu hoạch (Admin)
  */
 const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
   try {
     if (!mongoose.isValidObjectId(harvestBatchId)) {
-      return { status: "ERR", message: "harvestBatchId không hợp lệ" };
+      return { status: "ERR", message: "Invalid harvestBatchId" };
     }
+
 
     const harvestBatch = await HarvestBatchModel.findById(harvestBatchId);
     if (!harvestBatch) {
-      return { status: "ERR", message: "Lô thu hoạch không tồn tại" };
+      return { status: "ERR", message: "Harvest batch does not exist" };
     }
+
 
     // Không cho sửa nếu đã nhập kho (receivedQuantity > 0)
     if (harvestBatch.receivedQuantity > 0) {
       return {
         status: "ERR",
-        message: "Không thể chỉnh sửa lô thu hoạch đã được nhập kho (receivedQuantity > 0)",
+        message: "Cannot edit a harvest batch that has already been received (receivedQuantity > 0)",
       };
     }
 
+
     // Whitelist fields có thể sửa
-    const allowed = ["batchNumber", "harvestDate", "quantity", "location", "qualityGrade", "notes"];
+    const allowed = ["batchNumber", "harvestDate", "location", "notes", "receiptEligible", "visibleInReceipt"];
     for (const key of Object.keys(payload)) {
       if (!allowed.includes(key)) delete payload[key];
     }
 
+
     const changes = new Map();
+
 
     if (payload.batchNumber !== undefined) {
       const newBatchNumber = payload.batchNumber?.toString().trim() || "";
       if (!newBatchNumber) {
-        return { status: "ERR", message: "Số lô thu hoạch không được để trống" };
+        return { status: "ERR", message: "Batch number cannot be empty" };
       }
       if (harvestBatch.batchNumber !== newBatchNumber) {
+        // ✅ Validation: cùng supplier + product + ngày thu hoạch thì batchNumber không được trùng
+        const harvestDateNorm = harvestBatch.harvestDate ? new Date(harvestBatch.harvestDate) : null;
+        if (harvestDateNorm) {
+          harvestDateNorm.setHours(0, 0, 0, 0);
+          const endOfDay = new Date(harvestDateNorm.getTime() + 24 * 60 * 60 * 1000);
+          const existingSameDay = await HarvestBatchModel.findOne({
+            supplier: harvestBatch.supplier,
+            product: harvestBatch.product,
+            batchNumber: newBatchNumber,
+            harvestDate: { $gte: harvestDateNorm, $lt: endOfDay },
+            _id: { $ne: harvestBatchId },
+          });
+          if (existingSameDay) {
+            return {
+              status: "ERR",
+              message: `Số lô "${newBatchNumber}" đã tồn tại cho sản phẩm này trong cùng ngày thu hoạch. Vui lòng chọn số lô khác.`,
+            };
+          }
+        }
         changes.set("batchNumber", { old: harvestBatch.batchNumber, new: newBatchNumber });
         harvestBatch.batchNumber = newBatchNumber;
       }
     }
+
 
     if (payload.harvestDate !== undefined) {
       const harvestDateObj = new Date(payload.harvestDate);
@@ -155,27 +206,15 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       if (harvestDateObj > today) {
-        return { status: "ERR", message: "Ngày thu hoạch không được lớn hơn ngày hiện tại" };
+        return {
+          status: "ERR",
+          message: "Harvest date cannot be later than today",
+        };
       }
       changes.set("harvestDate", { old: harvestBatch.harvestDate, new: harvestDateObj });
       harvestBatch.harvestDate = harvestDateObj;
     }
 
-    if (payload.quantity !== undefined) {
-      const qty = Number(payload.quantity);
-      if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
-        return { status: "ERR", message: "Số lượng phải là số nguyên lớn hơn 0" };
-      }
-      // Không cho giảm quantity nếu đã nhập kho
-      if (qty < harvestBatch.receivedQuantity) {
-        return {
-          status: "ERR",
-          message: `Không thể giảm quantity xuống ${qty} vì đã nhập ${harvestBatch.receivedQuantity}`,
-        };
-      }
-      changes.set("quantity", { old: harvestBatch.quantity, new: qty });
-      harvestBatch.quantity = qty;
-    }
 
     if (payload.location !== undefined) {
       const newLocation = payload.location?.toString().trim() || "";
@@ -184,17 +223,6 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
         harvestBatch.location = newLocation;
       }
     }
-
-    if (payload.qualityGrade !== undefined) {
-      if (!["A", "B", "C", "D"].includes(payload.qualityGrade)) {
-        return { status: "ERR", message: "qualityGrade phải là A, B, C hoặc D" };
-      }
-      if (harvestBatch.qualityGrade !== payload.qualityGrade) {
-        changes.set("qualityGrade", { old: harvestBatch.qualityGrade, new: payload.qualityGrade });
-        harvestBatch.qualityGrade = payload.qualityGrade;
-      }
-    }
-
     if (payload.notes !== undefined) {
       const newNotes = payload.notes?.toString().trim() || "";
       if (harvestBatch.notes !== newNotes) {
@@ -202,17 +230,24 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
         harvestBatch.notes = newNotes;
       }
     }
-
+    if (payload.receiptEligible !== undefined) {
+      harvestBatch.receiptEligible = payload.receiptEligible === true || payload.receiptEligible === "true";
+    }
+    if (payload.visibleInReceipt !== undefined) {
+      harvestBatch.visibleInReceipt = payload.visibleInReceipt === true || payload.visibleInReceipt === "true";
+    }
     await harvestBatch.save();
+
 
     const populated = await HarvestBatchModel.findById(harvestBatch._id)
       .populate("supplier", "name type")
       .populate("product", "name brand")
       .lean();
 
+
     return {
       status: "OK",
-      message: "Cập nhật lô thu hoạch thành công",
+      message: "Harvest batch updated successfully",
       data: populated,
     };
   } catch (error) {
@@ -220,30 +255,35 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
   }
 };
 
+
 /**
  * Xóa lô thu hoạch (Admin)
  */
 const deleteHarvestBatch = async (harvestBatchId) => {
   try {
     if (!mongoose.isValidObjectId(harvestBatchId)) {
-      return { status: "ERR", message: "harvestBatchId không hợp lệ" };
+      return { status: "ERR", message: "Invalid harvestBatchId" };
     }
+
 
     const harvestBatch = await HarvestBatchModel.findById(harvestBatchId);
     if (!harvestBatch) {
-      return { status: "ERR", message: "Lô thu hoạch không tồn tại" };
+      return { status: "ERR", message: "Harvest batch does not exist" };
     }
+
 
     // Không cho xóa nếu đã nhập kho
     if (harvestBatch.receivedQuantity > 0) {
       return {
         status: "ERR",
-        message: "Không thể xóa lô thu hoạch đã được nhập kho (receivedQuantity > 0)",
+        message: "Cannot delete a harvest batch that has already been received (receivedQuantity > 0)",
       };
     }
 
+
     const supplierId = harvestBatch.supplier;
     await harvestBatch.deleteOne();
+
 
     // Cập nhật thống kê supplier
     const supplier = await SupplierModel.findById(supplierId);
@@ -252,14 +292,16 @@ const deleteHarvestBatch = async (harvestBatchId) => {
       await supplier.save();
     }
 
+
     return {
       status: "OK",
-      message: "Xóa lô thu hoạch thành công",
+      message: "Harvest batch deleted successfully",
     };
   } catch (error) {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 /**
  * Lấy danh sách lô thu hoạch (Admin)
@@ -272,9 +314,6 @@ const getHarvestBatches = async (filters = {}) => {
       search = "",
       supplierId,
       productId,
-      qualityGrade,
-      minQuantity,
-      maxQuantity,
       minReceivedQuantity,
       maxReceivedQuantity,
       harvestDateFrom,
@@ -284,15 +323,20 @@ const getHarvestBatches = async (filters = {}) => {
       updatedFrom,
       updatedTo,
       hasInventoryTransactions,
+      receiptEligible,
+      visibleInReceipt,
       sortBy = "createdAt",
       sortOrder = "desc",
     } = filters;
+
 
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
 
+
     const query = {};
+
 
     // Search
     const searchValue = search?.toString().trim();
@@ -307,32 +351,16 @@ const getHarvestBatches = async (filters = {}) => {
       ];
     }
 
+
     // Filter
     if (supplierId && mongoose.isValidObjectId(supplierId)) {
       query.supplier = new mongoose.Types.ObjectId(supplierId);
     }
 
+
     if (productId && mongoose.isValidObjectId(productId)) {
       query.product = new mongoose.Types.ObjectId(productId);
     }
-
-    if (qualityGrade && ["A", "B", "C", "D"].includes(qualityGrade)) {
-      query.qualityGrade = qualityGrade;
-    }
-
-    if (minQuantity !== undefined || maxQuantity !== undefined) {
-      query.quantity = {};
-      if (minQuantity !== undefined && !Number.isNaN(Number(minQuantity))) {
-        query.quantity.$gte = Number(minQuantity);
-      }
-      if (maxQuantity !== undefined && !Number.isNaN(Number(maxQuantity))) {
-        query.quantity.$lte = Number(maxQuantity);
-      }
-      if (Object.keys(query.quantity).length === 0) {
-        delete query.quantity;
-      }
-    }
-
     if (minReceivedQuantity !== undefined || maxReceivedQuantity !== undefined) {
       query.receivedQuantity = {};
       if (minReceivedQuantity !== undefined && !Number.isNaN(Number(minReceivedQuantity))) {
@@ -345,6 +373,7 @@ const getHarvestBatches = async (filters = {}) => {
         delete query.receivedQuantity;
       }
     }
+
 
     if (harvestDateFrom || harvestDateTo) {
       const range = {};
@@ -367,6 +396,7 @@ const getHarvestBatches = async (filters = {}) => {
       }
     }
 
+
     if (createdFrom || createdTo) {
       const range = {};
       if (createdFrom) {
@@ -387,6 +417,7 @@ const getHarvestBatches = async (filters = {}) => {
         query.createdAt = range;
       }
     }
+
 
     if (updatedFrom || updatedTo) {
       const range = {};
@@ -409,25 +440,34 @@ const getHarvestBatches = async (filters = {}) => {
       }
     }
 
+
     if (hasInventoryTransactions !== undefined) {
       const hasTx = hasInventoryTransactions === "true" || hasInventoryTransactions === true;
       query.inventoryTransactionIds = hasTx ? { $exists: true, $ne: [] } : { $in: [null, []] };
     }
-
+    // Filter by receipt eligibility (only batches eligible for warehouse receipt)
+    if (receiptEligible !== undefined) {
+      query.receiptEligible = receiptEligible === "true" || receiptEligible === true;
+    }
+    // Filter by visibility in receipt selection (hide batches already used)
+    if (visibleInReceipt !== undefined) {
+      query.visibleInReceipt = visibleInReceipt === "true" || visibleInReceipt === true;
+    }
     // Sort
     const allowedSortFields = [
       "batchNumber",
       "batchCode",
       "harvestDate",
-      "quantity",
       "receivedQuantity",
-      "qualityGrade",
+      "receiptEligible",
+      "visibleInReceipt",
       "createdAt",
       "updatedAt",
     ];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
     const sortDirection = sortOrder === "asc" || sortOrder === "1" || sortOrder === 1 ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
+
 
     const [data, total] = await Promise.all([
       HarvestBatchModel.find(query)
@@ -440,9 +480,10 @@ const getHarvestBatches = async (filters = {}) => {
       HarvestBatchModel.countDocuments(query),
     ]);
 
+
     return {
       status: "OK",
-      message: "Lấy danh sách lô thu hoạch thành công",
+      message: "Fetched harvest batch list successfully",
       data,
       pagination: {
         page: pageNum,
@@ -456,33 +497,38 @@ const getHarvestBatches = async (filters = {}) => {
   }
 };
 
+
 /**
  * Lấy chi tiết lô thu hoạch
  */
 const getHarvestBatchById = async (harvestBatchId) => {
   try {
     if (!mongoose.isValidObjectId(harvestBatchId)) {
-      return { status: "ERR", message: "ID lô thu hoạch không hợp lệ" };
+      return { status: "ERR", message: "Invalid harvest batch ID" };
     }
+
 
     const harvestBatch = await HarvestBatchModel.findById(harvestBatchId)
       .populate("supplier", "name type cooperationStatus")
       .populate("product", "name brand")
       .lean();
 
+
     if (!harvestBatch) {
-      return { status: "ERR", message: "Lô thu hoạch không tồn tại" };
+      return { status: "ERR", message: "Harvest batch does not exist" };
     }
+
 
     return {
       status: "OK",
-      message: "Lấy chi tiết lô thu hoạch thành công",
+      message: "Fetched harvest batch details successfully",
       data: harvestBatch,
     };
   } catch (error) {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 module.exports = {
   createHarvestBatch,

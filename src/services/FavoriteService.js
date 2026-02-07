@@ -3,6 +3,7 @@ const FavoriteModel = require("../models/FavoriteModel");
 const ProductModel = require("../models/ProductModel");
 const CategoryModel = require("../models/CategoryModel");
 
+
 /**
  * Thêm sản phẩm vào danh sách yêu thích
  * @param {String} userId - User ID
@@ -12,8 +13,9 @@ const CategoryModel = require("../models/CategoryModel");
 const addFavorite = async (userId, productId) => {
   try {
     if (!mongoose.isValidObjectId(productId)) {
-      return { status: "ERR", message: "productId không hợp lệ" };
+      return { status: "ERR", message: "Invalid productId" };
     }
+
 
     // Kiểm tra sản phẩm có tồn tại và đang hoạt động không
     const product = await ProductModel.findById(productId)
@@ -24,17 +26,21 @@ const addFavorite = async (userId, productId) => {
       })
       .lean();
 
+
     if (!product) {
-      return { status: "ERR", message: "Sản phẩm không tồn tại" };
+      return { status: "ERR", message: "Product does not exist" };
     }
+
 
     if (product.status === false) {
-      return { status: "ERR", message: "Sản phẩm không tồn tại" };
+      return { status: "ERR", message: "Product does not exist" };
     }
 
+
     if (!product.category || product.category.status === false) {
-      return { status: "ERR", message: "Sản phẩm không tồn tại" };
+      return { status: "ERR", message: "Product does not exist" };
     }
+
 
     // Kiểm tra đã yêu thích chưa
     const existingFavorite = await FavoriteModel.findOne({
@@ -42,9 +48,11 @@ const addFavorite = async (userId, productId) => {
       product_id: new mongoose.Types.ObjectId(productId),
     });
 
+
     if (existingFavorite) {
-      return { status: "ERR", message: "Sản phẩm đã có trong danh sách yêu thích" };
+      return { status: "ERR", message: "Product is already in favorites" };
     }
+
 
     // Tạo favorite mới
     const favorite = await FavoriteModel.create({
@@ -52,19 +60,21 @@ const addFavorite = async (userId, productId) => {
       product_id: new mongoose.Types.ObjectId(productId),
     });
 
+
     return {
       status: "OK",
-      message: "Đã thêm sản phẩm vào danh sách yêu thích",
+      message: "Product added to favorites",
       data: favorite,
     };
   } catch (error) {
     // Handle duplicate key error (unique constraint)
     if (error.code === 11000) {
-      return { status: "ERR", message: "Sản phẩm đã có trong danh sách yêu thích" };
+      return { status: "ERR", message: "Product is already in favorites" };
     }
     return { status: "ERR", message: error.message };
   }
 };
+
 
 /**
  * Xóa sản phẩm khỏi danh sách yêu thích
@@ -75,26 +85,30 @@ const addFavorite = async (userId, productId) => {
 const removeFavorite = async (userId, productId) => {
   try {
     if (!mongoose.isValidObjectId(productId)) {
-      return { status: "ERR", message: "productId không hợp lệ" };
+      return { status: "ERR", message: "Invalid productId" };
     }
+
 
     const favorite = await FavoriteModel.findOneAndDelete({
       user_id: new mongoose.Types.ObjectId(userId),
       product_id: new mongoose.Types.ObjectId(productId),
     });
 
+
     if (!favorite) {
-      return { status: "ERR", message: "Sản phẩm không có trong danh sách yêu thích" };
+      return { status: "ERR", message: "Product is not in favorites" };
     }
+
 
     return {
       status: "OK",
-      message: "Đã xóa sản phẩm khỏi danh sách yêu thích",
+      message: "Product removed from favorites",
     };
   } catch (error) {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 /**
  * Kiểm tra sản phẩm có trong danh sách yêu thích không
@@ -105,17 +119,19 @@ const removeFavorite = async (userId, productId) => {
 const checkFavorite = async (userId, productId) => {
   try {
     if (!mongoose.isValidObjectId(productId)) {
-      return { status: "ERR", message: "productId không hợp lệ" };
+      return { status: "ERR", message: "Invalid productId" };
     }
+
 
     const favorite = await FavoriteModel.findOne({
       user_id: new mongoose.Types.ObjectId(userId),
       product_id: new mongoose.Types.ObjectId(productId),
     });
 
+
     return {
       status: "OK",
-      message: "Kiểm tra thành công",
+      message: "Check completed successfully",
       data: {
         isFavorite: !!favorite,
       },
@@ -124,6 +140,7 @@ const checkFavorite = async (userId, productId) => {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 /**
  * Lấy danh sách sản phẩm yêu thích (có search, sort, filter, pagination)
@@ -142,24 +159,28 @@ const getFavorites = async (userId, filters = {}) => {
       sortOrder = "desc",
     } = filters;
 
+
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 12));
     const skip = (pageNum - 1) * limitNum;
+
 
     // Base query: Tìm tất cả favorites của user này
     const favoriteQuery = {
       user_id: new mongoose.Types.ObjectId(userId),
     };
 
+
     // Lấy danh sách product IDs từ favorites
     const favorites = await FavoriteModel.find(favoriteQuery)
       .select("product_id createdAt")
       .lean();
 
+
     if (favorites.length === 0) {
       return {
         status: "OK",
-        message: "Lấy danh sách sản phẩm yêu thích thành công",
+        message: "Fetched favorite products successfully",
         data: [],
         pagination: {
           page: pageNum,
@@ -170,7 +191,9 @@ const getFavorites = async (userId, filters = {}) => {
       };
     }
 
+
     const productIds = favorites.map((fav) => fav.product_id);
+
 
     // Build product query
     const productQuery = {
@@ -178,17 +201,19 @@ const getFavorites = async (userId, filters = {}) => {
       status: true, // Chỉ lấy sản phẩm đang hoạt động
     };
 
+
     // Search theo tên
     if (search) {
       productQuery.name = { $regex: search, $options: "i" };
     }
+
 
     // Filter theo category
     if (category) {
       if (!mongoose.Types.ObjectId.isValid(category)) {
         return {
           status: "OK",
-          message: "Lấy danh sách sản phẩm yêu thích thành công",
+          message: "Fetched favorite products successfully",
           data: [],
           pagination: {
             page: pageNum,
@@ -198,6 +223,7 @@ const getFavorites = async (userId, filters = {}) => {
           },
         };
       }
+
 
       const categoryDoc = await CategoryModel.findById(category);
       if (categoryDoc && categoryDoc.status === true) {
@@ -205,7 +231,7 @@ const getFavorites = async (userId, filters = {}) => {
       } else {
         return {
           status: "OK",
-          message: "Lấy danh sách sản phẩm yêu thích thành công",
+          message: "Fetched favorite products successfully",
           data: [],
           pagination: {
             page: pageNum,
@@ -217,10 +243,12 @@ const getFavorites = async (userId, filters = {}) => {
       }
     }
 
+
     // Sort options
     const allowedSortFields = ["name", "price", "createdAt", "updatedAt"];
     let sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
     let sortDirection = sortOrder === "asc" ? 1 : -1;
+
 
     // Xử lý sort đặc biệt
     let sortObj = {};
@@ -229,6 +257,7 @@ const getFavorites = async (userId, filters = {}) => {
     } else {
       sortObj = { [sortField]: sortDirection };
     }
+
 
     // Sử dụng aggregation để lọc category và giữ nguyên thứ tự yêu thích
     const pipeline = [
@@ -284,6 +313,7 @@ const getFavorites = async (userId, filters = {}) => {
       },
     ];
 
+
     // Thêm field nameLower nếu sort theo name
     if (sortBy === "name") {
       pipeline.push({
@@ -292,6 +322,7 @@ const getFavorites = async (userId, filters = {}) => {
         },
       });
     }
+
 
     // Sort: Ưu tiên sort theo favoritedAt nếu sortBy = "createdAt", ngược lại sort theo field được chọn
     if (sortBy === "createdAt") {
@@ -304,6 +335,7 @@ const getFavorites = async (userId, filters = {}) => {
       });
     }
 
+
     // Facet để pagination
     pipeline.push({
       $facet: {
@@ -312,9 +344,11 @@ const getFavorites = async (userId, filters = {}) => {
       },
     });
 
+
     const result = await ProductModel.aggregate(pipeline);
     const data = result[0]?.data || [];
     const total = result[0]?.total[0]?.count || 0;
+
 
     // Format category info và chỉ lấy ảnh đầu tiên cho list view
     const formattedProducts = data.map((product) => {
@@ -331,6 +365,7 @@ const getFavorites = async (userId, filters = {}) => {
       delete formatted.categoryInfo;
       delete formatted.favoriteInfo;
 
+
       // Chỉ lấy ảnh đầu tiên
       if (Array.isArray(product.images) && product.images.length > 0) {
         formatted.featuredImage = product.images[0];
@@ -338,17 +373,20 @@ const getFavorites = async (userId, filters = {}) => {
         formatted.featuredImage = null;
       }
 
+
       // Xóa field nameLower nếu có
       if (formatted.nameLower) {
         delete formatted.nameLower;
       }
 
+
       return formatted;
     });
 
+
     return {
       status: "OK",
-      message: "Lấy danh sách sản phẩm yêu thích thành công",
+      message: "Fetched favorite products successfully",
       data: formattedProducts,
       pagination: {
         page: pageNum,
@@ -361,6 +399,7 @@ const getFavorites = async (userId, filters = {}) => {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 module.exports = {
   addFavorite,
