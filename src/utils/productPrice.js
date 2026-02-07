@@ -28,8 +28,11 @@ const getEffectivePrice = (product, referenceDate) => {
   const expiryDate = product?.expiryDate ?? null;
   const expiry = expiryStr || expiryDate;
   const daysUntil = getDaysUntilExpiry(expiry, refDate);
+  const nearExpiryDaysThreshold = Number(product?.nearExpiryDaysThreshold) ?? 7;
+  const nearExpiryDiscountPercent = Number(product?.nearExpiryDiscountPercent) ?? 0;
+  const isNearExpiry = daysUntil != null && daysUntil >= 0 && daysUntil <= nearExpiryDaysThreshold;
   const effectivePrice = isNearExpiry
-    ? Math.round(originalPrice * (1 - discountPercent / 100) * 100) / 100
+    ? Math.round(originalPrice * (1 - nearExpiryDiscountPercent / 100) * 100) / 100
     : originalPrice;
   return {
     effectivePrice,

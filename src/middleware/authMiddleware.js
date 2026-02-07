@@ -264,6 +264,10 @@ const authAdminOrSalesStaffForOrderMiddleware = async (req, res, next) => {
             });
         }
 
+        const token = authHeader.split(" ")[1];
+        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        const user = await UserModel.findById(decoded._id).populate("role_id", "name");
+
         if (!user) {
             return res.status(404).json({
                 status: "ERR",
