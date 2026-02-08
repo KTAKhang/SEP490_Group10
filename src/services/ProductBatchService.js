@@ -526,7 +526,7 @@ const getProductBatchHistory = async (productId, filters = {}) => {
           displayReason = "SOLD_OUT";
         }
       }
-      const completionReasonLabel = displayReason === "EXPIRED" ? "Hết hạn" : "Bán hết";
+      const completionReasonLabel = displayReason === "EXPIRED" ? "Expired" : "Sold out";
       // Chỉ số tài chính (đồng bộ với thuật ngữ báo cáo kinh doanh)
       const totalCostPrice = received * unitCost; // Tổng vốn nhập
       const cogs = sold * unitCost; // Giá vốn hàng bán (Cost of Goods Sold)
@@ -598,7 +598,7 @@ const autoResetSoldOutProductsCatchUp = async () => {
     if (soldOutNotReset.length === 0) {
       return {
         status: "OK",
-        message: "Không có sản phẩm bán hết cần chốt lô",
+        message: "No sold-out products require batch closure",
         data: { resetCount: 0, resetProducts: [] },
       };
     }
@@ -621,7 +621,7 @@ const autoResetSoldOutProductsCatchUp = async () => {
 
     return {
       status: "OK",
-      message: `Đã chốt lô ${resetResults.length} sản phẩm bán hết (catch-up)`,
+      message: `Batch closure completed for ${resetResults.length} sold-out products (catch-up)`,
       data: {
         resetCount: resetResults.length,
         resetProducts: resetResults,

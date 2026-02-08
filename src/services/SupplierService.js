@@ -462,7 +462,7 @@ const deleteSupplier = async (supplierId, userId) => {
     if (productsCount > 0) {
       return {
         status: "ERR",
-        message: `Không thể xóa nhà cung cấp vì đang có ${productsCount} sản phẩm đang sử dụng nhà cung cấp này. Vui lòng gỡ liên kết sản phẩm trước.`,
+        message: `Cannot delete supplier. There are ${productsCount} products using this supplier. Please unlink the products first.`,
       };
     }
 
@@ -472,7 +472,7 @@ const deleteSupplier = async (supplierId, userId) => {
     if (harvestBatchesCount > 0) {
       return {
         status: "ERR",
-        message: `Không thể xóa nhà cung cấp vì đang có ${harvestBatchesCount} lô thu hoạch. Vui lòng xóa các lô thu hoạch trước.`,
+        message: `Cannot delete supplier. There are ${harvestBatchesCount} harvest batches. Please delete the harvest batches first.`,
       };
     }
 

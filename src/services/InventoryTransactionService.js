@@ -79,7 +79,7 @@ const createReceipt = async (userId, payload = {}) => {
         const minDateStr = formatDateVN(minDate);
         return {
           status: "ERR",
-          message: `Hạn sử dụng phải tối thiểu từ ngày ${minDateStr} (ngày mai theo timezone Asia/Ho_Chi_Minh)`
+          message: `Expiry date must be at least ${minDateStr} (tomorrow in Asia/Ho_Chi_Minh timezone)`
         };
       }
     } catch (err) {
@@ -499,7 +499,7 @@ const createIssue = async (userId, payload = {}) => {
       data: {
         transaction: populatedTx,
         product: updatedProduct,
-        markedForReset: markResult?.data || null, // Thông tin đánh dấu reset nếu có
+        markedForReset: resetResult?.data || null,
       },
     };
   } catch (error) {
