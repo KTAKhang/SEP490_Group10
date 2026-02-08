@@ -82,6 +82,9 @@ const userSchema = new mongoose.Schema(
       //   return !this.isGoogleAccount;
       // },
     },
+    // For scalable birthday voucher cron: query by day+month without full scan
+    birthdayMonth: { type: Number, min: 1, max: 12, default: null },
+    birthdayDay: { type: Number, min: 1, max: 31, default: null },
     gender: {
       type: String,
       enum: ["male", "female", "other"],
@@ -101,5 +104,6 @@ const userSchema = new mongoose.Schema(
   },
 );
 
+userSchema.index({ birthdayMonth: 1, birthdayDay: 1 });
 const UserModel = mongoose.model("users", userSchema);
 module.exports = UserModel;

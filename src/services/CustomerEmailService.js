@@ -416,7 +416,61 @@ Smart Fruit Shop
             console.error("PreOrder delayed email error:", error);
             return { status: "ERR", message: `Failed to send email: ${error.message}` };
         }
-    }
+    },
+
+    /**
+     * Send birthday voucher notification email.
+     * @param {String} customerEmail
+     * @param {String} customerName
+     * @param {String} code - Personal discount code
+     */
+    async sendBirthdayVoucherEmail(customerEmail, customerName, code) {
+        try {
+            const transporter = createTransporter();
+            const mailOptions = {
+                from: {
+                    name: "Smart Fruit Shop",
+                    address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn",
+                },
+                to: customerEmail,
+                subject: "Happy Birthday! Your personal discount code – Smart Fruit Shop",
+                html: `
+                    <!DOCTYPE html>
+                    <html lang="en">
+                    <head>
+                        <meta charset="UTF-8">
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                        <style>
+                            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+                            .container { background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 8px; padding: 30px; }
+                            .header { background-color: #e91e63; color: white; padding: 15px; border-radius: 8px 8px 0 0; text-align: center; margin: -30px -30px 20px -30px; }
+                            .code { font-size: 1.25rem; font-weight: bold; letter-spacing: 2px; padding: 12px; background: #fff3e0; border-radius: 6px; margin: 16px 0; }
+                            .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; font-size: 14px; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="header"><h2>Happy Birthday!</h2></div>
+                            <p>Hello <strong>${customerName || "Customer"}</strong>,</p>
+                            <p>Here is your personal discount code:</p>
+                            <p class="code">${code}</p>
+                            <p>Use it at checkout before it expires. Thank you for being with us!</p>
+                            <div class="footer">
+                                <p>Sincerely,<br><strong>Smart Fruit Shop</strong></p>
+                            </div>
+                        </div>
+                    </body>
+                    </html>
+                `,
+                text: `Happy Birthday! Here is your personal discount code: ${code}. Use it at checkout before it expires. – Smart Fruit Shop`,
+            };
+            const info = await transporter.sendMail(mailOptions);
+            return { status: "OK", message: "Email sent successfully", messageId: info.messageId };
+        } catch (error) {
+            console.error("Birthday voucher email error:", error);
+            return { status: "ERR", message: `Failed to send email: ${error.message}` };
+        }
+    },
 };
 
 

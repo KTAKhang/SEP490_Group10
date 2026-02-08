@@ -6,6 +6,7 @@ const routes = require("./routes");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const { startProductBatchJob } = require("./jobs/productBatchJob");
+const { startBirthdayVoucherJob } = require("./jobs/birthdayVoucherJob");
 
 // 👉 SOCKET
 const http = require("http");
@@ -86,4 +87,5 @@ server.listen(port, "0.0.0.0", () => {
 
   // ✅ Start scheduled jobs
   startProductBatchJob();
+  startBirthdayVoucherJob();
 });

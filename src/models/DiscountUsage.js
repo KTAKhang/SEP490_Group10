@@ -58,6 +58,7 @@ discountUsageSchema.index(
     { userId: 1, discountId: 1 },
     { unique: true }
 );
+discountUsageSchema.index({ usedAt: 1 });
 
 const DiscountUsageModel = mongoose.model("discount_usages", discountUsageSchema);
 module.exports = DiscountUsageModel;

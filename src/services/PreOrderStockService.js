@@ -1,4 +1,5 @@
 /**
+ * author: KhoaNDCE170420
  * Pre-order Stock Service
  *
  * Total received across ALL batches MUST NOT exceed total demand.
@@ -101,9 +102,12 @@ async function createReceive({ fruitTypeId, quantityKg, receivedBy, confirmed, n
   const demandKg = await getDemandKgForFruitType(fruitTypeId);
   const stock = await PreOrderStockModel.findOne({ fruitTypeId }).lean();
   const totalReceived = stock?.receivedKg ?? 0;
-  const remainingToReceive = Math.max(0, demandKg - totalReceived);
+  const allocatedKg = await getAllocatedKgForFruitType(fruitTypeId);
+  const availableKg = Math.max(0, totalReceived - allocatedKg);
+  const doneReceiving = totalReceived >= allocatedKg && demandKg <= allocatedKg;
+  const remainingToReceive = doneReceiving ? 0 : Math.max(0, demandKg - availableKg);
   if (qty > remainingToReceive) {
-    throw new Error(`Receive quantity (${qty} kg) exceeds remaining demand (${remainingToReceive} kg). Total demand: ${demandKg} kg, already received: ${totalReceived} kg.`);
+    throw new Error(`Receive quantity (${qty} kg) exceeds remaining to receive (${remainingToReceive} kg). Demand: ${demandKg} kg, available: ${availableKg} kg, already received: ${totalReceived} kg.`);
   }
 
   const [receive] = await Promise.all([
@@ -159,9 +163,12 @@ async function createReceiveByBatch({ preOrderHarvestBatchId, quantityKg, receiv
   const demandKg = await getDemandKgForFruitType(fruitTypeId);
   const stockDoc = await PreOrderStockModel.findOne({ fruitTypeId }).lean();
   const totalReceived = stockDoc?.receivedKg ?? 0;
-  const remainingToReceive = Math.max(0, demandKg - totalReceived);
+  const allocatedKg = await getAllocatedKgForFruitType(fruitTypeId);
+  const availableKg = Math.max(0, totalReceived - allocatedKg);
+  const doneReceiving = totalReceived >= allocatedKg && demandKg <= allocatedKg;
+  const remainingToReceive = doneReceiving ? 0 : Math.max(0, demandKg - availableKg);
   if (qty > remainingToReceive) {
-    throw new Error(`Receive quantity (${qty} kg) exceeds remaining demand (${remainingToReceive} kg). Total demand: ${demandKg} kg, already received: ${totalReceived} kg.`);
+    throw new Error(`Receive quantity (${qty} kg) exceeds remaining to receive (${remainingToReceive} kg). Demand: ${demandKg} kg, available: ${availableKg} kg, already received: ${totalReceived} kg.`);
   }
 
   const receive = await PreOrderReceiveModel.create({
