@@ -62,13 +62,13 @@ const checkSpamLimit = async (userId, newsId) => {
 
 /**
  * BR-COMMENT-05: Kiểm tra độ sâu comment
- * 
- * Chỉ cho phép tối đa 2 cấp:
- * - Cấp 1: Comment gốc (parent_id = null)
- * - Cấp 2: Reply comment (parent_id != null)
- * 
- * Không cho phép reply vào comment cấp 2
- * 
+ *
+ * Cho phép tối đa 5 cấp:
+ * - Cấp 1: Comment gốc (parent_id = null, depth = 0)
+ * - Cấp 2–5: Reply lồng nhau (depth = 1, 2, 3, 4)
+ *
+ * Không cho phép reply vào comment cấp 5 (depth = 4).
+ *
  * @param {string} parentId - ID của comment cha
  * @returns {Promise<object>} - { valid: boolean, message?: string }
  */
@@ -82,11 +82,22 @@ const checkCommentDepth = async (parentId) => {
     return { valid: false, message: "Comment cha không tồn tại" };
   }
 
-  // Nếu parent có parent_id (tức là đã là cấp 2), không cho phép reply
-  if (parentComment.parent_id) {
+  // Tính độ sâu: đi ngược parent_id đến khi gặp null (depth 0 = cấp 1, depth 4 = cấp 5)
+  let depth = 0;
+  let current = parentComment;
+  while (current.parent_id) {
+    depth += 1;
+    current = await NewsCommentModel.findById(current.parent_id);
+    if (!current) {
+      return { valid: false, message: "Comment cha không tồn tại" };
+    }
+  }
+
+  // Không cho reply khi comment cha đã ở cấp 5 (depth = 4)
+  if (depth >= 4) {
     return {
       valid: false,
-      message: "Không thể reply vào comment cấp 2. Hệ thống chỉ hỗ trợ tối đa 2 cấp comment",
+      message: "Không thể reply vào comment cấp 5. Hệ thống chỉ hỗ trợ tối đa 5 cấp comment",
     };
   }
 
@@ -122,7 +133,7 @@ const checkCommentDepth = async (parentId) => {
  * - Kiểm tra comment cha tồn tại
  * - Kiểm tra comment cha thuộc cùng bài viết
  * - Kiểm tra comment cha không có status = DELETED
- * - Kiểm tra độ sâu comment (tối đa 2 cấp)
+ * - Kiểm tra độ sâu comment (tối đa 5 cấp)
  * 
  * BƯỚC 6: Chống spam (BR-COMMENT-06)
  * - Kiểm tra user đã tạo quá 2 comment trong 1 phút cho bài viết này chưa
@@ -156,9 +167,12 @@ const createComment = async (payload = {}) => {
       return { status: "ERR", message: contentValidation.message };
     }
 
-    // Kiểm tra bài viết tồn tại và đã PUBLISHED
+    // Kiểm tra bài viết tồn tại và đã PUBLISHED (không xóa mềm)
     const news = await NewsModel.findById(news_id);
     if (!news) {
+      return { status: "ERR", message: "Bài viết không tồn tại" };
+    }
+    if (news.deleted_at) {
       return { status: "ERR", message: "Bài viết không tồn tại" };
     }
     if (news.status !== "PUBLISHED") {
@@ -265,9 +279,12 @@ const createComment = async (payload = {}) => {
  */
 const getComments = async (newsId, parentId = null, isAdmin = false, userId = null) => {
   try {
-    // Kiểm tra bài viết tồn tại
+    // Kiểm tra bài viết tồn tại và chưa bị xóa mềm
     const news = await NewsModel.findById(newsId);
     if (!news) {
+      return { status: "ERR", message: "Bài viết không tồn tại" };
+    }
+    if (news.deleted_at) {
       return { status: "ERR", message: "Bài viết không tồn tại" };
     }
 

@@ -56,12 +56,24 @@ const newsSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    deleted_at: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    deleted_by: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+      default: null,
+    },
   },
   { timestamps: true }
 );
 
 // Index for trending query
 newsSchema.index({ status: 1, published_at: -1, view_count: -1 });
+// Index for soft delete: exclude deleted in list/featured
+newsSchema.index({ deleted_at: 1 });
 
 // Auto-generate excerpt from content if not provided
 newsSchema.pre("save", function (next) {
