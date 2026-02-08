@@ -157,30 +157,40 @@ const vnpayReturn = async (req, res) => {
     /* =======================
        PRE-ORDER: intent id as vnp_TxnRef
     ======================= */
-    const preOrderIntent = await PreOrderPaymentIntentModel.findById(orderIdStr).session(session);
+    const preOrderIntent =
+      await PreOrderPaymentIntentModel.findById(orderIdStr).session(session);
     if (preOrderIntent) {
       if (responseCode === "00") {
         await PreOrderService.fulfillPaymentIntent(orderIdStr, session);
         await session.commitTransaction();
-        return res.redirect("http://localhost:5173/customer/preorder-payment-result?status=success");
+        return res.redirect(
+          "http://localhost:5173/customer/preorder-payment-result?status=success",
+        );
       }
       preOrderIntent.status = "FAILED";
       await preOrderIntent.save({ session });
       await session.commitTransaction();
-      return res.redirect("http://localhost:5173/customer/preorder-payment-result?status=failed");
+      return res.redirect(
+        "http://localhost:5173/customer/preorder-payment-result?status=failed",
+      );
     }
 
-    const remainingIntent = await PreOrderRemainingPaymentModel.findById(orderIdStr).session(session);
+    const remainingIntent =
+      await PreOrderRemainingPaymentModel.findById(orderIdStr).session(session);
     if (remainingIntent) {
       if (responseCode === "00") {
         await PreOrderService.fulfillRemainingPayment(orderIdStr, session);
         await session.commitTransaction();
-        return res.redirect("http://localhost:5173/customer/my-pre-orders?remaining=success");
+        return res.redirect(
+          "http://localhost:5173/customer/my-pre-orders?remaining=success",
+        );
       }
       remainingIntent.status = "FAILED";
       await remainingIntent.save({ session });
       await session.commitTransaction();
-      return res.redirect("http://localhost:5173/customer/my-pre-orders?remaining=failed");
+      return res.redirect(
+        "http://localhost:5173/customer/my-pre-orders?remaining=failed",
+      );
     }
 
     const orderId = new mongoose.Types.ObjectId(orderIdStr);
@@ -239,14 +249,6 @@ const vnpayReturn = async (req, res) => {
       throw new Error("PAID status not found");
     }
 
-    const paidNoStockStatus = await OrderStatusModel.findOne({
-      name: "PAID_NO_STOCK",
-    }).session(session);
-
-    if (!paidNoStockStatus) {
-      throw new Error("PAID_NO_STOCK status not found");
-    }
-
     /* =======================
        🔒 ANTI-REPLAY #3
        ORDER PAID
@@ -283,6 +285,35 @@ const vnpayReturn = async (req, res) => {
       await order.save({ session });
 
       await session.commitTransaction();
+
+      try {
+        await NotificationService.sendToUser(order.user_id.toString(), {
+          title: "VNPay payment successfull",
+          body: `Payment successfull for order ${orderId}. Go to Order History to check your order`,
+          data: {
+            type: "order",
+            orderId: orderId.toString(),
+            action: "retry_payment",
+          },
+        });
+      } catch (notifErr) {
+        console.error("Failed to send payment failure notification:", notifErr);
+      }
+
+      try {
+        const user = await UserModel.findById(order.user_id)
+          .select("email user_name")
+          .lean();
+        if (user && user.email) {
+          await CustomerEmailService.sendPaymentFailureEmail(
+            user.email,
+            user.user_name || "Customer",
+            orderId.toString(),
+          );
+        }
+      } catch (emailErr) {
+        console.error("Failed to send payment failure email:", emailErr);
+      }
 
       return res.redirect(
         `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
@@ -326,7 +357,7 @@ const vnpayReturn = async (req, res) => {
     try {
       await NotificationService.sendToUser(order.user_id.toString(), {
         title: "VNPay payment failed",
-        body: `Thanh toán thất bại cho đơn hàng ${orderId}. Go to Order History to re-pay in 10 minutes`,
+        body: `Payment failed for order ${orderId}. Go to Order History to re-pay in 10 minutes`,
         data: {
           type: "order",
           orderId: orderId.toString(),

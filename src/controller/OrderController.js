@@ -140,11 +140,10 @@ const cancelOrder = async (req, res) => {
     const order_id = req.params.id;
     const user_id = req.user._id;
 
-
-    if (req.user.role !== "customer") {
+    if (req.user.role_id.name !== "customer") {
       return res.status(403).json({
         success: false,
-        message: "Chỉ customer mới được hủy đơn",
+        message: "Only customers can cancel orders.",
       });
     }
 
@@ -154,13 +153,13 @@ const cancelOrder = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Hủy đơn hàng thành công",
+      message: "Order cancelled successfully.",
       ...result,
     });
   } catch (error) {
     return res.status(400).json({
       success: false,
-      message: error.message || "Hủy đơn hàng thất bại",
+      message: error.message || "Order cancellation failed.",
     });
   }
 };
@@ -172,7 +171,7 @@ const retryVnpayPayment = async (req, res) => {
     if (!order_id) {
       return res.status(400).json({
         success: false,
-        message: "Thiếu order_id",
+        message: "Missing order_id",
       });
     }
     const result = await OrderService.retryVnpayPayment({
