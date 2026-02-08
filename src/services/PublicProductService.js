@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const ProductModel = require("../models/ProductModel");
 const CategoryModel = require("../models/CategoryModel");
 const InventoryTransactionModel = require("../models/InventoryTransactionModel");
+const { getEffectivePrice } = require("../utils/productPrice");
 
 // Lấy 6 sản phẩm nổi bật (bán được nhiều nhất)
 const getFeaturedProducts = async () => {
@@ -84,9 +85,10 @@ const getFeaturedProducts = async () => {
     // Chỉ lấy 6 sản phẩm đầu tiên
     const finalProducts = sortedProducts.slice(0, 6);
 
-    // Format: Chỉ lấy ảnh đầu tiên cho featured products
+    // Format: Chỉ lấy ảnh đầu tiên + giá hiệu lực (sắp hết hạn giảm 50%)
     const formattedProducts = finalProducts.map((product) => {
-      const formatted = { ...product };
+      const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
+      const formatted = { ...product, price: effectivePrice, effectivePrice, isNearExpiry, originalPrice };
       if (Array.isArray(product.images) && product.images.length > 0) {
         formatted.featuredImage = product.images[0];
       } else {
@@ -97,7 +99,7 @@ const getFeaturedProducts = async () => {
 
     return {
       status: "OK",
-      message: "Lấy danh sách sản phẩm nổi bật thành công",
+      message: "Fetched featured products successfully",
       data: formattedProducts,
     };
   } catch (error) {
@@ -127,7 +129,7 @@ const getProducts = async ({ page = 1, limit = 12, search = "", category, sortBy
       if (!mongoose.Types.ObjectId.isValid(category)) {
         return {
           status: "OK",
-          message: "Lấy danh sách sản phẩm thành công",
+          message: "Fetched product list successfully",
           data: [],
           pagination: {
             page: pageNum,
@@ -146,7 +148,7 @@ const getProducts = async ({ page = 1, limit = 12, search = "", category, sortBy
         // Nếu category không tồn tại hoặc đã bị ẩn, trả về danh sách rỗng
         return {
           status: "OK",
-          message: "Lấy danh sách sản phẩm thành công",
+          message: "Fetched product list successfully",
           data: [],
           pagination: {
             page: pageNum,
@@ -223,10 +225,15 @@ const getProducts = async ({ page = 1, limit = 12, search = "", category, sortBy
     const data = result[0]?.data || [];
     const total = result[0]?.total[0]?.count || 0;
 
-    // Format category info và chỉ lấy ảnh đầu tiên cho list view
+    // Format category info, giá hiệu lực (sắp hết hạn giảm 50%), và chỉ lấy ảnh đầu tiên cho list view
     const formattedProducts = data.map((product) => {
+      const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
       const formatted = {
         ...product,
+        price: effectivePrice,
+        effectivePrice,
+        isNearExpiry,
+        originalPrice,
         category: {
           _id: product.categoryInfo._id,
           name: product.categoryInfo.name,
@@ -253,7 +260,7 @@ const getProducts = async ({ page = 1, limit = 12, search = "", category, sortBy
 
     return {
       status: "OK",
-      message: "Lấy danh sách sản phẩm thành công",
+      message: "Fetched product list successfully",
       data: formattedProducts,
       pagination: {
         page: pageNum,
@@ -263,6 +270,7 @@ const getProducts = async ({ page = 1, limit = 12, search = "", category, sortBy
       },
     };
   } catch (error) {
+    console.error("[PublicProductService] getProducts error:", error.message, error.stack);
     return { status: "ERR", message: error.message };
   }
 };
@@ -272,7 +280,7 @@ const getProductById = async (id) => {
   try {
     // Validate ObjectId format
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return { status: "ERR", message: "ID sản phẩm không hợp lệ" };
+      return { status: "ERR", message: "Invalid product ID" };
     }
 
     const product = await ProductModel.findById(id)
@@ -284,23 +292,26 @@ const getProductById = async (id) => {
       .lean();
 
     if (!product) {
-      return { status: "ERR", message: "Sản phẩm không tồn tại" };
+      return { status: "ERR", message: "Product does not exist" };
     }
 
     // Kiểm tra sản phẩm có đang hoạt động không
     if (product.status === false) {
-      return { status: "ERR", message: "Sản phẩm không tồn tại" };
+      return { status: "ERR", message: "Product does not exist" };
     }
 
     // Kiểm tra category có đang hoạt động không
     if (!product.category || product.category.status === false) {
-      return { status: "ERR", message: "Sản phẩm không tồn tại" };
+      return { status: "ERR", message: "Product does not exist" };
     }
+
+    const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
+    const data = { ...product, price: effectivePrice, effectivePrice, isNearExpiry, originalPrice };
 
     return {
       status: "OK",
-      message: "Lấy chi tiết sản phẩm thành công",
-      data: product, // Trả về tất cả ảnh trong mảng images
+      message: "Fetched product details successfully",
+      data,
     };
   } catch (error) {
     return { status: "ERR", message: error.message };

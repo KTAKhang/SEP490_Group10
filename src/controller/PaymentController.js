@@ -27,7 +27,7 @@ const createVnpayPaymentUrl = async (req, res) => {
     if (!order) throw new Error("No order found");
 
     if (order.user_id.toString() !== user_id.toString())
-      throw new Error("Không có quyền");
+      throw new Error("You do not have permission");
 
     const payment = await PaymentModel.findOne({
       order_id,
@@ -36,7 +36,7 @@ const createVnpayPaymentUrl = async (req, res) => {
     });
 
     if (!payment || payment.status !== "PENDING")
-      throw new Error("Đơn không hợp lệ để thanh toán");
+      throw new Error("Order is not valid for payment");
 
     const payUrl = createVnpayUrl(order._id, payment.amount, req.ip);
 
@@ -157,30 +157,40 @@ const vnpayReturn = async (req, res) => {
     /* =======================
        PRE-ORDER: intent id as vnp_TxnRef
     ======================= */
-    const preOrderIntent = await PreOrderPaymentIntentModel.findById(orderIdStr).session(session);
+    const preOrderIntent =
+      await PreOrderPaymentIntentModel.findById(orderIdStr).session(session);
     if (preOrderIntent) {
       if (responseCode === "00") {
         await PreOrderService.fulfillPaymentIntent(orderIdStr, session);
         await session.commitTransaction();
-        return res.redirect("http://localhost:5173/customer/preorder-payment-result?status=success");
+        return res.redirect(
+          "http://localhost:5173/customer/preorder-payment-result?status=success",
+        );
       }
       preOrderIntent.status = "FAILED";
       await preOrderIntent.save({ session });
       await session.commitTransaction();
-      return res.redirect("http://localhost:5173/customer/preorder-payment-result?status=failed");
+      return res.redirect(
+        "http://localhost:5173/customer/preorder-payment-result?status=failed",
+      );
     }
 
-    const remainingIntent = await PreOrderRemainingPaymentModel.findById(orderIdStr).session(session);
+    const remainingIntent =
+      await PreOrderRemainingPaymentModel.findById(orderIdStr).session(session);
     if (remainingIntent) {
       if (responseCode === "00") {
         await PreOrderService.fulfillRemainingPayment(orderIdStr, session);
         await session.commitTransaction();
-        return res.redirect("http://localhost:5173/customer/my-pre-orders?remaining=success");
+        return res.redirect(
+          "http://localhost:5173/customer/my-pre-orders?remaining=success",
+        );
       }
       remainingIntent.status = "FAILED";
       await remainingIntent.save({ session });
       await session.commitTransaction();
-      return res.redirect("http://localhost:5173/customer/my-pre-orders?remaining=failed");
+      return res.redirect(
+        "http://localhost:5173/customer/my-pre-orders?remaining=failed",
+      );
     }
 
     const orderId = new mongoose.Types.ObjectId(orderIdStr);
@@ -239,14 +249,6 @@ const vnpayReturn = async (req, res) => {
       throw new Error("PAID status not found");
     }
 
-    const paidNoStockStatus = await OrderStatusModel.findOne({
-      name: "PAID_NO_STOCK",
-    }).session(session);
-
-    if (!paidNoStockStatus) {
-      throw new Error("PAID_NO_STOCK status not found");
-    }
-
     /* =======================
        🔒 ANTI-REPLAY #3
        ORDER PAID
@@ -266,56 +268,6 @@ const vnpayReturn = async (req, res) => {
       /* =====================
      PAYMENT SUCCESS
   ===================== */
-
-      if (payment.status === "TIMEOUT") {
-        const isOutOfStock = await isOrderOutOfStock(order._id, session);
-
-        if (isOutOfStock) {
-          // ❌ PAID BUT NO STOCK
-          payment.status = "TIMEOUT"; // tiền vẫn đã thanh toán
-          await payment.save({ session });
-
-          order.status_history.push({
-            from_status: order.order_status_id,
-            to_status: paidNoStockStatus._id,
-            changed_by: order.user_id,
-            changed_by_role: "customer",
-            note: "Payment successful, but the product is out of stock",
-          });
-
-          order.order_status_id = paidNoStockStatus._id;
-          await order.save({ session });
-
-          await session.commitTransaction();
-
-          return res.redirect(
-            `http://localhost:5173/customer/payment-success-nostock?status=paid_no_stock&orderId=${orderId}`,
-          );
-        }
-        // ✅ CÒN HÀNG → TRỪ KHO TRƯỚC
-        await deductStock(order._id, session);
-        // ✅ CÒN HÀNG → coi như SUCCESS
-        payment.status = "SUCCESS";
-        await payment.save({ session });
-
-        order.status_history.push({
-          from_status: order.order_status_id,
-          to_status: paidStatus._id,
-          changed_by: order.user_id,
-          changed_by_role: "customer",
-          note: "VNPAY payment successful (TIMEOUT will reprocess)",
-        });
-
-        order.order_status_id = paidStatus._id;
-        await order.save({ session });
-
-        await session.commitTransaction();
-
-        return res.redirect(
-          `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
-        );
-      }
-
       payment.status = "SUCCESS";
       payment.provider_txn_id = transactionNo;
       payment.provider_response = sortedParams;
@@ -333,6 +285,35 @@ const vnpayReturn = async (req, res) => {
       await order.save({ session });
 
       await session.commitTransaction();
+
+      try {
+        await NotificationService.sendToUser(order.user_id.toString(), {
+          title: "VNPay payment successfull",
+          body: `Payment successfull for order ${orderId}. Go to Order History to check your order`,
+          data: {
+            type: "order",
+            orderId: orderId.toString(),
+            action: "retry_payment",
+          },
+        });
+      } catch (notifErr) {
+        console.error("Failed to send payment failure notification:", notifErr);
+      }
+
+      try {
+        const user = await UserModel.findById(order.user_id)
+          .select("email user_name")
+          .lean();
+        if (user && user.email) {
+          await CustomerEmailService.sendPaymentFailureEmail(
+            user.email,
+            user.user_name || "Customer",
+            orderId.toString(),
+          );
+        }
+      } catch (emailErr) {
+        console.error("Failed to send payment failure email:", emailErr);
+      }
 
       return res.redirect(
         `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
@@ -376,7 +357,7 @@ const vnpayReturn = async (req, res) => {
     try {
       await NotificationService.sendToUser(order.user_id.toString(), {
         title: "VNPay payment failed",
-        body: `Thanh toán thất bại cho đơn hàng ${orderId}. Go to Order History to re-pay in 10 minutes`,
+        body: `Payment failed for order ${orderId}. Go to Order History to re-pay in 10 minutes`,
         data: {
           type: "order",
           orderId: orderId.toString(),
@@ -430,7 +411,7 @@ const refundVNPay = async (req, res) => {
     }).session(session);
 
     if (!payment)
-      throw new Error("Không tìm thấy giao dịch hợp lệ để hoàn tiền");
+      throw new Error("No valid transaction found for refund");
 
     const result = await refund({
       order_id,
@@ -439,7 +420,7 @@ const refundVNPay = async (req, res) => {
     });
 
     if (result.vnp_ResponseCode !== "00") {
-      throw new Error(`Refund thất bại: ${result.vnp_Message}`);
+      throw new Error(`Refund failed: ${result.vnp_Message}`);
     }
 
     await PaymentModel.create(
@@ -458,7 +439,7 @@ const refundVNPay = async (req, res) => {
     );
 
     await session.commitTransaction();
-    res.json({ success: true, message: "Hoàn tiền thành công" });
+    res.json({ success: true, message: "Refund successful" });
   } catch (err) {
     await session.abortTransaction();
     res.status(400).json({

@@ -1,27 +1,31 @@
 const mongoose = require("mongoose");
 const ChatRoom = require("../models/ChatRoomModel");
 const Message = require("../models/MessageModel");
-const { pickAvailableStaff } = require("../sockets/staffPool");
+const NotificationService = require("./NotificationService");
 
 /**
  * Create or get room
  * 👉 KHÔNG cần staffId nữa
  */
-const getOrCreateRoom = async (userId) => {
+const getOrCreateRoom = async (userId, staffId) => {
+  // Validate userId
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     throw new Error("Invalid userId");
   }
 
-  // 1️⃣ Tìm room đã có
-  let room = await ChatRoom.findOne({ user: userId });
+  // Validate staffId
+  if (!staffId || !mongoose.Types.ObjectId.isValid(staffId)) {
+    throw new Error("Invalid staffId");
+  }
 
-  // 2️⃣ Chưa có → auto assign staff
+  // 1️⃣ Tìm room giữa USER và STAFF cụ thể này
+  let room = await ChatRoom.findOne({ 
+    user: userId,
+    staff: staffId  // 🔥 QUAN TRỌNG: phải tìm theo CẢ user VÀ staff
+  });
+
+  // 2️⃣ Chưa có → tạo mới
   if (!room) {
-    const staffId = pickAvailableStaff();
-    if (!staffId) {
-      throw new Error("Hiện không có staff online");
-    }
-
     try {
       room = await ChatRoom.create({
         user: userId,
@@ -29,9 +33,24 @@ const getOrCreateRoom = async (userId) => {
         unreadByStaff: 0,
         unreadByUser: 0,
       });
+      
+      console.log("✅ Created new room:", {
+        roomId: room._id,
+        userId,
+        staffId
+      });
     } catch (err) {
-      // tránh race condition
-      room = await ChatRoom.findOne({ user: userId });
+      console.error("❌ Error creating room:", err);
+      
+      // Tránh race condition - thử tìm lại
+      room = await ChatRoom.findOne({ 
+        user: userId,
+        staff: staffId 
+      });
+      
+      if (!room) {
+        throw new Error("Failed to create or find room");
+      }
     }
   }
 
@@ -99,13 +118,25 @@ const sendMessage = async ({ roomId, senderId, senderRole, content }) => {
     },
   ]);
 
+  // await NotificationService.sendToUser(order.user_id.toString(), {
+  //         title: "VNPay payment failed",
+  //         body: `Thanh toán thất bại cho đơn hàng ${orderId}. Go to Order History to re-pay in 10 minutes`,
+  //         data: {
+  //           type: "order",
+  //           orderId: orderId.toString(),
+  //           action: "retry_payment",
+  //         },
+  //       });
+
   return message;
 };
 
 /**
  * Get messages by room (check quyền)
  */
-const getMessagesByRoom = async (roomId, currentUserId) => {
+const getMessagesByRoom = async (roomId, currentUserId, options = {}) => {
+  const { limit = 6, before } = options;
+  
   const room = await ChatRoom.findById(roomId);
   if (!room) throw new Error("Room not found");
 
@@ -116,9 +147,38 @@ const getMessagesByRoom = async (roomId, currentUserId) => {
     throw new Error("Forbidden");
   }
 
-  return Message.find({ room: roomId })
+  // Build query
+  const query = { room: roomId };
+  
+  // Nếu có before, chỉ lấy tin nhắn cũ hơn message đó
+  if (before) {
+    const beforeMessage = await Message.findById(before);
+    if (beforeMessage) {
+      query.createdAt = { $lt: beforeMessage.createdAt };
+    }
+  }
+
+  // Lấy tin nhắn mới nhất trước (sort desc), sau đó reverse lại
+  const messages = await Message.find(query)
     .populate("sender", "user_name avatar")
-    .sort({ createdAt: 1 });
+    .sort({ createdAt: -1 }) // Lấy tin mới nhất trước
+    .limit(limit);
+
+  // Đảo ngược để tin cũ nhất ở đầu, mới nhất ở cuối
+  const sortedMessages = messages.reverse();
+
+  // Check xem còn tin nhắn cũ hơn không
+  const hasMore = messages.length === limit;
+  const oldestMessageId = sortedMessages.length > 0 
+    ? sortedMessages[0]._id 
+    : null;
+
+  return {
+    messages: sortedMessages,
+    hasMore,
+    oldestMessageId, // Dùng để load more
+    total: sortedMessages.length
+  };
 };
 
 /**

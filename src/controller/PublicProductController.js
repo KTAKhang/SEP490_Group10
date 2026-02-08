@@ -13,9 +13,13 @@ const getFeaturedProducts = async (req, res) => {
 const getProducts = async (req, res) => {
   try {
     const response = await PublicProductService.getProducts(req.query);
-    if (response.status === "ERR") return res.status(400).json(response);
+    if (response.status === "ERR") {
+      console.error("[PublicProduct] getProducts ERR:", response.message);
+      return res.status(400).json(response);
+    }
     return res.status(200).json(response);
   } catch (error) {
+    console.error("[PublicProduct] getProducts exception:", error.message);
     return res.status(500).json({ status: "ERR", message: error.message });
   }
 };

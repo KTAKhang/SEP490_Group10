@@ -4,6 +4,7 @@ const ProductModel = require("../models/ProductModel");
 const HarvestBatchModel = require("../models/HarvestBatchModel");
 const { getTodayInVietnam, formatDateVN, compareDates, calculateDaysBetween } = require("../utils/dateVN");
 
+
 // Build receivingStatus expression based on updated fields
 const receivingStatusExpr = () => ({
   $switch: {
@@ -17,9 +18,11 @@ const receivingStatusExpr = () => ({
   },
 });
 
+
 const stockStatusExpr = () => ({
   $cond: [{ $gt: ["$onHandQuantity", 0] }, "IN_STOCK", "OUT_OF_STOCK"],
 });
+
 
 /**
  * Nhập kho (RECEIPT) - atomic & chống lệch khi concurrent
@@ -34,47 +37,56 @@ const stockStatusExpr = () => ({
 const createReceipt = async (userId, payload = {}) => {
   const { productId, quantity, expiryDate, note = "", referenceType = "", referenceId = null, harvestBatchId = null } = payload;
 
+
   if (!mongoose.isValidObjectId(productId)) {
-    return { status: "ERR", message: "productId không hợp lệ" };
+    return { status: "ERR", message: "Invalid productId" };
   }
+
 
   const qty = Number(quantity);
   if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
-    return { status: "ERR", message: "Số lượng nhập kho phải là số nguyên lớn hơn 0" };
+    return {
+      status: "ERR",
+      message: "Inbound quantity must be an integer greater than 0",
+    };
   }
+
 
   // ✅ Lấy ngày hiện tại theo timezone Asia/Ho_Chi_Minh (date-only)
   const today = getTodayInVietnam();
 
+
   // Validate expiryDate
   let finalExpiryDate = null;
+
 
   if (expiryDate !== undefined && expiryDate !== null) {
     try {
       finalExpiryDate = new Date(expiryDate);
       if (isNaN(finalExpiryDate.getTime())) {
-        return { status: "ERR", message: "expiryDate không hợp lệ" };
+        return { status: "ERR", message: "Invalid expiryDate" };
       }
-      
+     
       // Reset về 00:00:00 để so sánh ngày
       finalExpiryDate.setHours(0, 0, 0, 0);
-      
+     
       // ✅ Validate: expiryDate >= ngày hiện tại + 1 ngày (theo timezone Vietnam)
       const minDate = new Date(today);
       minDate.setDate(minDate.getDate() + 1);
-      
+     
       if (finalExpiryDate < minDate) {
         // ✅ Format date theo timezone VN thay vì toISOString() (UTC)
         const minDateStr = formatDateVN(minDate);
-        return { 
-          status: "ERR", 
-          message: `Hạn sử dụng phải tối thiểu từ ngày ${minDateStr} (ngày mai theo timezone Asia/Ho_Chi_Minh)` 
+        return {
+          status: "ERR",
+          message: `Expiry date must be at least ${minDateStr} (tomorrow in Asia/Ho_Chi_Minh timezone)`
         };
       }
     } catch (err) {
-      return { status: "ERR", message: "expiryDate không hợp lệ" };
+      return { status: "ERR", message: "Invalid expiryDate" };
     }
   }
+
 
   // OPTIONAL: referenceId nếu có thì phải là ObjectId
   const refIdValue = referenceId
@@ -83,8 +95,9 @@ const createReceipt = async (userId, payload = {}) => {
       : null
     : null;
   if (referenceId && !refIdValue) {
-    return { status: "ERR", message: "referenceId không hợp lệ" };
+    return { status: "ERR", message: "Invalid referenceId" };
   }
+
 
   // ✅ Validate và convert harvestBatchId
   const harvestBatchIdValue = harvestBatchId
@@ -93,121 +106,145 @@ const createReceipt = async (userId, payload = {}) => {
       : null
     : null;
   if (harvestBatchId && !harvestBatchIdValue) {
-    return { status: "ERR", message: "harvestBatchId không hợp lệ" };
+    return { status: "ERR", message: "Invalid harvestBatchId" };
   }
+
 
   const session = await mongoose.startSession();
   try {
     let updatedProduct = null;
     let txDoc = null;
 
+
     await session.withTransaction(async () => {
       // Lấy product hiện tại để check supplier và các thông tin khác
       const currentProduct = await ProductModel.findById(productId).session(session);
       if (!currentProduct) {
-        throw new Error("Sản phẩm không tồn tại");
+        throw new Error("Product does not exist");
       }
+
 
       // ✅ Logic mới: Nếu sản phẩm có supplier, bắt buộc phải có harvestBatchId khi nhập hàng
       if (currentProduct.supplier) {
         if (!harvestBatchIdValue) {
-          throw new Error("Sản phẩm có nhà cung cấp, bắt buộc phải chọn lô thu hoạch (harvestBatchId) khi nhập hàng vào kho");
+          throw new Error("This product has a supplier, so a harvest batch (harvestBatchId) is required when receiving inventory");
         }
       }
+
 
       // ✅ Nếu có harvestBatchId, validate lại trong transaction để tránh race condition
       if (harvestBatchIdValue) {
         const currentHarvestBatch = await HarvestBatchModel.findById(harvestBatchIdValue).session(session);
         if (!currentHarvestBatch) {
-          throw new Error("Lô thu hoạch không tồn tại");
+          throw new Error("Harvest batch does not exist");
         }
-        // ✅ Bỏ qua validation status APPROVED - cho phép nhập kho với bất kỳ status nào
+        // ✅ Chỉ cho phép chọn lô có receiptEligible = true
+        if (currentHarvestBatch.receiptEligible === false) {
+          throw new Error("This harvest batch is not eligible for warehouse receipt");
+        }
         if (currentHarvestBatch.product.toString() !== productId) {
-          throw new Error("Lô thu hoạch không khớp với sản phẩm");
+          throw new Error("Harvest batch does not match the product");
         }
         // ✅ Validate: harvest batch phải thuộc cùng supplier với product
         if (currentHarvestBatch.supplier.toString() !== currentProduct.supplier?.toString()) {
-          throw new Error("Lô thu hoạch không thuộc nhà cung cấp của sản phẩm");
-        }
-
-        const remainingQty = currentHarvestBatch.quantity - (currentHarvestBatch.receivedQuantity || 0);
-        if (qty > remainingQty) {
-          throw new Error(`Số lượng nhập kho (${qty}) vượt quá số lượng còn lại trong lô thu hoạch (${remainingQty}). Vui lòng nhập không quá ${remainingQty}.`);
+          throw new Error("Harvest batch does not belong to the product's supplier");
         }
       }
-
-      // ✅ Ràng buộc: Nếu đã từng nhập kho với lô thu hoạch, các lần sau phải dùng cùng lô
-      const existingReceipt = await InventoryTransactionModel.findOne({
+      // ✅ Ràng buộc (theo từng kỳ nhập kho): Trong cùng một kỳ (cùng ngày nhập warehouseEntryDateStr),
+      // nếu đã có phiếu nhập chọn lô thu hoạch thì các phiếu sau phải dùng cùng lô.
+      // Sau khi sản phẩm reset (bán hết/hết hạn), warehouseEntryDateStr = null → kỳ mới → được chọn lô thu hoạch khác.
+      const receiptQuery = {
         product: new mongoose.Types.ObjectId(productId),
         type: "RECEIPT",
         harvestBatch: { $ne: null },
-      })
+      };
+      if (currentProduct.warehouseEntryDateStr) {
+        receiptQuery.$expr = {
+          $eq: [
+            { $dateToString: { date: "$createdAt", format: "%Y-%m-%d", timezone: "Asia/Ho_Chi_Minh" } },
+            currentProduct.warehouseEntryDateStr,
+          ],
+        };
+      } else {
+        receiptQuery.$expr = { $eq: [1, 0] }; // Kỳ mới (chưa có ngày nhập) → không ràng buộc lô cũ
+      }
+      const existingReceipt = await InventoryTransactionModel.findOne(receiptQuery)
         .sort({ createdAt: 1 })
         .select("harvestBatch")
         .session(session);
 
+
       if (existingReceipt && harvestBatchIdValue) {
         if (existingReceipt.harvestBatch?.toString() !== harvestBatchIdValue.toString()) {
-          throw new Error("Đã chọn lô thu hoạch ở lần nhập kho đầu tiên, các lần sau không thể đổi lô khác");
+          throw new Error("The harvest batch was selected during the first receipt and cannot be changed in later receipts");
         }
       }
+
 
       // ✅ Validate: Kiểm tra xem đây có phải lần nhập kho đầu tiên không
       const isFirstReceipt = !currentProduct.warehouseEntryDate && !currentProduct.warehouseEntryDateStr;
 
+
       // ✅ Ràng buộc: Ở lần nhập kho đầu tiên, bắt buộc phải setting hạn sử dụng
       if (isFirstReceipt) {
         if (!finalExpiryDate) {
-          throw new Error("Lần nhập kho đầu tiên bắt buộc phải thiết lập hạn sử dụng (expiryDate)");
+          throw new Error("The first receipt must set an expiryDate");
         }
       }
+
 
       // ✅ Validate: Nếu đã có expiryDate (Date hoặc Str) mà payload gửi expiryDate mới → trả lỗi
       // Check bằng cả Date + Str để khỏi lọt data cũ
       const hasExpiry = !!(currentProduct.expiryDate || currentProduct.expiryDateStr);
       if (hasExpiry && finalExpiryDate !== null) {
-        throw new Error("Hạn sử dụng đã được thiết lập và không thể thay đổi. Không thể đặt lại hạn sử dụng.");
+        throw new Error("The expiry date has already been set and cannot be changed.");
       }
+
 
       // ✅ Lưu warehouseEntryDate là date-only (YYYY-MM-DD) theo timezone Asia/Ho_Chi_Minh
       const warehouseEntryDate = getTodayInVietnam();
       const warehouseEntryDateStr = formatDateVN(warehouseEntryDate);
       const todayStr = formatDateVN(today);
 
+
       // ✅ Logic: Nếu đã có warehouseEntryDate, chỉ cho phép nhập trong cùng ngày (theo timezone Vietnam)
       // So sánh bằng string để đơn giản và chắc chắn hơn
       if (currentProduct.warehouseEntryDateStr) {
         if (todayStr !== currentProduct.warehouseEntryDateStr) {
-          throw new Error("Đơn hàng nhập kho phải hoàn thành trong cùng ngày (theo timezone Asia/Ho_Chi_Minh). Không thể nhập thêm vào ngày khác.");
+          throw new Error("Inbound purchase orders must be completed on the same day (Asia/Ho_Chi_Minh). You cannot add receipts on a different day.");
         }
       } else if (currentProduct.warehouseEntryDate) {
         // Fallback: nếu chưa có Str nhưng có Date (data cũ)
         const existingEntryDate = new Date(currentProduct.warehouseEntryDate);
         existingEntryDate.setHours(0, 0, 0, 0);
         if (!compareDates(today, existingEntryDate)) {
-          throw new Error("Đơn hàng nhập kho phải hoàn thành trong cùng ngày (theo timezone Asia/Ho_Chi_Minh). Không thể nhập thêm vào ngày khác.");
+          throw new Error("Inbound purchase orders must be completed on the same day (Asia/Ho_Chi_Minh). You cannot add receipts on a different day.");
         }
       }
+
 
       // ✅ Logic mới: Cho phép nhập nhiều lần trong ngày dù đã set expiryDate
       // (Chỉ chặn khi qua ngày khác, không chặn khi đã set expiryDate)
 
+
       // ✅ Tính toán expiryDate trước (nếu có)
       let expiryDateToSet = null;
       let expiryDateStrToSet = null;
-      const existingEntryDate = currentProduct.warehouseEntryDate 
-        ? new Date(currentProduct.warehouseEntryDate) 
+      const existingEntryDate = currentProduct.warehouseEntryDate
+        ? new Date(currentProduct.warehouseEntryDate)
         : warehouseEntryDate;
       existingEntryDate.setHours(0, 0, 0, 0);
+
 
       if (finalExpiryDate !== null) {
         const diffDays = calculateDaysBetween(existingEntryDate, finalExpiryDate);
         if (diffDays <= 0) {
-          throw new Error("Hạn sử dụng phải sau ngày nhập kho");
+          throw new Error("The expiry date must be after the warehouse entry date");
         }
         expiryDateToSet = finalExpiryDate;
         expiryDateStrToSet = formatDateVN(finalExpiryDate);
       }
+
 
       // ✅ Atomic update: gộp logic set warehouseEntryDate và expiryDate vào pipeline để tránh race condition
       const updatePipeline = [
@@ -222,6 +259,7 @@ const createReceipt = async (userId, payload = {}) => {
         },
       ];
 
+
       // ✅ Atomic set expiryDate chỉ khi chưa có và có giá trị mới
       if (expiryDateToSet !== null) {
         updatePipeline.push({
@@ -232,12 +270,14 @@ const createReceipt = async (userId, payload = {}) => {
         });
       }
 
+
       updatePipeline.push({
         $set: {
           receivingStatus: receivingStatusExpr(),
           stockStatus: stockStatusExpr(),
         },
       });
+
 
       // Atomic condition: received + qty <= planned
       updatedProduct = await ProductModel.findOneAndUpdate(
@@ -251,30 +291,20 @@ const createReceipt = async (userId, payload = {}) => {
         { new: true, session, runValidators: true }
       );
 
+
       if (!updatedProduct) {
-        throw new Error("Nhập vượt kế hoạch (plannedQuantity)");
+        throw new Error("Inbound quantity exceeds the plannedQuantity");
       }
 
-      // ✅ Cập nhật receivedQuantity của harvest batch nếu có (atomic update với validation)
+      // ✅ Cập nhật receivedQuantity và ẩn lô khỏi danh sách chọn (visibleInReceipt = false)
       if (harvestBatchIdValue) {
-        // ✅ Atomic update: đảm bảo receivedQuantity + qty <= quantity
-        const updatedHarvestBatch = await HarvestBatchModel.findOneAndUpdate(
-          {
-            _id: harvestBatchIdValue,
-            $expr: {
-              $lte: [{ $add: ["$receivedQuantity", qty] }, "$quantity"],
-            },
-          },
-          {
-            $inc: { receivedQuantity: qty },
-            $addToSet: { inventoryTransactionIds: null }, // Sẽ được set sau khi tạo transaction
-          },
-          { new: true, session }
+        await HarvestBatchModel.findByIdAndUpdate(
+          harvestBatchIdValue,
+          { $inc: { receivedQuantity: qty }, $set: { visibleInReceipt: false } },
+          { session }
         );
-        if (!updatedHarvestBatch) {
-          throw new Error("Không thể cập nhật lô thu hoạch: số lượng nhập vượt quá số lượng lô thu hoạch");
-        }
       }
+
 
       const created = await InventoryTransactionModel.create(
         [
@@ -293,6 +323,7 @@ const createReceipt = async (userId, payload = {}) => {
       );
       txDoc = created[0];
 
+
       // ✅ Cập nhật inventoryTransactionIds trong harvest batch
       if (harvestBatchIdValue) {
         await HarvestBatchModel.findByIdAndUpdate(
@@ -303,12 +334,13 @@ const createReceipt = async (userId, payload = {}) => {
       }
     });
 
+
     const populatedTx = await InventoryTransactionModel.findById(txDoc._id)
       .populate("product", "name plannedQuantity receivedQuantity onHandQuantity reservedQuantity receivingStatus stockStatus")
       .populate("createdBy", "user_name email")
       .populate({
         path: "harvestBatch",
-        select: "batchCode batchNumber harvestDate harvestDateStr quantity receivedQuantity location qualityGrade notes supplier",
+        select: "batchCode batchNumber harvestDate harvestDateStr receivedQuantity location notes supplier",
         populate: {
           path: "supplier",
           select: "name type code contactPerson phone email address cooperationStatus",
@@ -316,9 +348,10 @@ const createReceipt = async (userId, payload = {}) => {
       }) // ✅ Thông tin lô thu hoạch (nếu có)
       .lean();
 
+
     return {
       status: "OK",
-      message: "Nhập kho thành công",
+      message: "Stock receipt created successfully",
       data: {
         transaction: populatedTx,
         product: updatedProduct,
@@ -331,6 +364,7 @@ const createReceipt = async (userId, payload = {}) => {
   }
 };
 
+
 /**
  * Xuất kho (ISSUE) - atomic & chống lệch khi concurrent
  * Rules:
@@ -341,14 +375,20 @@ const createReceipt = async (userId, payload = {}) => {
 const createIssue = async (userId, payload = {}) => {
   const { productId, quantity, note = "", referenceType = "", referenceId = null } = payload;
 
+
   if (!mongoose.isValidObjectId(productId)) {
-    return { status: "ERR", message: "productId không hợp lệ" };
+    return { status: "ERR", message: "Invalid productId" };
   }
+
 
   const qty = Number(quantity);
   if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
-    return { status: "ERR", message: "Số lượng xuất kho phải là số nguyên lớn hơn 0" };
+    return {
+      status: "ERR",
+      message: "Outbound quantity must be an integer greater than 0",
+    };
   }
+
 
   // OPTIONAL: referenceId nếu có thì phải là ObjectId
   const refIdValue = referenceId
@@ -357,25 +397,29 @@ const createIssue = async (userId, payload = {}) => {
       : null
     : null;
   if (referenceId && !refIdValue) {
-    return { status: "ERR", message: "referenceId không hợp lệ" };
+    return { status: "ERR", message: "Invalid referenceId" };
   }
+
 
   const session = await mongoose.startSession();
   try {
     let updatedProduct = null;
     let txDoc = null;
 
+
     await session.withTransaction(async () => {
       // Lấy product hiện tại để check onHandQuantity
       const currentProduct = await ProductModel.findById(productId).session(session);
       if (!currentProduct) {
-        throw new Error("Sản phẩm không tồn tại");
+        throw new Error("Product does not exist");
       }
+
 
       // ✅ Validate: onHandQuantity - qty >= 0 (chặn âm kho)
       if ((currentProduct.onHandQuantity || 0) < qty) {
-        throw new Error(`Không đủ hàng trong kho. Tồn kho hiện tại: ${currentProduct.onHandQuantity || 0}`);
+        throw new Error(`Not enough inventory. Current on-hand quantity: ${currentProduct.onHandQuantity || 0}`);
       }
+
 
       // ✅ Atomic update: onHandQuantity -= qty
       const updatePipeline = [
@@ -386,6 +430,7 @@ const createIssue = async (userId, payload = {}) => {
           },
         },
       ];
+
 
       // Atomic condition: onHandQuantity - qty >= 0
       updatedProduct = await ProductModel.findOneAndUpdate(
@@ -399,9 +444,11 @@ const createIssue = async (userId, payload = {}) => {
         { new: true, session, runValidators: true }
       );
 
+
       if (!updatedProduct) {
-        throw new Error("Không đủ hàng trong kho hoặc đã bị thay đổi bởi transaction khác");
+        throw new Error("Insufficient inventory or quantities were modified by another transaction");
       }
+
 
       // Tạo ISSUE transaction
       const created = await InventoryTransactionModel.create(
@@ -421,6 +468,7 @@ const createIssue = async (userId, payload = {}) => {
       txDoc = created[0];
     });
 
+
     // ✅ Sau khi commit transaction, tự động reset nếu bán hết
     // (Không nên làm trong transaction vì có thể gây deadlock)
     // Tự động reset và lưu vào ProductBatchHistoryModel
@@ -438,18 +486,20 @@ const createIssue = async (userId, payload = {}) => {
       }
     }
 
+
     const populatedTx = await InventoryTransactionModel.findById(txDoc._id)
       .populate("product", "name plannedQuantity receivedQuantity onHandQuantity reservedQuantity receivingStatus stockStatus")
       .populate("createdBy", "user_name email")
       .lean();
 
+
     return {
       status: "OK",
-      message: "Xuất kho thành công",
+      message: "Stock issue created successfully",
       data: {
         transaction: populatedTx,
         product: updatedProduct,
-        markedForReset: markResult?.data || null, // Thông tin đánh dấu reset nếu có
+        markedForReset: resetResult?.data || null,
       },
     };
   } catch (error) {
@@ -458,6 +508,7 @@ const createIssue = async (userId, payload = {}) => {
     session.endSession();
   }
 };
+
 
 /**
  * Lấy lịch sử nhập hàng (RECEIPT transactions) - có search, sort, filter, pagination
@@ -478,35 +529,40 @@ const getReceiptHistory = async (filters = {}) => {
       sortOrder = "desc",
     } = filters;
 
+
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
 
+
     const query = {
       type: "RECEIPT", // Chỉ lấy RECEIPT transactions
     };
+
 
     // Filter theo productId
     if (productId) {
       if (!mongoose.isValidObjectId(productId)) {
         return {
           status: "ERR",
-          message: "productId không hợp lệ",
+          message: "Invalid productId",
         };
       }
       query.product = new mongoose.Types.ObjectId(productId);
     }
+
 
     // Filter theo createdBy (nhân viên nhập hàng)
     if (createdBy) {
       if (!mongoose.isValidObjectId(createdBy)) {
         return {
           status: "ERR",
-          message: "createdBy không hợp lệ",
+          message: "Invalid createdBy value",
         };
       }
       query.createdBy = new mongoose.Types.ObjectId(createdBy);
     }
+
 
     // Filter theo khoảng thời gian
     if (startDate || endDate) {
@@ -523,10 +579,12 @@ const getReceiptHistory = async (filters = {}) => {
       }
     }
 
+
     // Search theo note (nếu có)
     if (search) {
       query.note = { $regex: search, $options: "i" };
     }
+
 
     // Sort options
     const allowedSortFields = ["createdAt", "updatedAt", "quantity"];
@@ -534,13 +592,14 @@ const getReceiptHistory = async (filters = {}) => {
     const sortDirection = sortOrder === "asc" ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
 
+
     const [data, total] = await Promise.all([
       InventoryTransactionModel.find(query)
         .populate("product", "name price category")
         .populate("createdBy", "user_name email") // ✅ Thông tin nhân viên nhập hàng
         .populate({
           path: "harvestBatch",
-          select: "batchCode batchNumber harvestDate harvestDateStr quantity receivedQuantity supplier",
+          select: "batchCode batchNumber harvestDate harvestDateStr receivedQuantity supplier",
           populate: {
             path: "supplier",
             select: "name type code",
@@ -553,9 +612,10 @@ const getReceiptHistory = async (filters = {}) => {
       InventoryTransactionModel.countDocuments(query),
     ]);
 
+
     return {
       status: "OK",
-      message: "Lấy lịch sử nhập hàng thành công",
+      message: "Fetched receipt history successfully",
       data,
       pagination: {
         page: pageNum,
@@ -568,6 +628,7 @@ const getReceiptHistory = async (filters = {}) => {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 /**
  * Lấy lịch sử tất cả transactions (RECEIPT, ISSUE, etc.) - có search, sort, filter, pagination
@@ -589,11 +650,14 @@ const getTransactionHistory = async (filters = {}) => {
       sortOrder = "desc",
     } = filters;
 
+
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
 
+
     const query = {};
+
 
     // Filter theo type
     if (type) {
@@ -603,27 +667,30 @@ const getTransactionHistory = async (filters = {}) => {
       }
     }
 
+
     // Filter theo productId
     if (productId) {
       if (!mongoose.isValidObjectId(productId)) {
         return {
           status: "ERR",
-          message: "productId không hợp lệ",
+          message: "Invalid productId",
         };
       }
       query.product = new mongoose.Types.ObjectId(productId);
     }
+
 
     // Filter theo createdBy
     if (createdBy) {
       if (!mongoose.isValidObjectId(createdBy)) {
         return {
           status: "ERR",
-          message: "createdBy không hợp lệ",
+          message: "Invalid createdBy value",
         };
       }
       query.createdBy = new mongoose.Types.ObjectId(createdBy);
     }
+
 
     // Filter theo khoảng thời gian
     if (startDate || endDate) {
@@ -640,10 +707,12 @@ const getTransactionHistory = async (filters = {}) => {
       }
     }
 
+
     // Search theo note (nếu có)
     if (search) {
       query.note = { $regex: search, $options: "i" };
     }
+
 
     // Sort options
     const allowedSortFields = ["createdAt", "updatedAt", "quantity", "type"];
@@ -651,13 +720,14 @@ const getTransactionHistory = async (filters = {}) => {
     const sortDirection = sortOrder === "asc" ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
 
+
     const [data, total] = await Promise.all([
       InventoryTransactionModel.find(query)
         .populate("product", "name price category")
         .populate("createdBy", "user_name email") // ✅ Thông tin người thao tác
         .populate({
           path: "harvestBatch",
-          select: "batchCode batchNumber harvestDate harvestDateStr quantity receivedQuantity supplier",
+          select: "batchCode batchNumber harvestDate harvestDateStr receivedQuantity supplier",
           populate: {
             path: "supplier",
             select: "name type code",
@@ -670,9 +740,10 @@ const getTransactionHistory = async (filters = {}) => {
       InventoryTransactionModel.countDocuments(query),
     ]);
 
+
     return {
       status: "OK",
-      message: "Lấy lịch sử giao dịch thành công",
+      message: "Fetched transaction history successfully",
       data,
       pagination: {
         page: pageNum,
@@ -686,6 +757,7 @@ const getTransactionHistory = async (filters = {}) => {
   }
 };
 
+
 /**
  * Lấy chi tiết một phiếu nhập hàng (RECEIPT transaction) theo ID
  * @param {String} transactionId - ID của transaction
@@ -696,9 +768,10 @@ const getReceiptById = async (transactionId) => {
     if (!mongoose.isValidObjectId(transactionId)) {
       return {
         status: "ERR",
-        message: "ID transaction không hợp lệ",
+        message: "Invalid transaction ID",
       };
     }
+
 
     const transaction = await InventoryTransactionModel.findOne({
       _id: new mongoose.Types.ObjectId(transactionId),
@@ -722,7 +795,7 @@ const getReceiptById = async (transactionId) => {
       }) // ✅ Thông tin chi tiết nhân viên nhập hàng
       .populate({
         path: "harvestBatch",
-        select: "batchCode batchNumber harvestDate harvestDateStr quantity receivedQuantity location qualityGrade notes supplier",
+        select: "batchCode batchNumber harvestDate harvestDateStr receivedQuantity location notes supplier",
         populate: {
           path: "supplier",
           select: "name type code contactPerson phone email address cooperationStatus",
@@ -730,22 +803,25 @@ const getReceiptById = async (transactionId) => {
       }) // ✅ Thông tin lô thu hoạch (nếu có)
       .lean();
 
+
     if (!transaction) {
       return {
         status: "ERR",
-        message: "Không tìm thấy phiếu nhập hàng",
+        message: "Receipt transaction not found",
       };
     }
 
+
     return {
       status: "OK",
-      message: "Lấy chi tiết phiếu nhập hàng thành công",
+      message: "Fetched receipt transaction details successfully",
       data: transaction,
     };
   } catch (error) {
     return { status: "ERR", message: error.message };
   }
 };
+
 
 module.exports = {
   createReceipt,
@@ -754,4 +830,3 @@ module.exports = {
   getTransactionHistory,
   getReceiptById,
 };
-

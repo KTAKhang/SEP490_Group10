@@ -8,5 +8,6 @@ chatRouter.post("/room", authUserMiddleware, ChatController.createOrGetRoom);
 chatRouter.post("/message", authUserMiddleware, ChatController.sendMessage);
 chatRouter.get("/room/:roomId/messages", authUserMiddleware, ChatController.getMessages);
 chatRouter.get("/staff/rooms", authUserMiddleware, ChatController.getStaffRooms);
+chatRouter.get("/room/:roomId/mark-as-read", authUserMiddleware, ChatController.markAsRead);
 
 module.exports = chatRouter;

@@ -65,10 +65,6 @@ const orderSchema = new mongoose.Schema(
       trim: true,
       maxlength: [500, "Ghi chú không được vượt quá 500 ký tự"],
     },
-    retry_count: {
-      type: Number,
-      default: 0,
-    },
     receiver_address: {
       type: String,
       required: [true, "Địa chỉ người nhận là bắt buộc"],
