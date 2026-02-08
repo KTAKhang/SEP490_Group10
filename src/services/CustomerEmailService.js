@@ -416,63 +416,240 @@ Smart Fruit Shop
             console.error("PreOrder delayed email error:", error);
             return { status: "ERR", message: `Failed to send email: ${error.message}` };
         }
-    }
-};
+    },
 
-
-
-// Additional order-related email helpers
-EmailService.sendOrderConfirmationEmail = async (
+    /**
+     * Send birthday voucher notification email.
+     * @param {String} customerEmail
+     * @param {String} customerName
+     * @param {String} code - Personal discount code
+     */
+    async sendBirthdayVoucherEmail(customerEmail, customerName, code) {
+        try {
+            const transporter = createTransporter();
+            const mailOptions = {
+                from: {
+                    name: "Smart Fruit Shop",
+                    address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn",
+                },
+                to: customerEmail,
+                subject: "Happy Birthday! Your personal discount code – Smart Fruit Shop",
+                html: `
+                    <!DOCTYPE html>
+                    <html lang="en">
+                    <head>
+                        <meta charset="UTF-8">
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                        <style>
+                            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+                            .container { background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 8px; padding: 30px; }
+                            .header { background-color: #e91e63; color: white; padding: 15px; border-radius: 8px 8px 0 0; text-align: center; margin: -30px -30px 20px -30px; }
+                            .code { font-size: 1.25rem; font-weight: bold; letter-spacing: 2px; padding: 12px; background: #fff3e0; border-radius: 6px; margin: 16px 0; }
+                            .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; font-size: 14px; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="header"><h2>Happy Birthday!</h2></div>
+                            <p>Hello <strong>${customerName || "Customer"}</strong>,</p>
+                            <p>Here is your personal discount code:</p>
+                            <p class="code">${code}</p>
+                            <p>Use it at checkout before it expires. Thank you for being with us!</p>
+                            <div class="footer">
+                                <p>Sincerely,<br><strong>Smart Fruit Shop</strong></p>
+                            </div>
+                        </div>
+                    </body>
+                    </html>
+                `,
+                text: `Happy Birthday! Here is your personal discount code: ${code}. Use it at checkout before it expires. – Smart Fruit Shop`,
+            };
+            const info = await transporter.sendMail(mailOptions);
+            return { status: "OK", message: "Email sent successfully", messageId: info.messageId };
+        } catch (error) {
+            console.error("Birthday voucher email error:", error);
+            return { status: "ERR", message: `Failed to send email: ${error.message}` };
+        }
+    },
+   /**
+   * Gửi email xác nhận đơn hàng sau khi đặt thành công
+   * @param {String} customerEmail
+   * @param {String} customerName
+   * @param {String} orderId
+   * @param {Number} totalAmount
+   * @param {String} paymentMethod - COD | VNPAY | MOMO...
+   */
+  async sendOrderConfirmationEmail(
     customerEmail,
     customerName,
     orderId,
-    amount,
-    paymentMethod,
-    paymentUrl = null,
-) => {
+    totalAmount,
+    paymentMethod = "COD",
+  ) {
     try {
-        const transporter = createTransporter();
+      const transporter = createTransporter();
+      const formatPrice = (price) =>
+        new Intl.NumberFormat("vi-VN", {
+          style: "currency",
+          currency: "VND",
+        }).format(price);
 
-        const mailOptions = {
-            from: {
-                name: "Smart Fruit Shop",
-                address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn",
-            },
-            to: customerEmail,
-            subject: `Xác nhận đơn hàng ${orderId}`,
-            html: `
-                <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-                    <h2>✅ Đơn hàng đã được tạo</h2>
-                    <p>Xin chào <strong>${customerName}</strong>,</p>
-                    <p>Đơn hàng <strong>${orderId}</strong> của bạn đã được tạo với tổng tiền <strong>${amount}</strong>.</p>
-                    <p>Phương thức thanh toán: <strong>${paymentMethod}</strong></p>
-                    ${paymentUrl ? `<p>Hoàn tất thanh toán tại: <a href="${paymentUrl}">${paymentUrl}</a></p>` : ""}
-                    <p>Cảm ơn bạn đã mua hàng tại Smart Fruit Shop.</p>
-                </div>
-            `,
-            text: `Đơn hàng ${orderId} đã được tạo. Tổng: ${amount}. Phương thức: ${paymentMethod}`,
-        };
+      const isCOD = paymentMethod === "COD";
 
-        const info = await transporter.sendMail(mailOptions);
-        return { status: "OK", messageId: info.messageId };
+      const mailOptions = {
+        from: {
+          name: "Smart Fruit Shop",
+          address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn",
+        },
+        to: customerEmail,
+        subject: `Xác nhận đơn hàng #${orderId} – Smart Fruit Shop`,
+        html: `
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  .container {
+    background-color: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 30px;
+  }
+  .header {
+    background-color: #28a745;
+    color: white;
+    padding: 15px;
+    border-radius: 8px 8px 0 0;
+    text-align: center;
+    margin: -30px -30px 20px -30px;
+  }
+  .content { margin: 20px 0; }
+  .order-box {
+    background: #ffffff;
+    border: 1px solid #eee;
+    border-radius: 6px;
+    padding: 15px;
+    margin: 20px 0;
+  }
+  .highlight {
+    background-color: #e8f5e9;
+    padding: 15px;
+    border-left: 4px solid #28a745;
+    margin: 20px 0;
+  }
+  .footer {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid #ddd;
+    color: #666;
+    font-size: 14px;
+  }
+</style>
+</head>
+
+<body>
+  <div class="container">
+
+    <div class="header">
+      <h2>Đặt hàng thành công 🎉</h2>
+    </div>
+
+    <div class="content">
+      <p>Xin chào <strong>${customerName || "Quý khách"}</strong>,</p>
+
+      <p>Cảm ơn bạn đã đặt hàng tại <strong>Smart Fruit Shop</strong>.</p>
+
+      <div class="order-box">
+        <p><strong>Mã đơn hàng:</strong> #${orderId}</p>
+        <p><strong>Tổng thanh toán:</strong> ${formatPrice(totalAmount)}</p>
+        <p><strong>Phương thức thanh toán:</strong> ${paymentMethod}</p>
+      </div>
+
+      ${
+        isCOD
+          ? `
+        <div class="highlight">
+          Bạn sẽ thanh toán khi nhận hàng (COD).<br>
+          Vui lòng chuẩn bị đúng số tiền khi shipper giao đến.
+        </div>
+      `
+          : `
+        <div class="highlight">
+          Đơn hàng của bạn đang chờ xác nhận thanh toán.<br>
+          Vui lòng hoàn tất thanh toán để chúng tôi xử lý giao hàng.
+        </div>
+      `
+      }
+
+      <p>Chúng tôi sẽ thông báo khi đơn hàng được giao cho đơn vị vận chuyển.</p>
+    </div>
+
+    <div class="footer">
+      <p>Trân trọng,<br><strong>Smart Fruit Shop</strong></p>
+      <p>Email: support@smartfruitshop.vn</p>
+    </div>
+
+  </div>
+</body>
+</html>
+      `,
+
+        text: `
+Xin chào ${customerName || "Quý khách"},
+
+Cảm ơn bạn đã đặt hàng tại Smart Fruit Shop.
+
+Mã đơn hàng: #${orderId}
+Tổng thanh toán: ${formatPrice(totalAmount)}
+Phương thức thanh toán: ${paymentMethod}
+
+${
+  isCOD
+    ? "Bạn sẽ thanh toán khi nhận hàng (COD)."
+    : "Vui lòng hoàn tất thanh toán online để đơn được xử lý."
+}
+
+Trân trọng,
+Smart Fruit Shop
+      `.trim(),
+      };
+
+      const info = await transporter.sendMail(mailOptions);
+
+      return {
+        status: "OK",
+        message: "Order confirmation email sent",
+        messageId: info.messageId,
+      };
     } catch (error) {
-        console.error("Order confirmation email error:", error);
-        return { status: "ERR", message: error.message };
+      console.error("Order confirmation email error:", error);
+      return {
+        status: "ERR",
+        message: `Failed to send email: ${error.message}`,
+      };
     }
-};
+  },
 
-EmailService.sendPaymentFailureEmail = async (customerEmail, customerName, orderId) => {
+  async sendPaymentFailureEmail(customerEmail, customerName, orderId) {
     try {
-        const transporter = createTransporter();
-
-        const mailOptions = {
-            from: {
-                name: "Smart Fruit Shop",
-                address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn",
-            },
-            to: customerEmail,
-            subject: `Thanh toán thất bại cho đơn ${orderId}`,
-            html: `
+      const transporter = createTransporter();
+      const mailOptions = {
+        from: {
+          name: "Smart Fruit Shop",
+          address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn",
+        },
+        to: customerEmail,
+        subject: `Thanh toán thất bại cho đơn ${orderId}`,
+        html: `
                 <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
                     <h2>⚠️ Thanh toán không thành công</h2>
                     <p>Xin chào <strong>${customerName}</strong>,</p>
@@ -480,15 +657,20 @@ EmailService.sendPaymentFailureEmail = async (customerEmail, customerName, order
                     <p>Nếu cần hỗ trợ, liên hệ support@smartfruitshop.vn.</p>
                 </div>
             `,
-            text: `Thanh toán cho đơn ${orderId} thất bại. Vui lòng thử lại.`,
-        };
+        text: `Thanh toán cho đơn ${orderId} thất bại. Vui lòng thử lại.`,
+      };
 
-        const info = await transporter.sendMail(mailOptions);
-        return { status: "OK", messageId: info.messageId };
+      const info = await transporter.sendMail(mailOptions);
+      return { status: "OK", messageId: info.messageId };
     } catch (error) {
-        console.error("Payment failure email error:", error);
-        return { status: "ERR", message: error.message };
+      console.error("Payment failure email error:", error);
+      return { status: "ERR", message: error.message };
     }
+  },
 };
+
+
+
+
 
 module.exports = EmailService;

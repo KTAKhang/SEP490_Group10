@@ -1,0 +1,75 @@
+================================================================================
+THAY ĐỔI: NEWS CHUYỂN SANG XÓA MỀM (SOFT DELETE) - CHO FRONTEND
+================================================================================
+Ngày cập nhật: 2025-02-07
+
+--------------------------------------------------------------------------------
+1. TỔNG QUAN
+--------------------------------------------------------------------------------
+- News không còn bị xóa cứng (hard delete) nữa.
+- Khi "xóa" bài viết, backend chỉ đánh dấu xóa mềm (deleted_at, deleted_by).
+- Bài đã xóa mềm sẽ không hiển thị trong danh sách, chi tiết, featured và không cho phép comment.
+
+--------------------------------------------------------------------------------
+2. API KHÔNG THAY ĐỔI REQUEST/RESPONSE
+--------------------------------------------------------------------------------
+- URL, method, query/body của các API news vẫn giữ nguyên.
+- FE không cần đổi cách gọi API.
+
+--------------------------------------------------------------------------------
+3. HÀNH VI API THAY ĐỔI (FE CẦN BIẾT)
+--------------------------------------------------------------------------------
+
+3.1. GET danh sách news (list / search / filter)
+    - Chỉ trả về bài chưa bị xóa mềm.
+    - Bài đã xóa mềm sẽ không xuất hiện trong response.
+    -> FE: Không cần xử lý thêm; danh sách đã được lọc sẵn.
+
+3.2. GET chi tiết news theo ID
+    - Nếu bài đã bị xóa mềm: response status 200, body dạng:
+      { "status": "ERR", "message": "Bài viết không tồn tại" }
+    -> FE: Coi như bài không tồn tại (giống 404), hiển thị thông báo / redirect.
+
+3.3. GET featured news
+    - Chỉ trả về bài chưa bị xóa mềm và đang featured.
+    -> FE: Không cần thay đổi.
+
+3.4. DELETE news
+    - Trước: Xóa cứng (bài và dữ liệu liên quan bị xóa khỏi DB).
+    - Nay: Xóa mềm (chỉ set deleted_at, deleted_by).
+    - Response thành công vẫn là: { "status": "OK", "message": "Xóa bài viết thành công" }
+    - Nếu bài đã xóa mềm rồi mà gọi DELETE lần nữa:
+      { "status": "OK", "message": "Bài viết đã được xóa trước đó" }
+    -> FE: Có thể hiển thị "Đã xóa" hoặc ẩn bài khỏi danh sách ngay sau khi gọi DELETE thành công.
+
+3.5. PUT/PATCH update news
+    - Nếu bài đã bị xóa mềm: response { "status": "ERR", "message": "Bài viết không tồn tại" }
+    -> FE: Không cho mở form sửa bài đã xóa; nếu gọi update mà nhận ERR thì coi như bài không tồn tại.
+
+3.6. Comment theo news
+    - GET comments theo newsId: Nếu bài đã xóa mềm → { "status": "ERR", "message": "Bài viết không tồn tại" }
+    - POST comment vào newsId: Nếu bài đã xóa mềm → { "status": "ERR", "message": "Bài viết không tồn tại" }
+    -> FE: Giống bài không tồn tại: không hiển thị form comment, không gọi get comments.
+
+--------------------------------------------------------------------------------
+4. DỮ LIỆU TRẢ VỀ (OPTIONAL)
+--------------------------------------------------------------------------------
+- Backend không thêm field deleted_at / deleted_by vào response list/detail cho FE.
+- Bài đã xóa mềm đã bị loại khỏi mọi API public/list/detail/featured, nên FE không thấy bài đã xóa (trừ khi gọi đúng ID đã lưu từ trước thì nhận "Bài viết không tồn tại").
+
+--------------------------------------------------------------------------------
+5. GỢI Ý XỬ LÝ Ở FRONTEND
+--------------------------------------------------------------------------------
+- Sau khi gọi DELETE news thành công (status "OK"): ẩn bài đó khỏi danh sách hoặc chuyển về trang danh sách / thông báo "Đã xóa bài viết".
+- Khi gọi GET detail / update / comments mà nhận message "Bài viết không tồn tại": hiển thị trang 404 hoặc thông báo tương ứng, không hiển thị nội dung bài.
+- Không cần gọi API "restore" trừ khi backend sau này bổ sung API khôi phục bài đã xóa mềm.
+
+--------------------------------------------------------------------------------
+6. TÓM TẮT
+--------------------------------------------------------------------------------
++ API endpoints và format request/response giữ nguyên.
++ Danh sách / featured chỉ còn bài chưa xóa mềm.
++ Bài đã xóa mềm: mọi API (detail, update, delete lần 2, comments) trả về "Bài viết không tồn tại" hoặc message tương ứng.
++ FE chỉ cần xử lý message lỗi "Bài viết không tồn tại" và ẩn/redirect khi xóa thành công.
+
+================================================================================

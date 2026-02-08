@@ -244,6 +244,39 @@ const getDiscountUsageHistoryController = async (req, res) => {
     }
 };
 
+/**
+ * Get birthday voucher usage report (ADMIN). Statistics only; no list of codes.
+ * GET /admin/discounts/birthday/report?day=&month=&year=
+ */
+const getBirthdayReportController = async (req, res) => {
+    try {
+        const { day, month, year } = req.query;
+        const response = await DiscountService.getBirthdayReport({ day, month, year });
+        const code = response?.status === "OK" ? 200 : 400;
+        return res.status(code).json(response);
+    } catch (error) {
+        return res.status(500).json({
+            status: "ERR",
+            message: error.message,
+        });
+    }
+};
+
+/**
+ * Run birthday voucher job now (ADMIN). For testing without waiting for cron.
+ * POST /admin/discounts/birthday/run-now
+ * Commented out when using cron only; uncomment this and the route in AdminDiscountRouter to re-enable.
+ */
+// const runBirthdayVoucherJobController = async (req, res) => {
+//     try {
+//         const result = await DiscountService.runDailyBirthdayVouchers();
+//         return res.status(200).json({ status: "OK", message: "Birthday voucher job completed", data: result });
+//     } catch (error) {
+//         console.error("[BirthdayVoucher] run-now failed:", error);
+//         return res.status(500).json({ status: "ERR", message: error.message });
+//     }
+// };
+
 module.exports = {
     createDiscountController,
     updateDiscountController,
@@ -258,4 +291,6 @@ module.exports = {
     validateDiscountCodeController,
     applyDiscountCodeController,
     getDiscountUsageHistoryController,
+    getBirthdayReportController,
+    // runBirthdayVoucherJobController, // Uncomment when re-enabling POST /admin/discounts/birthday/run-now
 };

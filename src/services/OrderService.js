@@ -414,6 +414,22 @@ const confirmCheckoutAndCreateOrder = async ({
         session,
       });
       await session.commitTransaction();
+       try {
+        const user = await UserModel.findById(user_id)
+          .select("email user_name")
+          .lean();
+        if (user && user.email) {
+          await CustomerEmailService.sendOrderConfirmationEmail(
+            user.email,
+            user.user_name || "Client",
+            order._id.toString(),
+            finalTotalPrice,
+            "VNPAY",
+          );
+        }
+      } catch (emailErr) {
+        console.error("Failed to send COD order email:", emailErr);
+      }
       return {
         success: true,
         payment_url: paymentUrl,
@@ -689,7 +705,7 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
     }
 
 
-    payment.status = "FAILED";
+    payment.status = "UNPAID";
     payment.note = "Order cancelled";
     await payment.save({ session });
 
@@ -710,7 +726,6 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
           type: "order",
           orderId: order._id.toString(),
           action: "pay_order",
-          payment_url: paymentUrl,
         },
       });
     } catch (notifErr) {
@@ -778,15 +793,15 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
       throw new Error("Payment information not found");
     }
     if (!["FAILED"].includes(payment.status)) {
-      throw new Error("Payment status is not valid for retry");
+
+      throw new Error("Invalid payment status for retry");
     }
     /* ===== CHECK RETRY PER PAYMENT STATUS ===== */
     if (!order.allow_retry) {
-      throw new Error("Order does not allow payment retry");
+      throw new Error("The order does not allow refunds");
     }
     if (!order.retry_expired_at || order.retry_expired_at < new Date()) {
-      throw new Error("Order has exceeded the payment retry period");
-
+      throw new Error("The order is overdue for payment");
     }
     order.allow_retry = false;
     order.auto_delete = false;

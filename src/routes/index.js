@@ -94,7 +94,7 @@ const routes = (app) => {
     app.use("/staff", StaffRouter);
     //Customer management routes
     app.use("/customers", CustomerRouter);
-    // Discount management routes
+    // Discount management routes (includes admin birthday report at GET /discounts/birthday/report)
     app.use("/discounts", DiscountRouter);
     // Notification routes
     app.use("/notifications", NotificationRouter);
