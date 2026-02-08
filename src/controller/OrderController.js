@@ -7,7 +7,7 @@ const OrderService = require("../services/OrderService");
 const createOrder = async (req, res) => {
   try {
     const user_id = req.user._id;
-    const { selected_product_ids, receiverInfo, payment_method, city } = req.body;
+    const { selected_product_ids, receiverInfo, payment_method, city, discount_id } = req.body;
 
 
     if (
@@ -72,7 +72,8 @@ const createOrder = async (req, res) => {
       receiverInfo: normalizedReceiver,
       payment_method,
       ip: req.ip,
-      city
+      city,
+      discount_id: discount_id || null,
     });
 
 

@@ -11,6 +11,7 @@ const PaymentService = require("../services/PaymentService");
 const ShippingService = require("../services/ShippingService");
 const NotificationService = require("../services/NotificationService");
 const CustomerEmailService = require("./CustomerEmailService");
+const DiscountService = require("./DiscountService");
 const UserModel = require("../models/UserModel");
 const ReviewModel = require("../models/ReviewModel");
 const { default: mongoose } = require("mongoose");
@@ -143,6 +144,7 @@ const confirmCheckoutAndCreateOrder = async ({
   payment_method,
   ip,
   city,
+  discount_id,
 }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -224,8 +226,22 @@ const confirmCheckoutAndCreateOrder = async ({
       });
 
 
-    const finalTotalPrice = totalPrice + shippingFee;
-
+    const orderValueBeforeDiscount = totalPrice + shippingFee;
+    let finalTotalPrice = orderValueBeforeDiscount;
+    let discountCode = null;
+    let discountAmount = 0;
+    if (discount_id && mongoose.Types.ObjectId.isValid(discount_id)) {
+      const discountResult = await DiscountService.getDiscountAmountForOrder(
+        discount_id,
+        user_id.toString(),
+        orderValueBeforeDiscount
+      );
+      if (discountResult.status === "OK") {
+        discountAmount = discountResult.data.discountAmount;
+        discountCode = discountResult.data.code;
+        finalTotalPrice = orderValueBeforeDiscount - discountAmount;
+      }
+    }
 
     /* =======================
        4️⃣ CREATE ORDER
@@ -253,6 +269,8 @@ const confirmCheckoutAndCreateOrder = async ({
           order_status_id: pendingStatus._id,
           payment_method,
           status: true,
+          discount_code: discountCode,
+          discount_amount: discountAmount,
         },
       ],
       { session },
@@ -375,6 +393,18 @@ const confirmCheckoutAndCreateOrder = async ({
         }
       }
       await session.commitTransaction();
+      if (discount_id && discountCode) {
+        try {
+          await DiscountService.applyDiscountCode(
+            discount_id,
+            user_id.toString(),
+            orderValueBeforeDiscount,
+            order._id.toString()
+          );
+        } catch (discountErr) {
+          console.error("Record discount usage after COD order failed:", discountErr);
+        }
+      }
       return {
         success: true,
         type: "COD",
@@ -398,6 +428,18 @@ const confirmCheckoutAndCreateOrder = async ({
         session,
       });
       await session.commitTransaction();
+      if (discount_id && discountCode) {
+        try {
+          await DiscountService.applyDiscountCode(
+            discount_id,
+            user_id.toString(),
+            orderValueBeforeDiscount,
+            order._id.toString()
+          );
+        } catch (discountErr) {
+          console.error("Record discount usage after VNPAY order failed:", discountErr);
+        }
+      }
        try {
         const user = await UserModel.findById(user_id)
           .select("email user_name")
@@ -918,7 +960,12 @@ const getOrdersByUser = async (user_id, filters = {}) => {
     return {
       status: "OK",
       message: "Retrieved order history successfully",
-      data: data.map((order) => ({ ...order, payment: paymentMap.get(order._id.toString()) || null })),
+      data: data.map((order) => ({
+        ...order,
+        payment: paymentMap.get(order._id.toString()) || null,
+        discount_code: order.discount_code ?? null,
+        discount_amount: order.discount_amount ?? 0,
+      })),
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -985,7 +1032,11 @@ const getOrderByUser = async (order_id, user_id) => {
       status: "OK",
       message: "Retrieved order details successfully",
       data: {
-        order,
+        order: {
+          ...order,
+          discount_code: order.discount_code ?? null,
+          discount_amount: order.discount_amount ?? 0,
+        },
         details: detailsWithReview,
         reviews,
         payment: payment || null,
@@ -1093,6 +1144,8 @@ const getOrdersForAdmin = async (filters = {}) => {
       .map((order) => ({
         ...order,
         payment: paymentMap.get(order._id.toString()) || null,
+        discount_code: order.discount_code ?? null,
+        discount_amount: order.discount_amount ?? 0,
       }))
       .filter((order) => {
         if (!payment_status) return true;
@@ -1147,7 +1200,11 @@ const getOrderDetailForAdmin = async (order_id) => {
       status: "OK",
       message: "Retrieved order details successfully",
       data: {
-        order,
+        order: {
+          ...order,
+          discount_code: order.discount_code ?? null,
+          discount_amount: order.discount_amount ?? 0,
+        },
         details,
         payment,
       },
