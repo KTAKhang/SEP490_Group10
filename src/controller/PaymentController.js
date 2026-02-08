@@ -27,7 +27,7 @@ const createVnpayPaymentUrl = async (req, res) => {
     if (!order) throw new Error("No order found");
 
     if (order.user_id.toString() !== user_id.toString())
-      throw new Error("Không có quyền");
+      throw new Error("You do not have permission");
 
     const payment = await PaymentModel.findOne({
       order_id,
@@ -36,7 +36,7 @@ const createVnpayPaymentUrl = async (req, res) => {
     });
 
     if (!payment || payment.status !== "PENDING")
-      throw new Error("Đơn không hợp lệ để thanh toán");
+      throw new Error("Order is not valid for payment");
 
     const payUrl = createVnpayUrl(order._id, payment.amount, req.ip);
 
@@ -411,7 +411,7 @@ const refundVNPay = async (req, res) => {
     }).session(session);
 
     if (!payment)
-      throw new Error("Không tìm thấy giao dịch hợp lệ để hoàn tiền");
+      throw new Error("No valid transaction found for refund");
 
     const result = await refund({
       order_id,
@@ -420,7 +420,7 @@ const refundVNPay = async (req, res) => {
     });
 
     if (result.vnp_ResponseCode !== "00") {
-      throw new Error(`Refund thất bại: ${result.vnp_Message}`);
+      throw new Error(`Refund failed: ${result.vnp_Message}`);
     }
 
     await PaymentModel.create(
@@ -439,7 +439,7 @@ const refundVNPay = async (req, res) => {
     );
 
     await session.commitTransaction();
-    res.json({ success: true, message: "Hoàn tiền thành công" });
+    res.json({ success: true, message: "Refund successful" });
   } catch (err) {
     await session.abortTransaction();
     res.status(400).json({

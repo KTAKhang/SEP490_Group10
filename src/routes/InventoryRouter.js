@@ -37,8 +37,8 @@ InventoryRouter.post(
 );
 InventoryRouter.get("/preorder-stock/receives", inventoryAdminOrWarehouseMiddleware, PreOrderStockController.listReceives);
 
-// Warehouse staff: nhập kho (RECEIPT) -> tạo transaction + update product (atomic)
-InventoryRouter.post("/receipts", inventoryWarehouseMiddleware, InventoryTransactionController.createReceipt);
+// Admin và Warehouse staff: nhập kho (RECEIPT) -> tạo transaction + update product (atomic)
+InventoryRouter.post("/receipts", inventoryAdminOrWarehouseMiddleware, InventoryTransactionController.createReceipt);
 
 // Admin và Warehouse staff: Xem lịch sử nhập hàng
 InventoryRouter.get("/receipts", inventoryAdminOrWarehouseMiddleware, InventoryTransactionController.getReceiptHistory);

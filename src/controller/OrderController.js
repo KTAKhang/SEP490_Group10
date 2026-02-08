@@ -103,7 +103,7 @@ const updateOrder = async (req, res) => {
     if (!order_id || !status_name) {
       return res.status(400).json({
         success: false,
-        message: "Thiếu order_id hoặc status_name",
+        message: "Missing order_id or status_name",
       });
     }
     // Order schema enum: "admin" | "sales-staff" | "customer". User có role_id (populate → name).
@@ -120,13 +120,13 @@ const updateOrder = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Cập nhật trạng thái đơn hàng thành công",
+      message: "Order status updated successfully",
       ...result,
     });
   } catch (error) {
     return res.status(400).json({
       success: false,
-      message: error.message || "Cập nhật đơn hàng thất bại",
+      message: error.message || "Failed to update order",
     });
   }
 };

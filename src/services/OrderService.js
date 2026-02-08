@@ -17,6 +17,24 @@ const ReviewModel = require("../models/ReviewModel");
 const { default: mongoose } = require("mongoose");
 const { createVnpayUrl } = require("../utils/createVnpayUrl");
 const { getEffectivePrice } = require("../utils/productPrice");
+const STATUS_OPTIONS = [
+  { value: "PENDING", label: "Pending" },
+  { value: "PAID", label: "Paid" },
+  { value: "READY-TO-SHIP", label: "Ready to ship" },
+  { value: "SHIPPING", label: "Shipping" },
+  { value: "COMPLETED", label: "Completed" },
+  { value: "RETURNED", label: "Returned" },
+  { value: "CANCELLED", label: "Cancelled" },
+];
+
+const getStatusDisplayLabel = (statusName) => {
+  const normalized = statusName
+    ? statusName.toString().trim().toUpperCase().replace(/[_\s]+/g, "-")
+    : "";
+  const option = STATUS_OPTIONS.find((o) => o.value === normalized);
+  return option ? option.label : normalized || "Updated";
+};
+
 const normalizeStatusName = (value) => {
   if (!value) return "";
   return value
@@ -342,7 +360,6 @@ const confirmCheckoutAndCreateOrder = async ({
         session,
       });
 
-
       try {
         const user = await UserModel.findById(user_id)
           .select("email user_name")
@@ -508,9 +525,9 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     }
 
 
-    // Admin huỷ COD
+    // Admin huỷ COD → chưa thu tiền nên để UNPAID (FAILED chỉ dùng khi thanh toán thất bại)
     if (nextStatusName === "CANCELLED" && payment.method === "COD") {
-      payment.status = "FAILED";
+      payment.status = "UNPAID";
       await payment.save({ session });
     }
 
@@ -569,15 +586,16 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     const customerId = order.user_id?.toString?.() || order.user_id;
     if (customerId) {
       try {
-        const statusLabel = newStatus?.name || new_status_name || "cập nhật";
+        const statusValue = newStatus?.name || new_status_name || "";
+        const displayLabel = getStatusDisplayLabel(statusValue);
         await NotificationService.sendToUser(customerId, {
-          title: "Cập nhật đơn hàng",
-          body: `Đơn hàng của bạn đã được cập nhật trạng thái: ${statusLabel}`,
+          title: "Order update",
+          body: `Your order status has been updated to "${displayLabel}".`,
           data: {
             type: "order",
             orderId: order._id.toString(),
             action: "view_order",
-            status: statusLabel,
+            status: statusValue,
           },
         });
       } catch (notifErr) {
@@ -731,6 +749,7 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
       throw new Error("Payment information not found");
     }
     if (!["FAILED"].includes(payment.status)) {
+
       throw new Error("Invalid payment status for retry");
     }
     /* ===== CHECK RETRY PER PAYMENT STATUS ===== */
@@ -739,7 +758,6 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
     }
     if (!order.retry_expired_at || order.retry_expired_at < new Date()) {
       throw new Error("The order is overdue for payment");
-
     }
     order.allow_retry = false;
     order.auto_delete = false;

@@ -308,6 +308,66 @@ const authAdminOrSalesStaffForOrderMiddleware = async (req, res, next) => {
         });
     }
 };
+
+/**
+ * Cho phép Admin hoặc feedbacked-staff quản lý review (danh sách, ẩn/hiện).
+ * Full quyền bộ quản lý review.
+ */
+const authAdminOrFeedbackedStaffMiddleware = async (req, res, next) => {
+    try {
+        const authHeader = req.headers?.authorization;
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Token is not provided",
+            });
+        }
+
+        const token = authHeader.split(" ")[1];
+        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        const user = await UserModel.findById(decoded._id).populate("role_id", "name");
+
+        if (!user) {
+            return res.status(404).json({
+                status: "ERR",
+                message: "User not found",
+            });
+        }
+        if (user.status === false) {
+            return res.status(403).json({
+                status: "ERR",
+                message: "Account is locked",
+            });
+        }
+        const roleName = user.role_id?.name?.toLowerCase?.();
+        if (roleName !== "admin" && roleName !== "feedbacked-staff") {
+            return res.status(403).json({
+                status: "ERR",
+                message: "Access denied",
+            });
+        }
+        req.user = user;
+        next();
+    } catch (error) {
+        if (error.name === "TokenExpiredError") {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Token has expired",
+            });
+        }
+        if (error.name === "JsonWebTokenError") {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Invalid token",
+            });
+        }
+        return res.status(500).json({
+            status: "ERR",
+            message: error.message,
+        });
+    }
+};
+
 const authStaffOrAdminMiddleware = async (req, res, next) => {
     const authHeader = req.headers?.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -421,4 +481,5 @@ module.exports = {
     authSalesStaffMiddleware,
     authStaffOrAdminMiddleware,
     authAdminOrSalesStaffForOrderMiddleware,
+    authAdminOrFeedbackedStaffMiddleware,
 };
