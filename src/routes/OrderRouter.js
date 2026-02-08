@@ -2,29 +2,23 @@ const express = require("express");
 const routerOrder = express.Router();
 const orderController = require("../controller/OrderController");
 
+
 const {
-    authAdminMiddleware,
-    authMiddleware,
+    authAdminOrSalesStaffForOrderMiddleware,
     authUserMiddleware
 } = require("../middleware/authMiddleware");
-
-// Admin: danh sách order + thống kê
-routerOrder.get("/", authAdminMiddleware, orderController.getOrdersAdmin);
-routerOrder.get("/stats", authAdminMiddleware, orderController.getOrderStatusStatsAdmin);
-
+// Admin + Sales-staff: danh sách order + thống kê + danh sách log thay đổi trạng thái
+routerOrder.get("/", authAdminOrSalesStaffForOrderMiddleware, orderController.getOrdersAdmin);
+routerOrder.get("/stats", authAdminOrSalesStaffForOrderMiddleware, orderController.getOrderStatusStatsAdmin);
+routerOrder.get("/status-logs", authAdminOrSalesStaffForOrderMiddleware, orderController.getOrderStatusLogs);
 routerOrder.post("/create", authUserMiddleware, orderController.createOrder);
-
 // Customer: Lịch sử mua hàng
 routerOrder.get("/my-orders", authUserMiddleware, orderController.getMyOrders);
 routerOrder.get("/my-orders/:id", authUserMiddleware, orderController.getMyOrderById);
-
-// Admin: chi tiết order
-routerOrder.get("/:id", authAdminMiddleware, orderController.getOrderDetailAdmin);
-
-routerOrder.put("/update/:id", authAdminMiddleware, orderController.updateOrder);
-
+// Admin + Sales-staff: chi tiết order + log thay đổi trạng thái + cập nhật trạng thái
+routerOrder.get("/:id/status-logs", authAdminOrSalesStaffForOrderMiddleware, orderController.getOrderStatusLogs);
+routerOrder.get("/:id", authAdminOrSalesStaffForOrderMiddleware, orderController.getOrderDetailAdmin);
+routerOrder.put("/update/:id", authAdminOrSalesStaffForOrderMiddleware, orderController.updateOrder);
 routerOrder.put("/cancel/:id", authUserMiddleware, orderController.cancelOrder);
-
 routerOrder.post("/retry-payment", authUserMiddleware, orderController.retryVnpayPayment);
-
 module.exports = routerOrder;

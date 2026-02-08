@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 
+
 // ✅ Helper: Format Date thành string YYYY-MM-DD theo timezone Asia/Ho_Chi_Minh (DRY)
 const makeVNDateStr = (date) => {
   if (!date) return null;
@@ -11,9 +12,11 @@ const makeVNDateStr = (date) => {
   return `${year}-${month}-${day}`;
 };
 
+
 const productSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
+
 
     short_desc: {
       type: String,
@@ -22,7 +25,9 @@ const productSchema = new mongoose.Schema(
       maxlength: [200, "short_desc must be at most 200 characters"],
     },
 
+
     price: { type: Number, required: true, min: 0 }, // Giá bán
+
 
     // ✅ Giá nhập hàng (từ supplier) - tự động sync từ Supplier.purchaseCosts
     purchasePrice: {
@@ -30,6 +35,7 @@ const productSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+
 
     // Admin set lúc tạo
     plannedQuantity: {
@@ -42,6 +48,7 @@ const productSchema = new mongoose.Schema(
       },
     },
 
+
     // Cộng dồn từ các phiếu nhập
     receivedQuantity: {
       type: Number,
@@ -52,6 +59,7 @@ const productSchema = new mongoose.Schema(
         message: "receivedQuantity phải là số nguyên",
       },
     },
+
 
     // Tồn thực tế
     onHandQuantity: {
@@ -64,6 +72,7 @@ const productSchema = new mongoose.Schema(
       },
     },
 
+
     // Giữ hàng cho đơn (nếu bạn có flow đặt hàng)
     reservedQuantity: {
       type: Number,
@@ -75,12 +84,22 @@ const productSchema = new mongoose.Schema(
       },
     },
 
+
+    // ✅ Số kg đã phân bổ cho đặt trước (pre-order). Dùng để hiển thị "trừ" khỏi stock khả dụng.
+    preOrderAllocatedKg: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+
     receivingStatus: {
       type: String,
       enum: ["NOT_RECEIVED", "PARTIAL", "RECEIVED"], // Chưa nhập / Chưa đủ / Đã nhập đủ
       default: "NOT_RECEIVED",
       index: true,
     },
+
 
     stockStatus: {
       type: String,
@@ -89,12 +108,14 @@ const productSchema = new mongoose.Schema(
       index: true,
     },
 
+
     category: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "categories",
       required: true,
       index: true,
     },
+
 
     images: {
       type: [{ type: String, trim: true }],
@@ -115,6 +136,7 @@ const productSchema = new mongoose.Schema(
       },
     },
 
+
     // Đánh giá sản phẩm
     avgRating: {
       type: Number,
@@ -128,6 +150,7 @@ const productSchema = new mongoose.Schema(
       min: 0,
     },
 
+
     brand: { type: String, required: true, trim: true }, // ✅ Bắt buộc phải có brand (tên nhà cung cấp)
     // ✅ Liên kết đến Supplier (tự động set khi admin chọn brand)
     supplier: {
@@ -136,12 +159,14 @@ const productSchema = new mongoose.Schema(
       index: true,
     },
 
+
     // Số lô (tăng dần mỗi lần reset để nhập lô mới)
     batchNumber: {
       type: Number,
       default: 1,
       min: 1,
     },
+
 
     detail_desc: {
       type: String,
@@ -150,13 +175,16 @@ const productSchema = new mongoose.Schema(
       maxlength: [1000, "detail_desc must be at most 1000 characters"],
     },
 
+
     status: { type: Boolean, default: true }, // bật/tắt hiển thị
+
 
     // Ngày nhập kho (tự động ghi nhận khi nhập kho lần đầu) - Date object
     warehouseEntryDate: {
       type: Date,
       default: null,
     },
+
 
     // ✅ Date-only string (YYYY-MM-DD) theo timezone Asia/Ho_Chi_Minh để tránh timezone issues
     warehouseEntryDateStr: {
@@ -165,11 +193,13 @@ const productSchema = new mongoose.Schema(
       match: [/^\d{4}-\d{2}-\d{2}$/, "warehouseEntryDateStr phải có format YYYY-MM-DD"],
     },
 
+
     // Ngày hết hạn (nhân viên kho nhập khi nhập hàng) - Date object
     expiryDate: {
       type: Date,
       default: null,
     },
+
 
     // ✅ Date-only string (YYYY-MM-DD) theo timezone Asia/Ho_Chi_Minh để tránh timezone issues
     expiryDateStr: {
@@ -177,28 +207,36 @@ const productSchema = new mongoose.Schema(
       default: null,
       match: [/^\d{4}-\d{2}-\d{2}$/, "expiryDateStr phải có format YYYY-MM-DD"],
     },
-
+    // ✅ Giá sắp hết hạn: còn ≤ nearExpiryDaysThreshold ngày thì bán với giá giảm (effectivePrice = price * (1 - nearExpiryDiscountPercent/100))
+    nearExpiryDaysThreshold: {
+      type: Number,
+      default: 7,
+      min: 0,
+      validate: { validator: Number.isInteger, message: "nearExpiryDaysThreshold phải là số nguyên" },
+    },
+    nearExpiryDiscountPercent: {
+      type: Number,
+      default: 50,
+      min: 0,
+      max: 100,
+    },
   },
-  { 
+  {
     timestamps: true,
     toJSON: { virtuals: true }, // ✅ Enable virtuals khi convert sang JSON
     toObject: { virtuals: true }, // ✅ Enable virtuals khi convert sang Object
   }
 );
-
 // ✅ Unique constraint: không cho phép trùng (name + brand)
 productSchema.index({ name: 1, brand: 1 }, { unique: true });
-
 // Virtual: available = onHand - reserved
 productSchema.virtual("availableQuantity").get(function () {
   return Math.max(0, (this.onHandQuantity || 0) - (this.reservedQuantity || 0));
 });
-
 // Virtual: profit = price - purchasePrice
 productSchema.virtual("profit").get(function () {
   return Math.max(0, (this.price || 0) - (this.purchasePrice || 0));
 });
-
 // Virtual: profitMargin = (price - purchasePrice) / price * 100 (%)
 productSchema.virtual("profitMargin").get(function () {
   const price = this.price || 0;
@@ -206,15 +244,12 @@ productSchema.virtual("profitMargin").get(function () {
   if (price === 0) return 0;
   return Math.round(((price - purchasePrice) / price) * 100 * 100) / 100; // Làm tròn 2 chữ số thập phân
 });
-
-
 // Tự cập nhật trạng thái khi lưu - Chuẩn hóa logic
 productSchema.pre("save", function (next) {
   const planned = this.plannedQuantity ?? 0;
   const received = this.receivedQuantity ?? 0;
   const onHand = this.onHandQuantity ?? 0;
   const reserved = this.reservedQuantity ?? 0;
-
   // ✅ Đảm bảo invariant: 0 ≤ onHandQuantity ≤ receivedQuantity ≤ plannedQuantity
   if (onHand < 0) {
     return next(new Error("onHandQuantity không được âm"));
@@ -228,7 +263,6 @@ productSchema.pre("save", function (next) {
   if (received > planned) {
     return next(new Error("receivedQuantity không được vượt plannedQuantity"));
   }
-
   // ✅ Chuẩn hóa receivingStatus
   if (received === 0) {
     this.receivingStatus = "NOT_RECEIVED";
@@ -238,7 +272,6 @@ productSchema.pre("save", function (next) {
     // received === planned
     this.receivingStatus = "RECEIVED";
   }
-
   // ✅ Chuẩn hóa stockStatus
   if (onHand > 0) {
     this.stockStatus = "IN_STOCK";
@@ -246,19 +279,16 @@ productSchema.pre("save", function (next) {
     // onHand === 0
     this.stockStatus = "OUT_OF_STOCK";
   }
-
   // ✅ Safety: reserved không được vượt onHand
   if (reserved > onHand) {
     return next(new Error("reservedQuantity cannot exceed onHandQuantity"));
   }
-
   // ✅ Validate images.length === imagePublicIds.length
   const imagesLength = Array.isArray(this.images) ? this.images.length : 0;
   const imagePublicIdsLength = Array.isArray(this.imagePublicIds) ? this.imagePublicIds.length : 0;
   if (imagesLength !== imagePublicIdsLength) {
     return next(new Error("Số lượng images và imagePublicIds phải bằng nhau"));
   }
-
   // ✅ Tự động sync date string fields từ Date objects khi Date thay đổi
   // Xử lý cả case Date bị set về null
   if (this.isModified("warehouseEntryDate")) {
@@ -267,15 +297,12 @@ productSchema.pre("save", function (next) {
     // Fallback: sync nếu Date có nhưng Str chưa có (cho data cũ)
     this.warehouseEntryDateStr = makeVNDateStr(this.warehouseEntryDate);
   }
-
   if (this.isModified("expiryDate")) {
     this.expiryDateStr = this.expiryDate ? makeVNDateStr(this.expiryDate) : null;
   } else if (this.expiryDate && !this.expiryDateStr) {
     // Fallback: sync nếu Date có nhưng Str chưa có (cho data cũ)
     this.expiryDateStr = makeVNDateStr(this.expiryDate);
   }
-
   next();
 });
-
 module.exports = mongoose.model("products", productSchema);

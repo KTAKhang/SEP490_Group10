@@ -72,6 +72,13 @@ const supplierSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Map productId -> purchasePrice (dùng bởi ProductService, SupplierService)
+    purchaseCosts: {
+      type: Map,
+      of: Number,
+      default: () => new Map(),
+    },
+
     //  DANH SÁCH SẢN PHẨM CUNG CẤP (QUAN TRỌNG)
     suppliedProducts: [
       {

@@ -65,7 +65,7 @@ const discountSchema = new mongoose.Schema(
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "users",
-            required: true
+            default: null
         },
 
         approvedBy: {
@@ -90,6 +90,17 @@ const discountSchema = new mongoose.Schema(
             trim: true,
             maxlength: [500, "Description cannot exceed 500 characters"],
             default: ""
+        },
+
+        isBirthdayDiscount: {
+            type: Boolean,
+            default: false
+        },
+
+        targetUserId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "users",
+            default: null
         }
     },
     {
@@ -102,6 +113,7 @@ const discountSchema = new mongoose.Schema(
 
 discountSchema.index({ status: 1, isActive: 1 });
 discountSchema.index({ startDate: 1, endDate: 1 });
+discountSchema.index({ isBirthdayDiscount: 1, targetUserId: 1, createdAt: 1 });
 
 const DiscountModel = mongoose.model("discounts", discountSchema);
 module.exports = DiscountModel;

@@ -21,6 +21,8 @@ const RoleModel = require("../models/RolesModel");
 const OrderModel = require("../models/OrderModel");
 const PaymentModel = require("../models/PaymentModel");
 const NotificationService = require("./NotificationService");
+const CustomerEmailService = require("./CustomerEmailService");
+const birthdayDiscountConfig = require("../config/birthdayDiscountConfig");
 const mongoose = require("mongoose");
 
 const DiscountService = {
@@ -565,6 +567,8 @@ const DiscountService = {
             const filter = {};
             if (status) filter.status = status;
             if (isActive !== undefined) filter.isActive = isActive === "true" || isActive === true;
+            // Admin/Staff list: never show birthday vouchers (auto-generated, not managed here)
+            filter.isBirthdayDiscount = { $ne: true };
 
             const sortOption = {};
             const order = sortOrder === "asc" ? 1 : -1;
@@ -579,10 +583,31 @@ const DiscountService = {
 
             const total = await DiscountModel.countDocuments(filter);
 
+            // Thống kê theo đúng bộ lọc (toàn bộ dữ liệu, không chỉ trang hiện tại)
+            const [pending, approved, rejected, expired, active, inactive] = await Promise.all([
+                DiscountModel.countDocuments({ ...filter, status: "PENDING" }),
+                DiscountModel.countDocuments({ ...filter, status: "APPROVED" }),
+                DiscountModel.countDocuments({ ...filter, status: "REJECTED" }),
+                DiscountModel.countDocuments({ ...filter, status: "EXPIRED" }),
+                DiscountModel.countDocuments({ ...filter, isActive: true }),
+                DiscountModel.countDocuments({ ...filter, isActive: false }),
+            ]);
+
+            const statistics = {
+                total,
+                pending,
+                approved,
+                rejected,
+                expired,
+                active,
+                inactive,
+            };
+
             return {
                 status: "OK",
                 data: discounts,
                 pagination: { page: Number(page), limit: Number(limit), total },
+                statistics,
             };
         } catch (error) {
             return { status: "ERR", message: error.message };
@@ -617,30 +642,57 @@ const DiscountService = {
     },
 
     /**
-     * Get valid discount codes for customers
+     * Get valid discount codes for customers (phù hợp đơn hàng: minOrderValue <= orderValue, chưa dùng).
+     * Birthday vouchers are excluded here: they are only suggested at checkout, not shown on the voucher list page.
      *
+     * @param {String} [userId] - User ID để loại mã đã dùng
+     * @param {Number} [orderValue] - Giá trị đơn hàng để lọc mã thỏa đơn tối thiểu
      * @returns {Object}
      */
-    async getValidDiscountsForCustomer() {
+    async getValidDiscountsForCustomer(userId = null, orderValue = null) {
         try {
             const now = new Date();
 
-            const discounts = await DiscountModel.find({
+            const query = {
                 status: "APPROVED",
                 isActive: true,
                 startDate: { $lte: now },
                 endDate: { $gte: now },
-            })
-                .lean()
-                .sort({ createdAt: -1 });
+                // Do not list birthday vouchers here; they are suggested at checkout only
+                isBirthdayDiscount: { $ne: true },
+            };
 
-            const validDiscounts = discounts.filter(
+            if (orderValue != null && orderValue !== "") {
+                query.minOrderValue = { $lte: Number(orderValue) };
+            }
+
+            let discounts = await DiscountModel.find(query)
+                .lean()
+                .sort({ discountPercent: -1, maxDiscountAmount: -1 });
+
+            discounts = discounts.filter(
                 (d) => d.usageLimit === null || d.usedCount < d.usageLimit
             );
 
+            // Personal vouchers: only show if targetUserId is null or matches current user
+            if (userId) {
+                const uid = userId.toString();
+                discounts = discounts.filter(
+                    (d) => !d.targetUserId || d.targetUserId.toString() === uid
+                );
+            } else {
+                discounts = discounts.filter((d) => !d.targetUserId);
+            }
+
+            if (userId) {
+                const usedDiscountIds = await DiscountUsageModel.find({ userId }).distinct("discountId");
+                const usedSet = new Set(usedDiscountIds.map((id) => id.toString()));
+                discounts = discounts.filter((d) => !usedSet.has(d._id.toString()));
+            }
+
             return {
                 status: "OK",
-                data: validDiscounts,
+                data: discounts,
             };
         } catch (error) {
             return { status: "ERR", message: error.message };
@@ -678,6 +730,11 @@ const DiscountService = {
 
             if (discount.usageLimit !== null && discount.usedCount >= discount.usageLimit) {
                 return { status: "ERR", message: "Discount code has reached its usage limit" };
+            }
+
+            // Personal voucher: only the target user can use it
+            if (discount.targetUserId && discount.targetUserId.toString() !== userId.toString()) {
+                return { status: "ERR", message: "This discount code is not valid for your account" };
             }
 
             const existingUsage = await DiscountUsageModel.findOne({
@@ -749,6 +806,11 @@ const DiscountService = {
                 return { status: "ERR", message: "Discount code has reached its usage limit" };
             }
 
+            // Personal voucher: only the target user can use it
+            if (discount.targetUserId && discount.targetUserId.toString() !== userId.toString()) {
+                return { status: "ERR", message: "This discount code is not valid for your account" };
+            }
+
             // Check if user already used this discount
             const existingUsage = await DiscountUsageModel.findOne({
                 discountId: discount._id,
@@ -796,10 +858,16 @@ const DiscountService = {
                         return { status: "ERR", message: "Order does not belong to user" };
                     }
 
-                    // Update order total to reflect discount
+                    // Update order total and discount info for display
                     const updateResult = await OrderModel.updateOne(
                         { _id: orderObjectId },
-                        { $set: { total_price: finalAmount } }
+                        {
+                            $set: {
+                                total_price: finalAmount,
+                                discount_code: discount.code,
+                                discount_amount: discountAmount,
+                            },
+                        }
                     );
 
                     if (updateResult.matchedCount === 0) {
@@ -886,6 +954,267 @@ const DiscountService = {
             };
         } catch (error) {
             return { status: "ERR", message: error.message };
+        }
+    },
+
+    /**
+     * Birthday voucher usage report (admin). Statistics only; no list of codes.
+     * Query: day, month, year (optional). Filter by usedAt time range.
+     *
+     * @param {Object} query - { day, month, year } optional
+     * @returns {Object} { totalUsage, totalDiscountAmount, uniqueUsers, averageDiscountPerOrder }
+     */
+    async getBirthdayReport(query = {}) {
+        try {
+            const { day, month, year } = query;
+            const matchStage = { "discount.isBirthdayDiscount": true };
+
+            if (year !== undefined && year !== "" && year !== null) {
+                const y = Number(year);
+                let startDate, endDate;
+                if (month !== undefined && month !== "" && month !== null) {
+                    const m = Number(month) - 1; // 0-indexed
+                    if (day !== undefined && day !== "" && day !== null) {
+                        const d = Number(day);
+                        startDate = new Date(y, m, d, 0, 0, 0, 0);
+                        endDate = new Date(y, m, d, 23, 59, 59, 999);
+                    } else {
+                        startDate = new Date(y, m, 1, 0, 0, 0, 0);
+                        endDate = new Date(y, m + 1, 0, 23, 59, 59, 999);
+                    }
+                } else {
+                    startDate = new Date(y, 0, 1, 0, 0, 0, 0);
+                    endDate = new Date(y, 11, 31, 23, 59, 59, 999);
+                }
+                matchStage.usedAt = { $gte: startDate, $lte: endDate };
+            }
+
+            const pipeline = [
+                { $lookup: { from: "discounts", localField: "discountId", foreignField: "_id", as: "discount" } },
+                { $unwind: "$discount" },
+                { $match: matchStage },
+                {
+                    $group: {
+                        _id: null,
+                        totalUsage: { $sum: 1 },
+                        totalDiscountAmount: { $sum: "$discountAmount" },
+                        uniqueUsers: { $addToSet: "$userId" },
+                    },
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        totalUsage: 1,
+                        totalDiscountAmount: 1,
+                        uniqueUsers: { $size: "$uniqueUsers" },
+                        averageDiscountPerOrder: {
+                            $cond: [
+                                { $eq: ["$totalUsage", 0] },
+                                0,
+                                { $divide: ["$totalDiscountAmount", "$totalUsage"] },
+                            ],
+                        },
+                    },
+                },
+            ];
+
+            const result = await DiscountUsageModel.aggregate(pipeline);
+            const stats = result[0] || {
+                totalUsage: 0,
+                totalDiscountAmount: 0,
+                uniqueUsers: 0,
+                averageDiscountPerOrder: 0,
+            };
+
+            return { status: "OK", data: stats };
+        } catch (error) {
+            return { status: "ERR", message: error.message };
+        }
+    },
+
+    /**
+     * Birthday voucher: get today's month (1–12) and day (1–31) in Asia/Ho_Chi_Minh.
+     * Uses Intl so result is correct regardless of server timezone.
+     */
+    _getTodayMonthDayVN() {
+        const formatter = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Asia/Ho_Chi_Minh",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+        });
+        const parts = formatter.formatToParts(new Date());
+        const get = (type) => parseInt(parts.find((p) => p.type === type).value, 10);
+        return { month: get("month"), day: get("day"), year: get("year") };
+    },
+
+    /**
+     * Find customer users whose birthday (as calendar date in VN) falls on today's month+day (VN).
+     * Compares only month and day so any birth year matches (e.g. 2003-02-08 and 2026-02-08 both match 2/8).
+     */
+    async _findBirthdayCustomersToday() {
+        const { month, day } = this._getTodayMonthDayVN();
+        const customerRole = await RoleModel.findOne({ name: "customer" });
+        if (!customerRole) {
+            console.log("[BirthdayVoucher] No customer role found");
+            return [];
+        }
+
+        const todayMonthDay = `${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
+        const users = await UserModel.aggregate([
+            {
+                $match: {
+                    role_id: new mongoose.Types.ObjectId(customerRole._id),
+                    status: true,
+                    birthday: { $exists: true, $ne: null },
+                },
+            },
+            {
+                $addFields: {
+                    birthdayMonthDayVN: {
+                        $dateToString: {
+                            format: "%m-%d",
+                            date: "$birthday",
+                            timezone: "Asia/Ho_Chi_Minh",
+                        },
+                    },
+                },
+            },
+            { $match: { birthdayMonthDayVN: todayMonthDay } },
+            { $project: { _id: 1, email: 1, user_name: 1, birthday: 1 } },
+        ]);
+
+        console.log("[BirthdayVoucher] Today (VN) month=" + month + " day=" + day + " (" + todayMonthDay + "), found " + users.length + " customer(s) with birthday today");
+        return users;
+    },
+
+    /**
+     * Check if user already received a birthday voucher in the given calendar year.
+     * Used to enforce: 1 birthday voucher per user per year (prevents abuse e.g. user
+     * updating birthday on profile to get multiple codes). To skip this check for testing,
+     * comment out the block in runDailyBirthdayVouchers that calls this and skips when true.
+     */
+    async _alreadyReceivedBirthdayThisYear(userId, year) {
+        const startOfYear = new Date(year, 0, 1);
+        const endOfYear = new Date(year, 11, 31, 23, 59, 59, 999);
+        const existing = await DiscountModel.findOne({
+            isBirthdayDiscount: true,
+            targetUserId: new mongoose.Types.ObjectId(userId),
+            createdAt: { $gte: startOfYear, $lte: endOfYear },
+        }).lean();
+        return !!existing;
+    },
+
+    /**
+     * Create one birthday discount for a user (idempotent per year via caller check).
+     */
+    async _createBirthdayDiscount(userId, year) {
+        const now = new Date();
+        const expiryDays = birthdayDiscountConfig.expiryDays;
+        const endDate = new Date(now);
+        endDate.setDate(endDate.getDate() + expiryDays);
+
+        const code = `BDAY-${userId}-${year}`.toUpperCase();
+
+        const discount = new DiscountModel({
+            code,
+            discountPercent: birthdayDiscountConfig.discountPercent,
+            minOrderValue: birthdayDiscountConfig.minOrderValue,
+            maxDiscountAmount: birthdayDiscountConfig.maxDiscountAmount,
+            startDate: now,
+            endDate,
+            usageLimit: 1,
+            usedCount: 0,
+            status: "APPROVED",
+            isActive: true,
+            createdBy: null,
+            approvedBy: null,
+            approvedAt: now,
+            description: "Birthday voucher auto generated",
+            isBirthdayDiscount: true,
+            targetUserId: new mongoose.Types.ObjectId(userId),
+        });
+
+        await discount.save();
+        return discount;
+    },
+
+    /**
+     * Send FCM + email for a created birthday voucher. Logs errors; does not throw.
+     */
+    async _sendBirthdayNotifications(user, discount) {
+        const code = discount.code;
+        const message = `Happy Birthday! Here is your personal discount code: ${code}`;
+
+        try {
+            await NotificationService.sendToUser(user._id.toString(), {
+                title: "Happy Birthday!",
+                body: message,
+                data: {
+                    type: "discount",
+                    action: "view_voucher",
+                    code,
+                    discountId: discount._id.toString(),
+                },
+            });
+        } catch (err) {
+            console.error("[BirthdayVoucher] FCM failed for user", user._id, err.message);
+        }
+
+        try {
+            const emailResult = await CustomerEmailService.sendBirthdayVoucherEmail(
+                user.email,
+                user.user_name || "Customer",
+                code
+            );
+            if (emailResult.status !== "OK") {
+                console.error("[BirthdayVoucher] Email failed for user", user._id, emailResult.message);
+            }
+        } catch (err) {
+            console.error("[BirthdayVoucher] Email error for user", user._id, err.message);
+        }
+    },
+
+    /**
+     * Run daily birthday voucher: find users with birthday today (VN), create voucher, send FCM + email.
+     * Idempotent: skips users who already received a birthday voucher this year.
+     * Does not modify User or Profile; uses only existing User.birthday.
+     *
+     * @returns {Object} { created, skipped, total }
+     */
+    async runDailyBirthdayVouchers() {
+        const { year } = this._getTodayMonthDayVN();
+        let created = 0;
+        let skipped = 0;
+
+        try {
+            const users = await this._findBirthdayCustomersToday();
+            if (users.length === 0) {
+                console.log("[BirthdayVoucher] No birthday users today (no customer has birthday on this calendar date in VN)");
+                return { created, skipped, total: 0 };
+            }
+
+            for (const user of users) {
+                const userId = user._id.toString();
+                // --- Anti-abuse: 1 voucher per user per year. "Already received" is stored in Discount collection (isBirthdayDiscount + targetUserId + createdAt this year). Comment out block below to skip when testing. ---
+                const already = await this._alreadyReceivedBirthdayThisYear(userId, year);
+                if (already) {
+                    skipped++;
+                    continue;
+                }
+                // --- End skip-for-testing ---
+
+                const discount = await this._createBirthdayDiscount(userId, year);
+                created++;
+                await this._sendBirthdayNotifications(user, discount);
+            }
+
+            console.log("[BirthdayVoucher] Done. Created:", created, "Skipped (already this year):", skipped);
+            return { created, skipped, total: users.length };
+        } catch (error) {
+            console.error("[BirthdayVoucher] Job error:", error);
+            throw error;
         }
     },
 };

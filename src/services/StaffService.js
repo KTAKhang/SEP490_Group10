@@ -4,8 +4,10 @@
  */
 const UserModel = require("../models/UserModel");
 const RoleModel = require("../models/RolesModel");
+const cloudinary = require("../config/cloudinaryConfig");
 
-const ALLOWED_ROLES = ["sales-staff", "finance-staff", "inventory-staff"];
+/** Official staff roles (from roles collection) */
+const ALLOWED_ROLES = ["sales-staff", "warehouse_staff", "feedbacked-staff"];
 
 // Helper function to normalize status input
 function normalizeStatus(input) {
@@ -123,10 +125,11 @@ const StaffService = {
      * @param {String} [data.phone] - New staff phone number
      * @param {String} [data.address] - New staff address
      * @param {String} [data.role] - New staff role name
-     * @param {String} [data.avatar] - New staff avatar URL
+     * @param {String} [data.avatar] - New staff avatar URL (when not uploading file)
+     * @param {Object} [file] - Multer file object (req.file) when avatar image is uploaded
      * @returns {Promise<Object>} Result object with status and message
      */
-    async updateStaff(staffId, data) {
+    async updateStaff(staffId, data, file) {
         try {
             if (!staffId) {
                 return { status: "ERR", message: "Staff ID is required" };
@@ -140,7 +143,7 @@ const StaffService = {
                 return { status: "ERR", message: "Not a staff account" };
             }
 
-            const { user_name, password, phone, address, role, avatar } = data;
+            const { user_name, password, phone, address, role, avatar } = data || {};
 
             // Update user_name if provided and check uniqueness
             if (user_name && user_name !== staff.user_name) {
@@ -180,8 +183,24 @@ const StaffService = {
                 staff.role_id = staffRole._id;
             }
 
-            // Update avatar if provided
-            if (avatar !== undefined) {
+            // Update avatar: upload file to Cloudinary if provided, else use URL from data
+            if (file && file.buffer) {
+                if (staff.avatar) {
+                    try {
+                        const oldImageId = staff.avatar.split("/").pop().split(".")[0];
+                        await cloudinary.uploader.destroy(`avatars/${oldImageId}`);
+                    } catch (err) {
+                        console.warn("Staff avatar: could not delete old image on Cloudinary:", err.message);
+                    }
+                }
+                const uploadResult = await new Promise((resolve, reject) => {
+                    cloudinary.uploader.upload_stream(
+                        { folder: "avatars" },
+                        (error, result) => (error ? reject(error) : resolve(result))
+                    ).end(file.buffer);
+                });
+                staff.avatar = uploadResult.secure_url;
+            } else if (avatar !== undefined && typeof avatar === "string") {
                 staff.avatar = avatar;
             }
 
@@ -240,13 +259,23 @@ const StaffService = {
             .lean();
         const total = await UserModel.countDocuments(filter);
 
+        const [activeCount, inactiveCount] = await Promise.all([
+            UserModel.countDocuments({ ...filter, status: true }),
+            UserModel.countDocuments({ ...filter, status: false }),
+        ]);
+
         const data = users.map(u => ({
             ...u,
             role_name: u.role_id?.name,
             role_id: u.role_id?._id || u.role_id,
         }));
 
-        return { status: "OK", data, pagination: { page: Number(page), limit: Number(limit), total } };
+        return {
+            status: "OK",
+            data,
+            pagination: { page: Number(page), limit: Number(limit), total },
+            statistics: { total, active: activeCount, inactive: inactiveCount },
+        };
     },
 
     /**
@@ -326,13 +355,23 @@ const StaffService = {
             .lean();
         const total = await UserModel.countDocuments(criteria);
 
+        const [activeCount, inactiveCount] = await Promise.all([
+            UserModel.countDocuments({ ...criteria, status: true }),
+            UserModel.countDocuments({ ...criteria, status: false }),
+        ]);
+
         const data = users.map(u => ({
             ...u,
             role_name: u.role_id?.name,
             role_id: u.role_id?._id || u.role_id,
         }));
 
-        return { status: "OK", data, pagination: { page: Number(page), limit: Number(limit), total } };
+        return {
+            status: "OK",
+            data,
+            pagination: { page: Number(page), limit: Number(limit), total },
+            statistics: { total, active: activeCount, inactive: inactiveCount },
+        };
     },
 
     /**
@@ -384,13 +423,23 @@ const StaffService = {
             .lean();
         const total = await UserModel.countDocuments(criteria);
 
+        const [activeCount, inactiveCount] = await Promise.all([
+            UserModel.countDocuments({ ...criteria, status: true }),
+            UserModel.countDocuments({ ...criteria, status: false }),
+        ]);
+
         const data = users.map(u => ({
             ...u,
             role_name: u.role_id?.name,
             role_id: u.role_id?._id || u.role_id,
         }));
 
-        return { status: "OK", data, pagination: { page: Number(page), limit: Number(limit), total } };
+        return {
+            status: "OK",
+            data,
+            pagination: { page: Number(page), limit: Number(limit), total },
+            statistics: { total, active: activeCount, inactive: inactiveCount },
+        };
     }
 };
 
