@@ -2,7 +2,6 @@ const mongoose = require("mongoose");
 const NewsModel = require("../models/NewsModel");
 const NewsViewsModel = require("../models/NewsViewsModel");
 const UserModel = require("../models/UserModel");
-const cloudinary = require("../config/cloudinaryConfig");
 const { sanitizeHTMLWithImageValidation, validateHTMLImages, validateHTMLSecurity } = require("../utils/htmlSanitizer");
 
 /**
@@ -90,17 +89,16 @@ const validatePublishingRequirements = (news) => {
  * @returns {Promise<void>}
  */
 const manageFeaturedLimit = async () => {
-  const featuredCount = await NewsModel.countDocuments({ 
-    is_featured: true, 
-    status: "PUBLISHED" 
-  });
+  const featuredQuery = {
+    is_featured: true,
+    status: "PUBLISHED",
+    deleted_at: null,
+  };
+  const featuredCount = await NewsModel.countDocuments(featuredQuery);
 
   if (featuredCount >= 5) {
     // Find oldest featured news by published_at
-    const oldestFeatured = await NewsModel.findOne({
-      is_featured: true,
-      status: "PUBLISHED",
-    })
+    const oldestFeatured = await NewsModel.findOne(featuredQuery)
       .sort({ published_at: 1 })
       .select("_id");
 
@@ -416,6 +414,9 @@ const getNews = async (filters = {}) => {
       query.author_id = author_id;
     }
 
+    // Soft delete: chỉ lấy bài chưa bị xóa mềm
+    query.deleted_at = null;
+
     // BR-NEWS-11: Sorting
     let sort = {};
     if (public === "true" || public === true || query.status === "PUBLISHED") {
@@ -487,6 +488,9 @@ const getNewsById = async (id, userId = null, ipAddress = null) => {
   try {
     const news = await NewsModel.findById(id).populate("author_id", "user_name email avatar");
     if (!news) {
+      return { status: "ERR", message: "Bài viết không tồn tại" };
+    }
+    if (news.deleted_at) {
       return { status: "ERR", message: "Bài viết không tồn tại" };
     }
 
@@ -599,6 +603,9 @@ const updateNews = async (id, payload = {}, userId = null, isAdmin = false) => {
     if (!news) {
       return { status: "ERR", message: "Bài viết không tồn tại" };
     }
+    if (news.deleted_at) {
+      return { status: "ERR", message: "Bài viết không tồn tại" };
+    }
 
     // BR-NEWS-02: Check permission
     if (!isAdmin && news.author_id.toString() !== userId) {
@@ -702,9 +709,9 @@ const updateNews = async (id, payload = {}, userId = null, isAdmin = false) => {
 };
 
 /**
- * Delete News - Xóa bài viết
+ * Delete News - Xóa mềm bài viết (soft delete)
  * 
- * Thuật toán xóa bài viết:
+ * Thuật toán xóa mềm:
  * 
  * BƯỚC 1: Kiểm tra bài viết tồn tại
  * - Tìm bài viết theo ID
@@ -715,21 +722,9 @@ const updateNews = async (id, payload = {}, userId = null, isAdmin = false) => {
  * - Author: Chỉ có thể xóa bài viết của chính mình
  * - Nếu không có quyền → trả về lỗi
  * 
- * BƯỚC 3: Kiểm tra status (BR-NEWS-02)
- * - Không được xóa bài viết đã PUBLISHED trực tiếp
- * - Phải chuyển về DRAFT trước khi xóa
- * - Nếu là PUBLISHED → trả về lỗi
- * 
- * BƯỚC 4: Xóa thumbnail từ Cloudinary
- * - Nếu có thumbnailPublicId → xóa ảnh trên Cloudinary
- * - Bỏ qua lỗi nếu không xóa được (ảnh có thể đã bị xóa trước đó)
- * 
- * BƯỚC 5: Xóa tất cả view records liên quan
- * - Xóa tất cả records trong NewsViewsModel có news_id = id
- * - Đảm bảo không còn dữ liệu orphan
- * 
- * BƯỚC 6: Xóa bài viết khỏi database
- * - Sử dụng findByIdAndDelete để xóa
+ * BƯỚC 3: Xóa mềm
+ * - Set deleted_at = now(), deleted_by = userId
+ * - Không xóa thumbnail Cloudinary, không xóa views, không xóa comments (có thể khôi phục sau)
  * 
  * @param {string} id - ID của bài viết
  * @param {string} userId - ID của user đang xóa
@@ -748,24 +743,15 @@ const deleteNews = async (id, userId = null, isAdmin = false) => {
       return { status: "ERR", message: "Bạn không có quyền xóa bài viết này" };
     }
 
-    // BR-NEWS-02: Cannot delete PUBLISHED directly
-    if (news.status === "PUBLISHED") {
-      return { status: "ERR", message: "Không thể xóa bài viết đã PUBLISHED. Vui lòng chuyển về DRAFT trước" };
+    if (news.deleted_at) {
+      return { status: "OK", message: "Bài viết đã được xóa trước đó" };
     }
 
-    // Delete thumbnail from Cloudinary if exists
-    if (news.thumbnailPublicId) {
-      try {
-        await cloudinary.uploader.destroy(news.thumbnailPublicId);
-      } catch (err) {
-        console.warn(`Không thể xóa ảnh ${news.thumbnailPublicId} trên Cloudinary:`, err.message);
-      }
-    }
-
-    // Delete all related views
-    await NewsViewsModel.deleteMany({ news_id: id });
-
-    await NewsModel.findByIdAndDelete(id);
+    const deletedBy = userId ? new mongoose.Types.ObjectId(userId) : null;
+    await NewsModel.findByIdAndUpdate(id, {
+      deleted_at: new Date(),
+      deleted_by: deletedBy,
+    });
     return { status: "OK", message: "Xóa bài viết thành công" };
   } catch (error) {
     return { status: "ERR", message: error.message };
@@ -799,6 +785,7 @@ const getFeaturedNews = async () => {
     const featured = await NewsModel.find({
       status: "PUBLISHED",
       is_featured: true,
+      deleted_at: null,
     })
       .populate("author_id", "user_name email avatar")
       .sort({ published_at: -1 })
