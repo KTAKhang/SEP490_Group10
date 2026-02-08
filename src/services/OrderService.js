@@ -23,7 +23,7 @@ const STATUS_OPTIONS = [
   { value: "READY-TO-SHIP", label: "Ready to ship" },
   { value: "SHIPPING", label: "Shipping" },
   { value: "COMPLETED", label: "Completed" },
-  { value: "RETURNED", label: "Returned" },
+  { value: "REFUND", label: "Refund" },
   { value: "CANCELLED", label: "Cancelled" },
 ];
 
@@ -49,9 +49,9 @@ const normalizeToken = (value) =>
   value ? value.toString().trim().toUpperCase() : "";
 
 
-const isReturnedStatus = (value) => {
+const isRefundStatus = (value) => {
   const normalized = normalizeStatusName(value);
-  return normalized === "RETURNED";
+  return normalized === "REFUND";
 };
 
 
@@ -452,14 +452,15 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     );
     const nextStatusName = normalizeStatusName(newStatus.name);
     const paymentMethod = normalizeToken(order.payment_method);
-    if (isReturnedStatus(nextStatusName)) {
-      if (role !== "admin") {
+    if (isRefundStatus(nextStatusName)) {
+      const allowedRolesForRefund = ["admin", "sales-staff"];
+      if (!allowedRolesForRefund.includes(role)) {
         throw new Error(
-          "Only admins can move an order to the return status",
+          "Only admin or sales-staff can move an order to the refund status",
         );
       }
       if (currentStatusName !== "COMPLETED") {
-        throw new Error("Only COMPLETED orders can be moved to the return workflow");
+        throw new Error("Only COMPLETED orders can be moved to the refund workflow");
       }
     } else if (
       !isValidStatusTransition(paymentMethod, currentStatusName, nextStatusName)
@@ -512,6 +513,16 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     // Admin huỷ COD → chưa thu tiền nên để UNPAID (FAILED chỉ dùng khi thanh toán thất bại)
     if (nextStatusName === "CANCELLED" && payment.method === "COD") {
       payment.status = "UNPAID";
+      await payment.save({ session });
+    }
+
+
+    // COMPLETED → REFUND: payment chuyển PENDING (đợi nhân viên lấy hàng, hoàn tiền thủ công bên ngoài)
+    if (nextStatusName === "REFUND") {
+      payment.status = "PENDING";
+      payment.note = (payment.note || "").trim()
+        ? payment.note + "; Refund pending – staff to collect and process refund manually"
+        : "Refund pending – staff to collect and process refund manually";
       await payment.save({ session });
     }
 
@@ -594,6 +605,39 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
   } finally {
     session.endSession();
   }
+};
+
+
+/* =====================================================
+   CONFIRM REFUND PAYMENT (ADMIN / WAREHOUSE STAFF)
+   Chỉ cho phép khi đơn đang REFUND và payment đang PENDING.
+   Cập nhật payment sang SUCCESS khi đã hoàn tiền thủ công bên ngoài.
+===================================================== */
+const confirmRefundPayment = async (order_id) => {
+  const order = await OrderModel.findById(order_id);
+  if (!order) throw new Error("Order not found");
+
+  const currentStatusName = await getOrderStatusName(order.order_status_id, null);
+  if (normalizeStatusName(currentStatusName) !== "REFUND") {
+    throw new Error("Only orders in REFUND status can have refund payment confirmed");
+  }
+
+  const payment = await PaymentModel.findOne({
+    order_id: order._id,
+    type: "PAYMENT",
+  });
+  if (!payment) throw new Error("Order payment not found");
+  if (payment.status !== "PENDING") {
+    throw new Error("Refund payment can only be confirmed when payment status is PENDING");
+  }
+
+  payment.status = "SUCCESS";
+  payment.note = (payment.note || "").trim()
+    ? payment.note + "; Refund completed manually"
+    : "Refund completed manually";
+  await payment.save();
+
+  return { success: true, message: "Refund payment confirmed" };
 };
 
 
@@ -1266,6 +1310,7 @@ const getOrderStatusLogs = async (filters = {}) => {
 module.exports = {
   confirmCheckoutAndCreateOrder,
   updateOrder,
+  confirmRefundPayment,
   cancelOrderByCustomer,
   retryVnpayPayment,
   getOrdersByUser,
