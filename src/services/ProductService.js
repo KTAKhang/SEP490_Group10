@@ -316,7 +316,7 @@ const updateProductAdmin = async (id, payload = {}) => {
       if (!supplierDoc) {
         return {
           status: "ERR",
-          message: `Brand "${newBrand}" không tồn tại hoặc không đang hoạt động. Vui lòng chọn một nhà cung cấp hợp lệ.`,
+          message: `Brand "${newBrand}" does not exist or is inactive. Please choose a valid supplier.`,
         };
       }
 
@@ -410,7 +410,7 @@ const updateProductAdmin = async (id, payload = {}) => {
     if (imagesToDelete.length > 0) {
       try {
         await Promise.all(imagesToDelete.map(id => cloudinary.uploader.destroy(id).catch(err => {
-          console.warn(`Không thể xóa ảnh ${id} trên Cloudinary:`, err.message);
+          console.warn(`Failed to delete image ${id} on Cloudinary:`, err.message);
         })));
       } catch (err) {
         console.warn("Failed to remove old image:", err.message);
@@ -471,7 +471,7 @@ const updateProductExpiryDate = async (id, payload = {}) => {
         const minDateStr = formatDateVN(minDate);
         return {
           status: "ERR",
-          message: `Hạn sử dụng phải tối thiểu từ ngày ${minDateStr} (ngày mai theo timezone Asia/Ho_Chi_Minh)`
+          message: `Expiry date must be at least ${minDateStr} (tomorrow in Asia/Ho_Chi_Minh timezone)`
         };
       }
     } catch (err) {
@@ -489,7 +489,7 @@ const updateProductExpiryDate = async (id, payload = {}) => {
     const diffDays = calculateDaysBetween(warehouseEntryDate, newExpiryDate);
    
     if (diffDays <= 0) {
-      return { status: "ERR", message: "Hạn sử dụng phải sau ngày nhập kho." };
+      return { status: "ERR", message: "Expiry date must be after the warehouse entry date." };
     }
 
 
@@ -518,7 +518,7 @@ const deleteProduct = async (id) => {
       try {
         await Promise.all(product.imagePublicIds.map(publicId =>
           cloudinary.uploader.destroy(publicId).catch(err => {
-            console.warn(`Không thể xóa ảnh ${publicId} trên Cloudinary:`, err.message);
+            console.warn(`Failed to delete image ${publicId} on Cloudinary:`, err.message);
           })
         ));
       } catch (err) {

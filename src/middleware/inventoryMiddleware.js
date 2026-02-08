@@ -2,8 +2,8 @@ const jwt = require("jsonwebtoken");
 const UserModel = require("../models/UserModel");
 require("dotenv").config();
 
-// Role nhân viên quản lý kho trong DB
-const WAREHOUSE_ROLE_NAMES = ["warehouse_staff"];
+// Role nhân viên quản lý kho trong DB (hỗ trợ cả warehouse_staff và warehouse-staff)
+const WAREHOUSE_ROLE_NAMES = ["warehouse_staff", "warehouse-staff"];
 
 const getToken = (req) => req.headers.authorization?.split(" ")[1] || req.headers.authorization;
 

@@ -8,14 +8,14 @@ const checkoutHold = async (req, res) => {
         if (!selected_product_ids || !Array.isArray(selected_product_ids) || selected_product_ids.length === 0) {
             return res.status(400).json({
                 success: false,
-                message: "Vui lòng chọn ít nhất một sản phẩm để đặt hàng"
+                message: "Please select at least one product to place an order"
             });
         }
 
          if (!checkout_session_id || selected_product_ids.length === 0) {
             return res.status(400).json({
                 success: false,
-                message: "Không tìm thấy phiên thanh toán"
+                message: "Checkout session not found"
             });
         }
         const response = await CheckoutService.checkoutHold(user_id,selected_product_ids,checkout_session_id);
@@ -41,7 +41,7 @@ const cancelCheckout = async (req, res) => {
          if (!checkout_session_id || checkout_session_id.length === 0) {
             return res.status(400).json({
                 success: false,
-                message: "Không tìm thấy phiên thanh toán"
+                message: "Checkout session not found"
             });
         }
         const response = await CheckoutService.cancelCheckout(user_id,checkout_session_id);

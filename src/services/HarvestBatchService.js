@@ -68,7 +68,7 @@ const createHarvestBatch = async (payload = {}) => {
     if (supplier.cooperationStatus !== "ACTIVE") {
       return {
         status: "ERR",
-        message: `Không thể tạo lô thu hoạch cho nhà cung cấp có trạng thái ${supplier.cooperationStatus}. Chỉ nhà cung cấp ACTIVE mới được phép.`
+        message: `Cannot create harvest batch for supplier with status ${supplier.cooperationStatus}. Only ACTIVE suppliers are allowed.`
       };
     }
 
@@ -94,7 +94,7 @@ const createHarvestBatch = async (payload = {}) => {
     if (existingSameDay) {
       return {
         status: "ERR",
-        message: `Số lô "${batchNumberTrimmed}" đã tồn tại cho sản phẩm này trong cùng ngày thu hoạch. Vui lòng chọn số lô khác.`,
+        message: `Batch number "${batchNumberTrimmed}" already exists for this product on the same harvest date. Please choose a different batch number.`,
       };
     }
 
@@ -190,7 +190,7 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
           if (existingSameDay) {
             return {
               status: "ERR",
-              message: `Số lô "${newBatchNumber}" đã tồn tại cho sản phẩm này trong cùng ngày thu hoạch. Vui lòng chọn số lô khác.`,
+              message: `Batch number "${newBatchNumber}" already exists for this product on the same harvest date. Please choose a different batch number.`,
             };
           }
         }
