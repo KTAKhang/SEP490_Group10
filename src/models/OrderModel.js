@@ -103,6 +103,19 @@ const orderSchema = new mongoose.Schema(
       required: true,
     },
 
+    /** Mã giảm giá đã áp dụng (để hiển thị trên đơn hàng) */
+    discount_code: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    /** Số tiền được giảm (VNĐ) */
+    discount_amount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     /* =========================
        🔁 RETRY + AUTO DELETE
     ========================= */

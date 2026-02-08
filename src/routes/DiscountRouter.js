@@ -28,6 +28,7 @@ const {
     validateDiscountCodeController,
     applyDiscountCodeController,
     getDiscountUsageHistoryController,
+    getBirthdayReportController,
 } = require("../controller/DiscountController");
 
 // ===== SALES-STAFF ROUTES =====
@@ -52,6 +53,11 @@ router.put("/:discountId/activate", authAdminMiddleware, activateDiscountControl
 
 // Update discount code 
 router.put("/:discountId/admin", authAdminMiddleware, updateDiscountByAdminController);
+
+// Birthday voucher report (admin only). Statistics only; no list of codes.
+router.get("/birthday/report", authAdminMiddleware, getBirthdayReportController);
+// Manual trigger for testing; uncomment controller export and this line to re-enable.
+// router.post("/birthday/run-now", authAdminMiddleware, runBirthdayVoucherJobController);
 
 // ===== STAFF/ADMIN ROUTES =====
 // Get discount list (staff/admin)
