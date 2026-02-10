@@ -131,21 +131,6 @@ async function pushStatusHistory({
   });
 
   await order.save({ session });
-  // Ghi log chi tiết (giống InventoryTransaction có createdBy) để truy vấn nhân viên nào đã cập nhật đơn
-  await OrderStatusChangeLogModel.create(
-    [
-      {
-        order_id: order._id,
-        from_status: fromStatus,
-        to_status: toStatus,
-        changed_by: userId,
-        changed_by_role: roleValue,
-        note: note || "",
-        changed_at: changedAt,
-      },
-    ],
-    session ? { session } : {},
-  );
 
 }
 /* =====================================================
