@@ -214,11 +214,12 @@ const updateProductAdmin = async (id, payload = {}) => {
   try {
     const product = await ProductModel.findById(id);
     if (!product) return { status: "ERR", message: "Product does not exist" };
-    // Whitelist fields (Admin được sửa plannedQuantity, price, mô tả...)
+    // Whitelist fields (Admin được sửa plannedQuantity, price, purchasePrice, mô tả...)
     const allowed = [
       "name",
       "short_desc",
       "price",
+      "purchasePrice",
       "plannedQuantity",
       "category",
       "images",
@@ -235,6 +236,21 @@ const updateProductAdmin = async (id, payload = {}) => {
       if (!allowed.includes(key)) delete payload[key];
     }
 
+    // ✅ Cho phép update đầy đủ chỉ khi chưa có hàng trong kho: receivedQuantity = 0 và onHandQuantity = 0
+    // (gồm: sản phẩm mới tạo chưa nhập, hoặc đã reset lô). Khi đã có hàng nhập/tồn → chỉ được sửa mô tả.
+    const noStockInWarehouse =
+      (product.receivedQuantity ?? 0) === 0 && (product.onHandQuantity ?? 0) === 0;
+    const allowedWhenHasStock = ["short_desc", "detail_desc"];
+    if (!noStockInWarehouse) {
+      const disallowedKeys = Object.keys(payload).filter((k) => !allowedWhenHasStock.includes(k));
+      if (disallowedKeys.length > 0) {
+        return {
+          status: "ERR",
+          message:
+            "Khi sản phẩm đã có hàng trong kho (đã nhập / còn tồn), chỉ được cập nhật mô tả (short_desc) và mô tả chi tiết (detail_desc). Để sửa giá, số lượng, ảnh, ... cần đợi xuất hết và reset lô.",
+        };
+      }
+    }
 
     if (payload.name !== undefined) {
       const newName = (payload.name ?? "").toString().trim();
