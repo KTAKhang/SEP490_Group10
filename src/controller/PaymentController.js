@@ -293,7 +293,21 @@ const vnpayReturn = async (req, res) => {
           data: {
             type: "order",
             orderId: orderId.toString(),
-            action: "retry_payment",
+            action: "view_order",
+          },
+        });
+      } catch (notifErr) {
+        console.error("Failed to send payment failure notification:", notifErr);
+      }
+
+      try {
+        await NotificationService.sendToRole("sales-staff", {
+          title: "Order VNPay Payment Successfull",
+          body: `Payment successfull for order ${orderId}`,
+          data: {
+            type: "order",
+            orderId: orderId.toString(),
+            action: "view_order",
           },
         });
       } catch (notifErr) {
@@ -305,7 +319,7 @@ const vnpayReturn = async (req, res) => {
           .select("email user_name")
           .lean();
         if (user && user.email) {
-          await CustomerEmailService.sendPaymentFailureEmail(
+          await CustomerEmailService.sendPaymentSuccessEmail(
             user.email,
             user.user_name || "Customer",
             orderId.toString(),

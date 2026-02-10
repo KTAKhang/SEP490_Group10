@@ -118,13 +118,12 @@ const sendMessage = async ({ roomId, senderId, senderRole, content }) => {
     },
   ]);
 
-  // await NotificationService.sendToUser(order.user_id.toString(), {
-  //         title: "VNPay payment failed",
-  //         body: `Thanh toán thất bại cho đơn hàng ${orderId}. Go to Order History to re-pay in 10 minutes`,
+  // await NotificationService.sendToUser(senderId.toString(), {
+  //         title: "New message",
+  //         body: "You have new massage, Please check your box chat",
   //         data: {
-  //           type: "order",
-  //           orderId: orderId.toString(),
-  //           action: "retry_payment",
+  //           type: "chat",
+  //           action: "chat_message",
   //         },
   //       });
 
