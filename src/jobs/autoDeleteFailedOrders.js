@@ -168,7 +168,7 @@ cron.schedule("*/1 * * * *", async () => {
       try {
         await NotificationService.sendToUser(order.user_id, {
           title: "Order Removed",
-          body: `Đơn hàng ${order._id.toString()} đã được xoá tự động vì thanh toán chưa hoàn tất (pending > 15 phút).`,
+          body: `The order ${order._id.toString()} was automatically deleted because the payment was not completed (pending > 15 minutes).`,
           data: {
             type: "order",
             orderId: order._id.toString(),
