@@ -19,6 +19,7 @@ routerOrder.get("/my-orders/:id", authUserMiddleware, orderController.getMyOrder
 routerOrder.get("/:id/status-logs", authAdminOrSalesStaffForOrderMiddleware, orderController.getOrderStatusLogs);
 routerOrder.get("/:id", authAdminOrSalesStaffForOrderMiddleware, orderController.getOrderDetailAdmin);
 routerOrder.put("/update/:id", authAdminOrSalesStaffForOrderMiddleware, orderController.updateOrder);
+routerOrder.put("/:id/payment-refund-done", authAdminOrSalesStaffForOrderMiddleware, orderController.confirmRefundPayment);
 routerOrder.put("/cancel/:id", authUserMiddleware, orderController.cancelOrder);
 routerOrder.post("/retry-payment", authUserMiddleware, orderController.retryVnpayPayment);
 module.exports = routerOrder;

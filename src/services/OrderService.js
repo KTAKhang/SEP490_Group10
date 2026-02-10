@@ -1,7 +1,6 @@
 const OrderModel = require("../models/OrderModel");
 const OrderDetailModel = require("../models/OrderDetailModel");
 const OrderStatusModel = require("../models/OrderStatusModel");
-const OrderStatusChangeLogModel = require("../models/OrderStatusChangeLogModel");
 const CartModel = require("../models/CartsModel");
 const CartDetailModel = require("../models/CartDetailsModel");
 const PaymentModel = require("../models/PaymentModel");
@@ -12,6 +11,7 @@ const PaymentService = require("../services/PaymentService");
 const ShippingService = require("../services/ShippingService");
 const NotificationService = require("../services/NotificationService");
 const CustomerEmailService = require("./CustomerEmailService");
+const DiscountService = require("./DiscountService");
 const UserModel = require("../models/UserModel");
 const ReviewModel = require("../models/ReviewModel");
 const { default: mongoose } = require("mongoose");
@@ -23,7 +23,7 @@ const STATUS_OPTIONS = [
   { value: "READY-TO-SHIP", label: "Ready to ship" },
   { value: "SHIPPING", label: "Shipping" },
   { value: "COMPLETED", label: "Completed" },
-  { value: "RETURNED", label: "Returned" },
+  { value: "REFUND", label: "Refund" },
   { value: "CANCELLED", label: "Cancelled" },
 ];
 
@@ -51,9 +51,11 @@ const normalizeStatusName = (value) => {
 const normalizeToken = (value) =>
   value ? value.toString().trim().toUpperCase() : "";
 
-const isReturnedStatus = (value) => {
+
+
+const isRefundStatus = (value) => {
   const normalized = normalizeStatusName(value);
-  return normalized === "RETURNED";
+  return normalized === "REFUND";
 };
 
 const buildStatusRegex = (value) => {
@@ -144,6 +146,7 @@ async function pushStatusHistory({
     ],
     session ? { session } : {},
   );
+
 }
 /* =====================================================
    CREATE ORDER (PENDING)
@@ -155,6 +158,7 @@ const confirmCheckoutAndCreateOrder = async ({
   payment_method,
   ip,
   city,
+  discount_id,
 }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -226,7 +230,23 @@ const confirmCheckoutAndCreateOrder = async ({
         session,
       });
 
-    const finalTotalPrice = totalPrice + shippingFee;
+    const orderValueBeforeDiscount = totalPrice + shippingFee;
+    let finalTotalPrice = orderValueBeforeDiscount;
+    let discountCode = null;
+    let discountAmount = 0;
+    if (discount_id && mongoose.Types.ObjectId.isValid(discount_id)) {
+      const discountResult = await DiscountService.getDiscountAmountForOrder(
+        discount_id,
+        user_id.toString(),
+        orderValueBeforeDiscount
+      );
+      if (discountResult.status === "OK") {
+        discountAmount = discountResult.data.discountAmount;
+        discountCode = discountResult.data.code;
+        finalTotalPrice = orderValueBeforeDiscount - discountAmount;
+      }
+    }
+
 
     /* =======================
        4️⃣ CREATE ORDER
@@ -252,6 +272,8 @@ const confirmCheckoutAndCreateOrder = async ({
           order_status_id: pendingStatus._id,
           payment_method,
           status: true,
+          discount_code: discountCode,
+          discount_amount: discountAmount,
         },
       ],
       { session },
@@ -357,7 +379,20 @@ const confirmCheckoutAndCreateOrder = async ({
           );
         }
       }
+     
       await session.commitTransaction();
+       if (discount_id && discountCode) {
+        try {
+          await DiscountService.applyDiscountCode(
+            discount_id,
+            user_id.toString(),
+            orderValueBeforeDiscount,
+            order._id.toString()
+          );
+        } catch (discountErr) {
+          console.error("Record discount usage after COD order failed:", discountErr);
+        }
+      }
       const orderId = order._id.toString();
       const response = {
         success: true,
@@ -422,6 +457,20 @@ const confirmCheckoutAndCreateOrder = async ({
         session,
       });
       await session.commitTransaction();
+
+      if (discount_id && discountCode) {
+        try {
+          await DiscountService.applyDiscountCode(
+            discount_id,
+            user_id.toString(),
+            orderValueBeforeDiscount,
+            order._id.toString()
+          );
+        } catch (discountErr) {
+          console.error("Record discount usage after VNPAY order failed:", discountErr);
+        }
+      }
+
       await NotificationService.sendToUser(order.user_id.toString(), {
         title: "Order VNPay Created",
         body: `Created succes for order ${order.id}. Go to Order History to check our order`,
@@ -482,14 +531,16 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     );
     const nextStatusName = normalizeStatusName(newStatus.name);
     const paymentMethod = normalizeToken(order.payment_method);
-    if (isReturnedStatus(nextStatusName)) {
-      if (role !== "admin") {
-        throw new Error("Only admins can move an order to the return status");
+
+    if (isRefundStatus(nextStatusName)) {
+      const allowedRolesForRefund = ["admin", "sales-staff"];
+      if (!allowedRolesForRefund.includes(role)) {
+        throw new Error(
+          "Only admin or sales-staff can move an order to the refund status",
+        );
       }
       if (currentStatusName !== "COMPLETED") {
-        throw new Error(
-          "Only COMPLETED orders can be moved to the return workflow",
-        );
+        throw new Error("Only COMPLETED orders can be moved to the refund workflow");
       }
     } else if (
       !isValidStatusTransition(paymentMethod, currentStatusName, nextStatusName)
@@ -536,6 +587,16 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     // Admin huỷ COD → chưa thu tiền nên để UNPAID (FAILED chỉ dùng khi thanh toán thất bại)
     if (nextStatusName === "CANCELLED" && payment.method === "COD") {
       payment.status = "UNPAID";
+      await payment.save({ session });
+    }
+
+
+    // COMPLETED → REFUND: payment chuyển PENDING (đợi nhân viên lấy hàng, hoàn tiền thủ công bên ngoài)
+    if (nextStatusName === "REFUND") {
+      payment.status = "PENDING";
+      payment.note = (payment.note || "").trim()
+        ? payment.note + "; Refund pending – staff to collect and process refund manually"
+        : "Refund pending – staff to collect and process refund manually";
       await payment.save({ session });
     }
 
@@ -616,6 +677,39 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     session.endSession();
   }
 };
+
+/* =====================================================
+   CONFIRM REFUND PAYMENT (ADMIN / WAREHOUSE STAFF)
+   Chỉ cho phép khi đơn đang REFUND và payment đang PENDING.
+   Cập nhật payment sang SUCCESS khi đã hoàn tiền thủ công bên ngoài.
+===================================================== */
+const confirmRefundPayment = async (order_id) => {
+  const order = await OrderModel.findById(order_id);
+  if (!order) throw new Error("Order not found");
+
+  const currentStatusName = await getOrderStatusName(order.order_status_id, null);
+  if (normalizeStatusName(currentStatusName) !== "REFUND") {
+    throw new Error("Only orders in REFUND status can have refund payment confirmed");
+  }
+
+  const payment = await PaymentModel.findOne({
+    order_id: order._id,
+    type: "PAYMENT",
+  });
+  if (!payment) throw new Error("Order payment not found");
+  if (payment.status !== "PENDING") {
+    throw new Error("Refund payment can only be confirmed when payment status is PENDING");
+  }
+
+  payment.status = "SUCCESS";
+  payment.note = (payment.note || "").trim()
+    ? payment.note + "; Refund completed manually"
+    : "Refund completed manually";
+  await payment.save();
+
+  return { success: true, message: "Refund payment confirmed" };
+};
+
 
 /* =====================================================
    CANCEL ORDER (CUSTOMER – PENDING ONLY)
@@ -888,6 +982,8 @@ const getOrdersByUser = async (user_id, filters = {}) => {
       data: data.map((order) => ({
         ...order,
         payment: paymentMap.get(order._id.toString()) || null,
+        discount_code: order.discount_code ?? null,
+        discount_amount: order.discount_amount ?? 0,
       })),
       pagination: {
         page: pageNum,
@@ -951,7 +1047,11 @@ const getOrderByUser = async (order_id, user_id) => {
       status: "OK",
       message: "Retrieved order details successfully",
       data: {
-        order,
+        order: {
+          ...order,
+          discount_code: order.discount_code ?? null,
+          discount_amount: order.discount_amount ?? 0,
+        },
         details: detailsWithReview,
         reviews,
         payment: payment || null,
@@ -1048,6 +1148,8 @@ const getOrdersForAdmin = async (filters = {}) => {
       .map((order) => ({
         ...order,
         payment: paymentMap.get(order._id.toString()) || null,
+        discount_code: order.discount_code ?? null,
+        discount_amount: order.discount_amount ?? 0,
       }))
       .filter((order) => {
         if (!payment_status) return true;
@@ -1096,7 +1198,11 @@ const getOrderDetailForAdmin = async (order_id) => {
       status: "OK",
       message: "Retrieved order details successfully",
       data: {
-        order,
+        order: {
+          ...order,
+          discount_code: order.discount_code ?? null,
+          discount_amount: order.discount_amount ?? 0,
+        },
         details,
         payment,
       },
@@ -1143,7 +1249,7 @@ const getOrderStatusCounts = async () => {
   }
 };
 /**
- * Lấy danh sách log thay đổi trạng thái đơn hàng với search, sort, filter, pagination.
+ * Lấy danh sách log thay đổi trạng thái đơn hàng từ order.status_history (filter, search, sort, pagination).
  * Dùng cho admin/sales-staff xem "nhân viên nào đã cập nhật đơn".
  *
  * @param {Object} filters - { order_id, changed_by, changed_by_role, from_status, to_status, changedAtFrom, changedAtTo, search, sortBy, sortOrder, page, limit }
@@ -1167,83 +1273,116 @@ const getOrderStatusLogs = async (filters = {}) => {
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
-    const query = {};
-    // Filter: order_id (bắt buộc nếu cần xem log của 1 đơn)
+
+    const matchStage = {};
     if (order_id) {
       if (!mongoose.Types.ObjectId.isValid(order_id)) {
         return { status: "ERR", message: "Invalid order_id" };
       }
-      query.order_id = new mongoose.Types.ObjectId(order_id);
+      matchStage._id = new mongoose.Types.ObjectId(order_id);
     }
-    // Filter: nhân viên đã thay đổi
+
+    const unwindMatch = {};
     if (changed_by && mongoose.Types.ObjectId.isValid(changed_by)) {
-      query.changed_by = new mongoose.Types.ObjectId(changed_by);
+      unwindMatch["status_history.changed_by"] = new mongoose.Types.ObjectId(changed_by);
     }
-    // Filter: role (admin, sales-staff, customer)
     if (changed_by_role) {
       const role = String(changed_by_role).trim().toLowerCase();
       if (["admin", "sales-staff", "customer"].includes(role)) {
-        query.changed_by_role = role;
+        unwindMatch["status_history.changed_by_role"] = role;
       }
     }
-    // Filter: từ trạng thái
     if (from_status && mongoose.Types.ObjectId.isValid(from_status)) {
-      query.from_status = new mongoose.Types.ObjectId(from_status);
+      unwindMatch["status_history.from_status"] = new mongoose.Types.ObjectId(from_status);
     }
-    // Filter: sang trạng thái
     if (to_status && mongoose.Types.ObjectId.isValid(to_status)) {
-      query.to_status = new mongoose.Types.ObjectId(to_status);
+      unwindMatch["status_history.to_status"] = new mongoose.Types.ObjectId(to_status);
     }
-    // Filter: khoảng thời gian thay đổi
     if (changedAtFrom || changedAtTo) {
-      query.changed_at = {};
+      unwindMatch["status_history.changed_at"] = {};
       if (changedAtFrom) {
         const from = new Date(changedAtFrom);
         if (!Number.isNaN(from.getTime())) {
           from.setHours(0, 0, 0, 0);
-          query.changed_at.$gte = from;
+          unwindMatch["status_history.changed_at"].$gte = from;
         }
       }
       if (changedAtTo) {
         const to = new Date(changedAtTo);
         if (!Number.isNaN(to.getTime())) {
           to.setHours(23, 59, 59, 999);
-          query.changed_at.$lte = to;
+          unwindMatch["status_history.changed_at"].$lte = to;
         }
       }
-      if (Object.keys(query.changed_at).length === 0) delete query.changed_at;
+      if (Object.keys(unwindMatch["status_history.changed_at"]).length === 0) delete unwindMatch["status_history.changed_at"];
     }
-    // Search: theo nội dung note
     if (search && String(search).trim()) {
-      const escaped = String(search)
-        .trim()
-        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      query.note = { $regex: escaped, $options: "i" };
+      const escaped = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      unwindMatch["status_history.note"] = { $regex: escaped, $options: "i" };
     }
-    // Sort
-    const allowedSortFields = [
-      "changed_at",
-      "changed_by_role",
-      "order_id",
-      "createdAt",
-    ];
-    const sortField = allowedSortFields.includes(sortBy)
-      ? sortBy
-      : "changed_at";
+    const allowedSortFields = ["changed_at", "changed_by_role", "order_id", "createdAt"];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : "changed_at";
     const sortDirection = sortOrder === "asc" ? 1 : -1;
-    const sortObj = { [sortField]: sortDirection };
-    const [data, total] = await Promise.all([
-      OrderStatusChangeLogModel.find(query)
-        .populate("from_status", "name")
-        .populate("to_status", "name")
-        .populate("changed_by", "user_name email")
-        .populate("order_id", "receiver_name receiver_phone total_price")
-        .sort(sortObj)
-        .skip(skip)
-        .limit(limitNum)
-        .lean(),
-      OrderStatusChangeLogModel.countDocuments(query),
-    ]);
+    const sortKey = sortField === "order_id" ? "order_id._id" : sortField;
+
+    const pipeline = [
+      ...(Object.keys(matchStage).length > 0 ? [{ $match: matchStage }] : []),
+      { $unwind: "$status_history" },
+      ...(Object.keys(unwindMatch).length > 0 ? [{ $match: unwindMatch }] : []),
+      {
+        $lookup: {
+          from: "order_statuses",
+          localField: "status_history.from_status",
+          foreignField: "_id",
+          as: "_from_status",
+        },
+      },
+      {
+        $lookup: {
+          from: "order_statuses",
+          localField: "status_history.to_status",
+          foreignField: "_id",
+          as: "_to_status",
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "status_history.changed_by",
+          foreignField: "_id",
+          as: "_changed_by",
+        },
+      },
+      {
+        $project: {
+          from_status: { $arrayElemAt: ["$_from_status", 0] },
+          to_status: { $arrayElemAt: ["$_to_status", 0] },
+          changed_by: { $arrayElemAt: ["$_changed_by", 0] },
+          changed_by_role: "$status_history.changed_by_role",
+          note: "$status_history.note",
+          changed_at: "$status_history.changed_at",
+          createdAt: "$createdAt",
+          order_id: {
+            _id: "$_id",
+            receiver_name: "$receiver_name",
+            receiver_phone: "$receiver_phone",
+            total_price: "$total_price",
+          },
+        },
+      },
+      { $sort: { [sortKey]: sortDirection } },
+      {
+        $facet: {
+          total: [{ $count: "count" }],
+          data: [{ $skip: skip }, { $limit: limitNum }],
+        },
+      },
+    ];
+
+    const result = await OrderModel.aggregate(pipeline);
+    const total = result[0]?.total?.[0]?.count ?? 0;
+    const data = result[0]?.data ?? [];
+
     return {
       status: "OK",
       message: "Fetched order status change logs successfully",
@@ -1262,6 +1401,7 @@ const getOrderStatusLogs = async (filters = {}) => {
 module.exports = {
   confirmCheckoutAndCreateOrder,
   updateOrder,
+  confirmRefundPayment,
   cancelOrderByCustomer,
   retryVnpayPayment,
   getOrdersByUser,

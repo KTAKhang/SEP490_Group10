@@ -772,6 +772,65 @@ const DiscountService = {
     },
 
     /**
+     * Validate discount by ID and return discount amount + code (không ghi usage).
+     * Dùng khi tạo đơn có áp dụng mã giảm giá ngay từ đầu.
+     *
+     * @param {String} discountId
+     * @param {String} userId
+     * @param {Number} orderValue
+     * @returns {Object} { status, data: { discountAmount, code } | message }
+     */
+    async getDiscountAmountForOrder(discountId, userId, orderValue) {
+        try {
+            if (!discountId || !userId || orderValue === undefined) {
+                return { status: "ERR", message: "Missing required parameters" };
+            }
+            const discount = await DiscountModel.findById(discountId);
+            if (!discount) {
+                return { status: "ERR", message: "Discount not found" };
+            }
+            const now = new Date();
+            if (
+                discount.status !== "APPROVED" ||
+                !discount.isActive ||
+                now < discount.startDate ||
+                now > discount.endDate
+            ) {
+                return { status: "ERR", message: "Discount code is not valid" };
+            }
+            if (discount.usageLimit !== null && discount.usedCount >= discount.usageLimit) {
+                return { status: "ERR", message: "Discount code has reached its usage limit" };
+            }
+            if (discount.targetUserId && discount.targetUserId.toString() !== userId.toString()) {
+                return { status: "ERR", message: "This discount code is not valid for your account" };
+            }
+            const existingUsage = await DiscountUsageModel.findOne({
+                discountId: discount._id,
+                userId,
+            });
+            if (existingUsage) {
+                return { status: "ERR", message: "You have already used this discount code" };
+            }
+            if (orderValue < discount.minOrderValue) {
+                return {
+                    status: "ERR",
+                    message: `Minimum order value is ${discount.minOrderValue}`,
+                };
+            }
+            const discountAmount = Math.min(
+                (orderValue * discount.discountPercent) / 100,
+                discount.maxDiscountAmount
+            );
+            return {
+                status: "OK",
+                data: { discountAmount, code: discount.code },
+            };
+        } catch (error) {
+            return { status: "ERR", message: error.message };
+        }
+    },
+
+    /**
      * Apply discount code after successful order creation
      *
      * @param {String} discountId

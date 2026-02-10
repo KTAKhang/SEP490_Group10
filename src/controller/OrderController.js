@@ -7,7 +7,7 @@ const OrderService = require("../services/OrderService");
 const createOrder = async (req, res) => {
   try {
     const user_id = req.user._id;
-    const { selected_product_ids, receiverInfo, payment_method, city } = req.body;
+    const { selected_product_ids, receiverInfo, payment_method, city, discount_id } = req.body;
 
 
     if (
@@ -72,7 +72,8 @@ const createOrder = async (req, res) => {
       receiverInfo: normalizedReceiver,
       payment_method,
       ip: req.ip,
-      city
+      city,
+      discount_id: discount_id || null,
     });
 
 
@@ -133,12 +134,34 @@ const updateOrder = async (req, res) => {
 
 
 /* =====================================================
+   CONFIRM REFUND PAYMENT (ADMIN / WAREHOUSE STAFF)
+   Cập nhật payment từ PENDING → SUCCESS khi đã hoàn tiền thủ công.
+===================================================== */
+const confirmRefundPayment = async (req, res) => {
+  try {
+    const order_id = req.params.id;
+    if (!order_id) {
+      return res.status(400).json({ success: false, message: "Missing order id" });
+    }
+    const result = await OrderService.confirmRefundPayment(order_id);
+    return res.status(200).json(result);
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Failed to confirm refund payment",
+    });
+  }
+};
+
+
+/* =====================================================
    CANCEL ORDER (CUSTOMER – PENDING ONLY)
 ===================================================== */
 const cancelOrder = async (req, res) => {
   try {
     const order_id = req.params.id;
     const user_id = req.user._id;
+
 
     if (req.user.role_id.name !== "customer") {
       return res.status(403).json({
@@ -281,6 +304,7 @@ const getOrderStatusLogs = async (req, res) => {
 module.exports = {
   createOrder,
   updateOrder,
+  confirmRefundPayment,
   cancelOrder,
   retryVnpayPayment,
   getMyOrders,
