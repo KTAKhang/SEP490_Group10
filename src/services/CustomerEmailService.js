@@ -270,38 +270,31 @@ Smart Fruit Shop
     }
   },
 
-  /**
-   * Gửi email khi đặt trước đã sẵn sàng giao – nhắc khách thanh toán phần còn lại.
-   * @param {String} customerEmail
-   * @param {String} customerName
-   * @param {String} fruitTypeName - Tên loại trái cây
-   * @param {Number} quantityKg
-   * @param {Number} daysToPay - Số ngày phải thanh toán (mặc định 7)
-   */
-  async sendPreOrderReadyEmail(
-    customerEmail,
-    customerName,
-    fruitTypeName = "sản phẩm đặt trước",
-    quantityKg = 0,
-    daysToPay = 7,
-  ) {
-    try {
-      const transporter = createTransporter();
-      const fruitLabel = fruitTypeName
-        ? `${fruitTypeName} (${quantityKg} kg)`
-        : `sản phẩm (${quantityKg} kg)`;
 
-      const mailOptions = {
-        from: {
-          name: "Smart Fruit Shop",
-          address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn",
-        },
-        to: customerEmail,
-        subject:
-          "Đặt trước sẵn sàng – Vui lòng thanh toán phần còn lại – Smart Fruit Shop",
-        html: `
+    /**
+     * Send email when pre-order is ready for delivery – remind customer to pay the remaining amount.
+     * @param {String} customerEmail
+     * @param {String} customerName
+     * @param {String} fruitTypeName - Fruit type name
+     * @param {Number} quantityKg
+     * @param {Number} daysToPay - Number of days to pay (default 7)
+     */
+    async sendPreOrderReadyEmail(customerEmail, customerName, fruitTypeName = "pre-order product", quantityKg = 0, daysToPay = 7) {
+        try {
+            const transporter = createTransporter();
+            const fruitLabel = fruitTypeName ? `${fruitTypeName} (${quantityKg} kg)` : `product (${quantityKg} kg)`;
+
+            const mailOptions = {
+                from: {
+                    name: "Smart Fruit Shop",
+                    address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn"
+                },
+                to: customerEmail,
+                subject: "Pre-order ready – Please pay the remaining amount – Smart Fruit Shop",
+                html: `
+
                     <!DOCTYPE html>
-                    <html lang="vi">
+                    <html lang="en">
                     <head>
                         <meta charset="UTF-8">
                         <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -316,31 +309,33 @@ Smart Fruit Shop
                     </head>
                     <body>
                         <div class="container">
-                            <div class="header"><h2>Đặt trước sẵn sàng giao</h2></div>
+                            <div class="header"><h2>Pre-order ready for delivery</h2></div>
                             <div class="content">
-                                <p>Xin chào <strong>${customerName || "Quý khách"}</strong>,</p>
-                                <p>Sản phẩm đặt trước của bạn <strong>${fruitLabel}</strong> đã được phân bổ và sẵn sàng để giao.</p>
+                                <p>Hello <strong>${customerName || "Customer"}</strong>,</p>
+                                <p>Your pre-order <strong>${fruitLabel}</strong> has been allocated and is ready for delivery.</p>
                                 <div class="highlight">
-                                    <strong>Vui lòng thanh toán phần tiền còn lại trong vòng ${daysToPay} ngày.</strong><br>
-                                    Nếu không thanh toán đủ trong thời hạn trên, đơn đặt trước có thể bị hủy và <strong>tiền cọc đã thanh toán sẽ không được hoàn lại</strong>.
+                                    <strong>Please pay the remaining amount within ${daysToPay} days.</strong><br>
+                                    If payment is not completed within this period, your pre-order may be cancelled and <strong>the deposit already paid will not be refunded</strong>.
                                 </div>
-                                <p>Vui lòng đăng nhập vào ứng dụng/website và hoàn tất thanh toán để nhận hàng.</p>
+                                <p>Please log in to the app/website and complete the payment to receive your order.</p>
                             </div>
                             <div class="footer">
-                                <p>Trân trọng,<br><strong>Smart Fruit Shop</strong></p>
+                                <p>Best regards,<br><strong>Smart Fruit Shop</strong></p>
                             </div>
                         </div>
                     </body>
                     </html>
                 `,
-        text: `
-Xin chào ${customerName || "Quý khách"},
 
-Sản phẩm đặt trước của bạn ${fruitLabel} đã sẵn sàng giao.
+                text: `
+Hello ${customerName || "Customer"},
 
-Vui lòng thanh toán phần tiền còn lại trong vòng ${daysToPay} ngày. Nếu không thanh toán đủ trong thời hạn trên, đơn có thể bị hủy và tiền cọc đã thanh toán sẽ không được hoàn lại.
 
-Trân trọng,
+Your pre-order ${fruitLabel} is ready for delivery.
+
+Please pay the remaining amount within ${daysToPay} days. If payment is not completed within this period, your order may be cancelled and the deposit will not be refunded.
+
+Best regards,
 Smart Fruit Shop
                 `.trim(),
       };
@@ -494,24 +489,19 @@ Smart Fruit Shop
                     </body>
                     </html>
                 `,
-        text: `Happy Birthday! Here is your personal discount code: ${code}. Use it at checkout before it expires. – Smart Fruit Shop`,
-      };
-      const info = await transporter.sendMail(mailOptions);
-      return {
-        status: "OK",
-        message: "Email sent successfully",
-        messageId: info.messageId,
-      };
-    } catch (error) {
-      console.error("Birthday voucher email error:", error);
-      return {
-        status: "ERR",
-        message: `Failed to send email: ${error.message}`,
-      };
-    }
-  },
-  /**
-   * Gửi email xác nhận đơn hàng sau khi đặt thành công
+
+                text: `Happy Birthday! Here is your personal discount code: ${code}. Use it at checkout before it expires. – Smart Fruit Shop`,
+            };
+            const info = await transporter.sendMail(mailOptions);
+            return { status: "OK", message: "Email sent successfully", messageId: info.messageId };
+        } catch (error) {
+            console.error("Birthday voucher email error:", error);
+            return { status: "ERR", message: `Failed to send email: ${error.message}` };
+        }
+    },
+   /**
+   * Send order confirmation email after successful order
+
    * @param {String} customerEmail
    * @param {String} customerName
    * @param {String} orderId
@@ -528,9 +518,10 @@ Smart Fruit Shop
     try {
       const transporter = createTransporter();
       const formatPrice = (price) =>
-        new Intl.NumberFormat("vi-VN", {
+        new Intl.NumberFormat("en-US", {
           style: "currency",
           currency: "VND",
+          minimumFractionDigits: 0,
         }).format(price);
 
       const isCOD = paymentMethod === "COD";
@@ -541,10 +532,10 @@ Smart Fruit Shop
           address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn",
         },
         to: customerEmail,
-        subject: `Xác nhận đơn hàng #${orderId} – Smart Fruit Shop`,
+        subject: `Order confirmation #${orderId} – Smart Fruit Shop`,
         html: `
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -599,41 +590,41 @@ Smart Fruit Shop
   <div class="container">
 
     <div class="header">
-      <h2>Đặt hàng thành công 🎉</h2>
+      <h2>Order placed successfully 🎉</h2>
     </div>
 
     <div class="content">
-      <p>Xin chào <strong>${customerName || "Quý khách"}</strong>,</p>
+      <p>Hello <strong>${customerName || "Customer"}</strong>,</p>
 
-      <p>Cảm ơn bạn đã đặt hàng tại <strong>Smart Fruit Shop</strong>.</p>
+      <p>Thank you for your order at <strong>Smart Fruit Shop</strong>.</p>
 
       <div class="order-box">
-        <p><strong>Mã đơn hàng:</strong> #${orderId}</p>
-        <p><strong>Tổng thanh toán:</strong> ${formatPrice(totalAmount)}</p>
-        <p><strong>Phương thức thanh toán:</strong> ${paymentMethod}</p>
+        <p><strong>Order ID:</strong> #${orderId}</p>
+        <p><strong>Total amount:</strong> ${formatPrice(totalAmount)}</p>
+        <p><strong>Payment method:</strong> ${paymentMethod}</p>
       </div>
 
       ${
         isCOD
           ? `
         <div class="highlight">
-          Bạn sẽ thanh toán khi nhận hàng (COD).<br>
-          Vui lòng chuẩn bị đúng số tiền khi shipper giao đến.
+          You will pay on delivery (COD).<br>
+          Please have the exact amount ready when the shipper delivers.
         </div>
       `
           : `
         <div class="highlight">
-          Đơn hàng của bạn đang chờ xác nhận thanh toán.<br>
-          Vui lòng hoàn tất thanh toán để chúng tôi xử lý giao hàng.
+          Your order is pending payment confirmation.<br>
+          Please complete the payment so we can process your delivery.
         </div>
       `
       }
 
-      <p>Chúng tôi sẽ thông báo khi đơn hàng được giao cho đơn vị vận chuyển.</p>
+      <p>We will notify you when your order is handed over to the shipping carrier.</p>
     </div>
 
     <div class="footer">
-      <p>Trân trọng,<br><strong>Smart Fruit Shop</strong></p>
+      <p>Best regards,<br><strong>Smart Fruit Shop</strong></p>
       <p>Email: support@smartfruitshop.vn</p>
     </div>
 
@@ -643,21 +634,21 @@ Smart Fruit Shop
       `,
 
         text: `
-Xin chào ${customerName || "Quý khách"},
+Hello ${customerName || "Customer"},
 
-Cảm ơn bạn đã đặt hàng tại Smart Fruit Shop.
+Thank you for your order at Smart Fruit Shop.
 
-Mã đơn hàng: #${orderId}
-Tổng thanh toán: ${formatPrice(totalAmount)}
-Phương thức thanh toán: ${paymentMethod}
+Order ID: #${orderId}
+Total amount: ${formatPrice(totalAmount)}
+Payment method: ${paymentMethod}
 
 ${
   isCOD
-    ? "Bạn sẽ thanh toán khi nhận hàng (COD)."
-    : "Vui lòng hoàn tất thanh toán online để đơn được xử lý."
+    ? "You will pay on delivery (COD)."
+    : "Please complete your online payment so we can process your order."
 }
 
-Trân trọng,
+Best regards,
 Smart Fruit Shop
       `.trim(),
       };
@@ -687,107 +678,18 @@ Smart Fruit Shop
           address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn",
         },
         to: customerEmail,
-        subject: `Thanh toán thất bại cho đơn #${orderId} – Smart Fruit Shop`,
+
+        subject: `Payment failed for order #${orderId}`,
         html: `
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-  body {
-    font-family: Arial, sans-serif;
-    line-height: 1.6;
-    color: #333;
-    max-width: 600px;
-    margin: 0 auto;
-    padding: 20px;
-  }
-  .container {
-    background-color: #f9f9f9;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    padding: 30px;
-  }
-  .header {
-    background-color: #dc3545;
-    color: white;
-    padding: 15px;
-    border-radius: 8px 8px 0 0;
-    text-align: center;
-    margin: -30px -30px 20px -30px;
-  }
-  .content { margin: 20px 0; }
-  .order-box {
-    background: #ffffff;
-    border: 1px solid #eee;
-    border-radius: 6px;
-    padding: 15px;
-    margin: 20px 0;
-  }
-  .highlight {
-    background-color: #fff3cd;
-    padding: 15px;
-    border-left: 4px solid #ffc107;
-    margin: 20px 0;
-  }
-  .footer {
-    margin-top: 30px;
-    padding-top: 20px;
-    border-top: 1px solid #ddd;
-    color: #666;
-    font-size: 14px;
-  }
-</style>
-</head>
+                <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+                    <h2>⚠️ Payment unsuccessful</h2>
+                    <p>Hello <strong>${customerName}</strong>,</p>
+                    <p>Payment for order <strong>#${orderId}</strong> was not successful. You may try again within 10 minutes.</p>
+                    <p>If you need assistance, contact support@smartfruitshop.vn.</p>
+                </div>
+            `,
+        text: `Payment for order #${orderId} failed. Please try again.`,
 
-<body>
-  <div class="container">
-
-    <div class="header">
-      <h2>⚠️ Thanh toán không thành công</h2>
-    </div>
-
-    <div class="content">
-      <p>Xin chào <strong>${customerName || "Quý khách"}</strong>,</p>
-
-      <p>Rất tiếc, thanh toán cho đơn hàng của bạn không thành công.</p>
-
-      <div class="order-box">
-        <p><strong>Mã đơn hàng:</strong> #${orderId}</p>
-      </div>
-
-      <div class="highlight">
-        <strong>Vui lòng thử thanh toán lại trong vòng 10 phút.</strong><br>
-        Nếu quá thời gian, đơn hàng sẽ bị hủy tự động.
-      </div>
-
-      <p>Nếu bạn gặp khó khăn hoặc cần hỗ trợ, vui lòng liên hệ với chúng tôi qua email: <strong>support@smartfruitshop.vn</strong></p>
-    </div>
-
-    <div class="footer">
-      <p>Trân trọng,<br><strong>Smart Fruit Shop</strong></p>
-      <p>Email: support@smartfruitshop.vn</p>
-    </div>
-
-  </div>
-</body>
-</html>
-      `,
-        text: `
-Xin chào ${customerName || "Quý khách"},
-
-Rất tiếc, thanh toán cho đơn hàng của bạn không thành công.
-
-Mã đơn hàng: #${orderId}
-
-Vui lòng thử thanh toán lại trong vòng 10 phút. Nếu quá thời gian, đơn hàng sẽ bị hủy tự động.
-
-Nếu cần hỗ trợ, liên hệ support@smartfruitshop.vn.
-
-Trân trọng,
-Smart Fruit Shop
-      `.trim(),
       };
 
       const info = await transporter.sendMail(mailOptions);

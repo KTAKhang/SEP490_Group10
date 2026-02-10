@@ -1,5 +1,19 @@
+/**
+ * Pre-order Stock Controller
+ *
+ * HTTP layer for pre-order stock and warehouse receive. Delegates to PreOrderStockService.
+ *
+ * Handles:
+ * - GET /preorder-stock: list stock by fruit type (receivedKg, allocatedKg, availableKg)
+ * - POST /preorder-stock/receive: record receive by fruit type (body: fruitTypeId, quantityKg, note)
+ * - POST /preorder-stock/receive-by-batch: record receive by PreOrderHarvestBatch (body: preOrderHarvestBatchId, quantityKg, note)
+ * - GET /preorder-stock/receives: list receive history (query: fruitTypeId, preOrderHarvestBatchId, page, limit)
+ *
+ * @module controller/PreOrderStockController
+ */
 const PreOrderStockService = require("../services/PreOrderStockService");
 
+/** List pre-order stock by fruit type. */
 const listStock = async (req, res) => {
   try {
     const response = await PreOrderStockService.listStock();

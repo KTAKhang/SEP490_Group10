@@ -6,24 +6,26 @@ const {
   inventoryWarehouseMiddleware,
   inventoryAdminOrWarehouseMiddleware,
   inventoryAdminMiddleware,
+  inventoryAdminOrSalesStaffMiddleware,
+  inventoryAdminOrWarehouseOrSalesStaffMiddleware,
 } = require("../middleware/inventoryMiddleware");
 
 const InventoryRouter = express.Router();
 
-// ----- Lô nhập hàng trả đơn (Admin tạo lô; Admin + Warehouse xem) -----
+// ----- Lô nhập hàng trả đơn (Admin + Sales-staff tạo lô; Admin + Warehouse + Sales-staff xem) -----
 InventoryRouter.post(
   "/preorder-batches",
-  inventoryAdminMiddleware,
+  inventoryAdminOrSalesStaffMiddleware,
   PreOrderHarvestBatchController.createBatch
 );
 InventoryRouter.get(
   "/preorder-batches",
-  inventoryAdminOrWarehouseMiddleware,
+  inventoryAdminOrWarehouseOrSalesStaffMiddleware,
   PreOrderHarvestBatchController.listBatches
 );
 InventoryRouter.get(
   "/preorder-batches/:id",
-  inventoryAdminOrWarehouseMiddleware,
+  inventoryAdminOrWarehouseOrSalesStaffMiddleware,
   PreOrderHarvestBatchController.getBatchById
 );
 

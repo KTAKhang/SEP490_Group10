@@ -1,5 +1,18 @@
+/**
+ * Pre-order Harvest Batch Controller
+ *
+ * HTTP layer for pre-order receive batches. Delegates to PreOrderHarvestBatchService.
+ *
+ * Handles:
+ * - POST: create pre-order receive batch (body: harvestBatchId or supplierId+harvestDate+batchNumber, fruitTypeId, quantityKg, notes)
+ * - GET: list batches with filters (fruitTypeId, supplierId, status, page, limit, keyword, sortBy, sortOrder)
+ * - GET /:id: get batch by ID
+ *
+ * @module controller/PreOrderHarvestBatchController
+ */
 const PreOrderHarvestBatchService = require("../services/PreOrderHarvestBatchService");
 
+/** Create a pre-order receive batch. */
 const createBatch = async (req, res) => {
   try {
     const { harvestBatchId, fruitTypeId, supplierId, quantityKg, harvestDate, batchNumber, notes } = req.body;

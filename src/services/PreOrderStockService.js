@@ -1,9 +1,17 @@
 /**
- * author: KhoaNDCE170420
  * Pre-order Stock Service
  *
- * Total received across ALL batches MUST NOT exceed total demand.
- * Each receive: quantity > 0 and <= (remaining demand not yet received). Requires explicit confirmation flag.
+ * Business logic for pre-order stock (received kg by fruit type) and warehouse receive operations.
+ *
+ * This service handles:
+ * - List pre-order stock by fruit type: receivedKg, allocatedKg, availableKg (receivedKg - allocatedKg)
+ * - Warehouse receive by fruit type: increment receivedKg; total received must not exceed demand; requires confirmed: true
+ * - Warehouse receive by batch (PreOrderHarvestBatch): partial receives allowed; total received must not exceed demand
+ * - List receive history with optional filters and pagination
+ *
+ * Total received for a fruit type must not exceed total demand. Each receive requires explicit confirmation (confirmed: true).
+ *
+ * @module services/PreOrderStockService
  */
 
 const mongoose = require("mongoose");
@@ -13,10 +21,17 @@ const PreOrderHarvestBatchModel = require("../models/PreOrderHarvestBatchModel")
 const PreOrderAllocationModel = require("../models/PreOrderAllocationModel");
 const PreOrderModel = require("../models/PreOrderModel");
 const FruitTypeModel = require("../models/FruitTypeModel");
+const HarvestBatchModel = require("../models/HarvestBatchModel");
 
 /** Statuses that count toward demand. */
 const DEMAND_STATUSES = ["WAITING_FOR_ALLOCATION", "WAITING_FOR_NEXT_BATCH", "ALLOCATED_WAITING_PAYMENT", "WAITING_FOR_PRODUCT"];
 
+/**
+ * Get total demand (kg) for a fruit type from pre-orders in demand statuses.
+ *
+ * @param {string} fruitTypeId - Fruit type document ID
+ * @returns {Promise<number>} Total demand in kg
+ */
 async function getDemandKgForFruitType(fruitTypeId) {
   const agg = await PreOrderModel.aggregate([
     { $match: { fruitTypeId: new mongoose.Types.ObjectId(fruitTypeId), status: { $in: DEMAND_STATUSES } } },
@@ -25,7 +40,12 @@ async function getDemandKgForFruitType(fruitTypeId) {
   return agg[0]?.demandKg ?? 0;
 }
 
-/** Allocated kg for this fruit type (from PreOrderAllocation). Used to compute available = received - allocated. */
+/**
+ * Get allocated kg for a fruit type from PreOrderAllocation. Used to compute available = received - allocated.
+ *
+ * @param {string} fruitTypeId - Fruit type document ID
+ * @returns {Promise<number>} Allocated kg
+ */
 async function getAllocatedKgForFruitType(fruitTypeId) {
   const a = await PreOrderAllocationModel.findOne({ fruitTypeId }).lean();
   return a?.allocatedKg ?? 0;
@@ -189,6 +209,15 @@ async function createReceiveByBatch({ preOrderHarvestBatchId, quantityKg, receiv
   );
 
   const updatedBatch = await PreOrderHarvestBatchModel.findById(preOrderHarvestBatchId).lean();
+  if (updatedBatch?.harvestBatchId && mongoose.isValidObjectId(updatedBatch.harvestBatchId)) {
+    const hb = await HarvestBatchModel.findById(updatedBatch.harvestBatchId).select("isPreOrderBatch").lean();
+    if (hb && hb.isPreOrderBatch === true) {
+      await HarvestBatchModel.findByIdAndUpdate(updatedBatch.harvestBatchId, {
+        $set: { receivedQuantity: Math.round(updatedBatch.receivedKg ?? 0) },
+      });
+    }
+  }
+
   return {
     status: "OK",
     data: receive,

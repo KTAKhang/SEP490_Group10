@@ -1,5 +1,22 @@
+/**
+ * Pre-order Allocation Controller
+ *
+ * HTTP layer for pre-order demand and allocation. Delegates to PreOrderAllocationService.
+ *
+ * Handles:
+ * - GET /demand: demand dashboard by fruit type (page, limit, keyword)
+ * - GET /allocations: list allocation records (optional fruitTypeId)
+ * - POST /allocations: run FIFO allocation for a fruit type (body: fruitTypeId, allocatedKg)
+ *
+ * @module controller/PreOrderAllocationController
+ */
 const PreOrderAllocationService = require("../services/PreOrderAllocationService");
 
+/**
+ * Get demand by fruit type with pagination and keyword filter.
+ * @param {Object} req - Express request (query: page, limit, keyword)
+ * @param {Object} res - Express response
+ */
 const getDemand = async (req, res) => {
   try {
     const { page, limit, keyword } = req.query;
@@ -10,6 +27,11 @@ const getDemand = async (req, res) => {
   }
 };
 
+/**
+ * List allocation records, optionally filtered by fruit type.
+ * @param {Object} req - Express request (query.fruitTypeId optional)
+ * @param {Object} res - Express response
+ */
 const listAllocations = async (req, res) => {
   try {
     const fruitTypeId = req.query.fruitTypeId;
@@ -20,6 +42,11 @@ const listAllocations = async (req, res) => {
   }
 };
 
+/**
+ * Run FIFO allocation for a fruit type. Body: fruitTypeId (required), allocatedKg (ignored).
+ * @param {Object} req - Express request (body: fruitTypeId, allocatedKg)
+ * @param {Object} res - Express response
+ */
 const upsertAllocation = async (req, res) => {
   try {
     const { fruitTypeId, allocatedKg } = req.body;

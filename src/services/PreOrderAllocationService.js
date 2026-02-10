@@ -1,9 +1,16 @@
 /**
  * Pre-order Allocation Service
  *
- * Demand = sum(quantityKg) of PreOrders with status WAITING_FOR_ALLOCATION, WAITING_FOR_NEXT_BATCH, ALLOCATED_WAITING_PAYMENT.
- * READY_FOR_FULFILLMENT and COMPLETED are NOT counted in demand.
- * Allocation runs FIFO by createdAt: first WAITING_FOR_NEXT_BATCH, then WAITING_FOR_ALLOCATION. No partial allocation.
+ * Business logic for pre-order demand and FIFO allocation.
+ *
+ * This service handles:
+ * - Demand dashboard: aggregate demand by fruit type (WAITING_FOR_ALLOCATION, WAITING_FOR_NEXT_BATCH, ALLOCATED_WAITING_PAYMENT)
+ * - Run allocation: FIFO by createdAt (WAITING_FOR_NEXT_BATCH first, then WAITING_FOR_ALLOCATION); no partial allocation
+ * - List allocation records by fruit type
+ *
+ * Demand = sum(quantityKg) of pre-orders in demand statuses. READY_FOR_FULFILLMENT and COMPLETED are not counted.
+ *
+ * @module services/PreOrderAllocationService
  */
 
 const mongoose = require("mongoose");
@@ -149,7 +156,15 @@ const upsertAllocation = async ({ fruitTypeId, allocatedKg: _ignored }) => {
   const allocatedSoFar = allocatedAgg[0]?.allocatedKg ?? 0;
   let available = receivedKg - allocatedSoFar;
   if (available <= 0) {
-    return { status: "OK", data: { message: "No available stock to allocate." } };
+    const demandAgg = await PreOrderModel.aggregate([
+      { $match: { fruitTypeId: ftObjId, status: { $in: DEMAND_STATUSES } } },
+      { $group: { _id: null, demandKg: { $sum: "$quantityKg" } } },
+    ]);
+    const demandKg = demandAgg[0]?.demandKg ?? 0;
+    const remainingKg = Math.max(0, demandKg - allocatedSoFar);
+    throw new Error(
+      `Not enough stock to run allocation. Current: Demand ${demandKg} kg, Received ${receivedKg} kg, Allocated ${allocatedSoFar} kg, Remaining demand ${remainingKg} kg, Available to allocate 0 kg. Please receive more stock before running allocation.`
+    );
   }
 
   const nextBatch = await PreOrderModel.find({
@@ -165,15 +180,18 @@ const upsertAllocation = async ({ fruitTypeId, allocatedKg: _ignored }) => {
     .sort({ createdAt: 1 })
     .lean();
   const queue = [...nextBatch, ...waitingAlloc];
+  let insufficientMessage = null; // when we break due to insufficient stock for next order
 
   for (const po of queue) {
     const qty = po.quantityKg ?? 0;
     if (qty <= 0) continue;
+    const availableBeforeOrder = available;
     if (available >= qty) {
       await PreOrderModel.updateOne({ _id: po._id }, { $set: { status: "ALLOCATED_WAITING_PAYMENT" } });
       available -= qty;
     } else {
       // Allocation failed for this order due to insufficient stock: set WAITING_FOR_NEXT_BATCH and notify customer.
+      insufficientMessage = `Allocation has been run but there is not enough stock to allocate for the next order: need ${qty} kg, available ${availableBeforeOrder} kg. Please receive more stock.`;
       // Notify is triggered HERE only (not on createBatch/createReceive/cron): this is the exact moment we transition
       // from WAITING_FOR_ALLOCATION/WAITING_FOR_PRODUCT → WAITING_FOR_NEXT_BATCH due to allocation attempt.
       if (po.status === "WAITING_FOR_ALLOCATION" || po.status === "WAITING_FOR_PRODUCT") {
@@ -217,7 +235,9 @@ const upsertAllocation = async ({ fruitTypeId, allocatedKg: _ignored }) => {
     await FruitTypeModel.findByIdAndUpdate(fruitTypeId, { $set: { status: "INACTIVE" } });
   }
 
-  return { status: "OK", data: { allocatedKg: newAllocatedKg } };
+  const responseData = { allocatedKg: newAllocatedKg };
+  if (insufficientMessage) responseData.message = insufficientMessage;
+  return { status: "OK", data: responseData };
   } finally {
     allocatingFruitIds.delete(fid);
   }

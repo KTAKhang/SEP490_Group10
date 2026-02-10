@@ -14,7 +14,22 @@ const harvestBatchSchema = new mongoose.Schema(
     product: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "products",
-      required: [true, "Sản phẩm là bắt buộc"],
+      required: false,
+      default: null,
+      index: true,
+    },
+    /** True = pre-order harvest batch (product null, fruitTypeId required); receivedQuantity stays 0, received at Pre-order Import. */
+    isPreOrderBatch: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    /** Required when isPreOrderBatch is true; links to fruit_types for pre-order fulfillment. */
+    fruitTypeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "fruit_types",
+      required: false,
+      default: null,
       index: true,
     },
 
@@ -103,8 +118,16 @@ harvestBatchSchema.set("toJSON", { virtuals: true });
 harvestBatchSchema.set("toObject", { virtuals: true });
 // Index
 harvestBatchSchema.index({ supplier: 1, product: 1, harvestDate: -1 });
-// ✅ Unique constraint: không cho trùng (supplier, product, batchNumber, harvestDate)
-harvestBatchSchema.index({ supplier: 1, product: 1, batchNumber: 1, harvestDate: 1 }, { unique: true });
+// ✅ Unique for product batches: (supplier, product, batchNumber, harvestDate)
+harvestBatchSchema.index(
+  { supplier: 1, product: 1, batchNumber: 1, harvestDate: 1 },
+  { unique: true, partialFilterExpression: { product: { $exists: true, $ne: null } } }
+);
+// ✅ Unique for pre-order batches: (supplier, fruitTypeId, batchNumber, harvestDate)
+harvestBatchSchema.index(
+  { supplier: 1, fruitTypeId: 1, batchNumber: 1, harvestDate: 1 },
+  { unique: true, partialFilterExpression: { isPreOrderBatch: true } }
+);
 // Pre-save hook
 harvestBatchSchema.pre("save", function (next) {
   // ✅ BR-SUP-12: Validation harvestDate không được lớn hơn ngày hiện tại
