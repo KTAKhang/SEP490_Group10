@@ -29,7 +29,11 @@ const STATUS_OPTIONS = [
 
 const getStatusDisplayLabel = (statusName) => {
   const normalized = statusName
-    ? statusName.toString().trim().toUpperCase().replace(/[_\s]+/g, "-")
+    ? statusName
+        .toString()
+        .trim()
+        .toUpperCase()
+        .replace(/[_\s]+/g, "-")
     : "";
   const option = STATUS_OPTIONS.find((o) => o.value === normalized);
   return option ? option.label : normalized || "Updated";
@@ -44,16 +48,15 @@ const normalizeStatusName = (value) => {
     .replace(/[_\s]+/g, "-");
 };
 
-
 const normalizeToken = (value) =>
   value ? value.toString().trim().toUpperCase() : "";
+
 
 
 const isRefundStatus = (value) => {
   const normalized = normalizeStatusName(value);
   return normalized === "REFUND";
 };
-
 
 const buildStatusRegex = (value) => {
   const normalized = normalizeStatusName(value);
@@ -63,7 +66,6 @@ const buildStatusRegex = (value) => {
   return new RegExp(`^${flexible}$`, "i");
 };
 
-
 const findStatusByName = async (name, session) => {
   const regex = buildStatusRegex(name);
   if (!regex) return null;
@@ -71,7 +73,6 @@ const findStatusByName = async (name, session) => {
     session || null,
   );
 };
-
 
 const getOrderStatusName = async (statusId, session) => {
   if (!statusId) return "";
@@ -81,12 +82,10 @@ const getOrderStatusName = async (statusId, session) => {
   return normalizeStatusName(statusDoc?.name || "");
 };
 
-
 const isValidStatusTransition = (paymentMethod, currentStatus, nextStatus) => {
   const method = normalizeToken(paymentMethod);
   const current = normalizeStatusName(currentStatus);
   const next = normalizeStatusName(nextStatus);
-
 
   const transitions = {
     COD: {
@@ -102,11 +101,9 @@ const isValidStatusTransition = (paymentMethod, currentStatus, nextStatus) => {
     },
   };
 
-
   const allowed = transitions[method] || {};
   return (allowed[current] || []).includes(next);
 };
-
 
 /* =====================================================
    HELPER: PUSH STATUS HISTORY
@@ -120,7 +117,9 @@ async function pushStatusHistory({
   note,
   session,
 }) {
-  const roleValue = ["admin", "sales-staff", "customer"].includes(role) ? role : "admin";
+  const roleValue = ["admin", "sales-staff", "customer"].includes(role)
+    ? role
+    : "admin";
   const changedAt = new Date();
   order.status_history.push({
     from_status: fromStatus,
@@ -131,8 +130,23 @@ async function pushStatusHistory({
     changed_at: changedAt,
   });
 
-
   await order.save({ session });
+  // Ghi log chi tiết (giống InventoryTransaction có createdBy) để truy vấn nhân viên nào đã cập nhật đơn
+  await OrderStatusChangeLogModel.create(
+    [
+      {
+        order_id: order._id,
+        from_status: fromStatus,
+        to_status: toStatus,
+        changed_by: userId,
+        changed_by_role: roleValue,
+        note: note || "",
+        changed_at: changedAt,
+      },
+    ],
+    session ? { session } : {},
+  );
+
 }
 /* =====================================================
    CREATE ORDER (PENDING)
@@ -155,15 +169,12 @@ const confirmCheckoutAndCreateOrder = async ({
     const cart = await CartModel.findOne({ user_id }).session(session);
     if (!cart) throw new Error("Shopping cart not found");
 
-
     const cartItems = await CartDetailModel.find({
       cart_id: cart._id,
       product_id: { $in: selected_product_ids },
     }).session(session);
 
-
     if (!cartItems.length) throw new Error("No products were selected");
-
 
     /* =======================
        2️⃣ LOAD & VALIDATE STOCK LOCK
@@ -173,9 +184,7 @@ const confirmCheckoutAndCreateOrder = async ({
       product_id: { $in: selected_product_ids },
     }).session(session);
 
-
     const lockMap = new Map(locks.map((l) => [l.product_id.toString(), l]));
-
 
     /* =======================
        3️⃣ SNAPSHOT + CALC PRICE
@@ -183,17 +192,14 @@ const confirmCheckoutAndCreateOrder = async ({
     let totalPrice = 0;
     const orderDetails = [];
 
-
     for (const item of cartItems) {
       const lock = lockMap.get(item.product_id.toString());
+
       if (!lock || lock.quantity < item.quantity)
         throw new Error("The holding period has expired");
-
-
       const product = await ProductModel.findById(item.product_id)
         .populate("category", "name")
         .session(session);
-
 
       if (!product || !product.status)
         throw new Error("The product is unavailable");
@@ -213,7 +219,6 @@ const confirmCheckoutAndCreateOrder = async ({
       });
     }
 
-
     /* =======================
    3️⃣.5 CALCULATE SHIPPING
 ======================= */
@@ -224,7 +229,6 @@ const confirmCheckoutAndCreateOrder = async ({
         city,
         session,
       });
-
 
     const orderValueBeforeDiscount = totalPrice + shippingFee;
     let finalTotalPrice = orderValueBeforeDiscount;
@@ -243,6 +247,7 @@ const confirmCheckoutAndCreateOrder = async ({
       }
     }
 
+
     /* =======================
        4️⃣ CREATE ORDER
     ======================= */
@@ -250,9 +255,7 @@ const confirmCheckoutAndCreateOrder = async ({
       name: "PENDING",
     }).session(session);
 
-
     if (!pendingStatus) throw new Error("Missing order status");
-
 
     const [order] = await OrderModel.create(
       [
@@ -276,7 +279,6 @@ const confirmCheckoutAndCreateOrder = async ({
       { session },
     );
 
-
     /* =======================
        5️⃣ CREATE ORDER DETAILS
     ======================= */
@@ -291,7 +293,6 @@ const confirmCheckoutAndCreateOrder = async ({
         { session },
       );
     }
-
 
     /* =======================
        6️⃣ TRỪ KHO THẬT
@@ -308,12 +309,10 @@ const confirmCheckoutAndCreateOrder = async ({
         { session },
       );
 
-
       if (result.modifiedCount === 0) {
         throw new Error("Insufficient inventory to fulfill the order.");
       }
     }
-
 
     /* =======================
        7️⃣ XÓA CART ITEMS
@@ -326,16 +325,13 @@ const confirmCheckoutAndCreateOrder = async ({
       { session },
     );
 
-
     const remainingItemCount = await CartDetailModel.countDocuments(
       { cart_id: cart._id },
       { session },
     );
 
-
     cart.sum = remainingItemCount;
     await cart.save({ session });
-
 
     /* =======================
        8️⃣ XÓA STOCK LOCK
@@ -348,11 +344,9 @@ const confirmCheckoutAndCreateOrder = async ({
       { session },
     );
 
-
     /* =======================
        9️⃣ PAYMENT
     ======================= */
-
 
     // COD → tạo payment unpaid
     if (payment_method === "COD") {
@@ -361,23 +355,6 @@ const confirmCheckoutAndCreateOrder = async ({
         amount: finalTotalPrice,
         session,
       });
-
-      try {
-        const user = await UserModel.findById(user_id)
-          .select("email user_name")
-          .lean();
-        if (user && user.email) {
-          await CustomerEmailService.sendOrderConfirmationEmail(
-            user.email,
-            user.user_name || "Client",
-            order._id.toString(),
-            finalTotalPrice,
-            "COD",
-          );
-        }
-      } catch (emailErr) {
-        console.error("Failed to send COD order email:", emailErr);
-      }
       // ✅ Tự động chốt lô (reset) sản phẩm bán hết sau khi trừ kho (COD)
       const ProductBatchService = require("./ProductBatchService");
       for (const item of cartItems) {
@@ -385,15 +362,26 @@ const confirmCheckoutAndCreateOrder = async ({
           const product = await ProductModel.findById(item.product_id)
             .select("onHandQuantity warehouseEntryDate warehouseEntryDateStr")
             .lean();
-          if (product && product.onHandQuantity === 0 && (product.warehouseEntryDate || product.warehouseEntryDateStr)) {
-            await ProductBatchService.autoResetSoldOutProduct(item.product_id.toString());
+          if (
+            product &&
+            product.onHandQuantity === 0 &&
+            (product.warehouseEntryDate || product.warehouseEntryDateStr)
+          ) {
+            await ProductBatchService.autoResetSoldOutProduct(
+              item.product_id.toString(),
+            );
           }
         } catch (e) {
-          console.error("Auto-reset sold out product failed:", item.product_id, e);
+          console.error(
+            "Auto-reset sold out product failed:",
+            item.product_id,
+            e,
+          );
         }
       }
+     
       await session.commitTransaction();
-      if (discount_id && discountCode) {
+       if (discount_id && discountCode) {
         try {
           await DiscountService.applyDiscountCode(
             discount_id,
@@ -405,12 +393,54 @@ const confirmCheckoutAndCreateOrder = async ({
           console.error("Record discount usage after COD order failed:", discountErr);
         }
       }
-      return {
+      const orderId = order._id.toString();
+      const response = {
         success: true,
         type: "COD",
         redirect_url: "http://localhost:5173/customer/order-success",
-        order_id: order._id,
+        order_id: orderId,
       };
+      setImmediate(async () => {
+        try {
+          await NotificationService.sendToUser(order.user_id.toString(), {
+            title: "Order COD Created",
+            body: `Created success for order ${orderId}. Go to Order History to check your order`,
+            data: {
+              type: "order",
+              orderId,
+              action: "view_order",
+            },
+          });
+
+          await NotificationService.sendToRole("sales-staff", {
+            title: "Order COD Created",
+            body: `Created success for order ${orderId}`,
+            data: {
+              type: "order",
+              orderId,
+              action: "view_order",
+            },
+          });
+
+          const user = await UserModel.findById(user_id)
+            .select("email user_name")
+            .lean();
+
+          if (user?.email) {
+            await CustomerEmailService.sendOrderConfirmationEmail(
+              user.email,
+              user.user_name || "Client",
+              orderId,
+              finalTotalPrice,
+              "COD",
+            );
+          }
+        } catch (err) {
+          console.error("Notify/Email error:", err);
+        }
+      });
+
+      return response;
     }
     // VNPAY → tạo payment pending + url
     if (payment_method === "VNPAY") {
@@ -420,7 +450,6 @@ const confirmCheckoutAndCreateOrder = async ({
         session,
       });
 
-
       const paymentUrl = await PaymentService.createVnpayPaymentUrl({
         order_id: order._id,
         user_id,
@@ -428,6 +457,7 @@ const confirmCheckoutAndCreateOrder = async ({
         session,
       });
       await session.commitTransaction();
+
       if (discount_id && discountCode) {
         try {
           await DiscountService.applyDiscountCode(
@@ -440,29 +470,38 @@ const confirmCheckoutAndCreateOrder = async ({
           console.error("Record discount usage after VNPAY order failed:", discountErr);
         }
       }
-       try {
-        const user = await UserModel.findById(user_id)
-          .select("email user_name")
-          .lean();
-        if (user && user.email) {
-          await CustomerEmailService.sendOrderConfirmationEmail(
-            user.email,
-            user.user_name || "Client",
-            order._id.toString(),
-            finalTotalPrice,
-            "VNPAY",
-          );
-        }
-      } catch (emailErr) {
-        console.error("Failed to send COD order email:", emailErr);
-      }
+
+      await NotificationService.sendToUser(order.user_id.toString(), {
+        title: "Order VNPay Created",
+        body: `Created succes for order ${order.id}. Go to Order History to check our order`,
+        data: {
+          type: "order",
+          orderId: order.id.toString(),
+          action: "view_order",
+        },
+      });
+      // try {
+      //   const user = await UserModel.findById(user_id)
+      //     .select("email user_name")
+      //     .lean();
+      //   if (user && user.email) {
+      //     await CustomerEmailService.sendOrderConfirmationEmail(
+      //       user.email,
+      //       user.user_name || "Client",
+      //       order._id.toString(),
+      //       finalTotalPrice,
+      //       "VNPAY",
+      //     );
+      //   }
+      // } catch (emailErr) {
+      //   console.error("Failed to send COD order email:", emailErr);
+      // }
       return {
         success: true,
         payment_url: paymentUrl,
         order_id: order._id,
       };
     }
-
 
     throw new Error("Invalid payment method");
   } catch (err) {
@@ -472,14 +511,12 @@ const confirmCheckoutAndCreateOrder = async ({
   }
 };
 
-
 /* =====================================================
    UPDATE ORDER STATUS (ADMIN / SYSTEM)
 ===================================================== */
 const updateOrder = async (order_id, new_status_name, userId, role, note) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
 
   try {
     const order = await OrderModel.findById(order_id).session(session);
@@ -494,6 +531,7 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     );
     const nextStatusName = normalizeStatusName(newStatus.name);
     const paymentMethod = normalizeToken(order.payment_method);
+
     if (isRefundStatus(nextStatusName)) {
       const allowedRolesForRefund = ["admin", "sales-staff"];
       if (!allowedRolesForRefund.includes(role)) {
@@ -516,7 +554,6 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     order.order_status_id = newStatus._id;
     await order.save({ session });
 
-
     await pushStatusHistory({
       order,
       fromStatus,
@@ -527,7 +564,6 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
       session,
     });
 
-
     /* =======================
        PAYMENT LOGIC
     ======================= */
@@ -536,21 +572,17 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
       type: "PAYMENT",
     }).session(session);
 
-
     if (!payment) {
       throw new Error("Order payment not found");
     }
 
-
     /* ========= COD ========= */
-
 
     // COD giao thành công → thu tiền
     if (nextStatusName === "COMPLETED" && payment.method === "COD") {
       payment.status = "SUCCESS";
       await payment.save({ session });
     }
-
 
     // Admin huỷ COD → chưa thu tiền nên để UNPAID (FAILED chỉ dùng khi thanh toán thất bại)
     if (nextStatusName === "CANCELLED" && payment.method === "COD") {
@@ -568,9 +600,7 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
       await payment.save({ session });
     }
 
-
     /* ========= VNPAY ========= */
-
 
     // Admin huỷ khi VNPAY CHƯA thanh toán
     if (
@@ -582,7 +612,6 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
       await payment.save({ session });
     }
 
-
     // ✅ Admin huỷ khi VNPAY ĐÃ THANH TOÁN
     if (
       nextStatusName === "CANCELLED" &&
@@ -591,7 +620,6 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     ) {
       // ❗ KHÔNG đổi payment PAYMENT
       // ❗ KHÔNG gọi VNPay ở đây
-
 
       // Tạo refund record
       await PaymentModel.create(
@@ -609,14 +637,12 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
       );
     }
 
-
     // Online: chỉ cho chuyển PENDING -> PAID khi payment đã SUCCESS
     if (payment.method === "VNPAY" && nextStatusName === "PAID") {
       if (payment.status !== "SUCCESS") {
         throw new Error("Payment has not been recorded as successful");
       }
     }
-
 
     await session.commitTransaction();
     // ✅ Thông báo cho khách hàng khi admin cập nhật trạng thái đơn
@@ -636,7 +662,10 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
           },
         });
       } catch (notifErr) {
-        console.error("Failed to send order status notification to customer:", notifErr);
+        console.error(
+          "Failed to send order status notification to customer:",
+          notifErr,
+        );
         // Không throw – trạng thái đơn đã cập nhật thành công
       }
     }
@@ -648,7 +677,6 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     session.endSession();
   }
 };
-
 
 /* =====================================================
    CONFIRM REFUND PAYMENT (ADMIN / WAREHOUSE STAFF)
@@ -690,7 +718,6 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
-
   try {
     /* =======================
        1️⃣ LOAD ORDER
@@ -701,14 +728,14 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
       order.order_status_id,
     ).session(session);
 
-
     if (status.name !== "PENDING")
-      throw new Error("You can only cancel when the order is in PENDING status");
+      throw new Error(
+        "You can only cancel when the order is in PENDING status",
+      );
     /* =======================
        2️⃣ HOÀN KHO
     ======================= */
     const details = await OrderDetailModel.find({ order_id }).session(session);
-
 
     for (const item of details) {
       await ProductModel.updateOne(
@@ -717,7 +744,6 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
         { session },
       );
     }
-
 
     /* =======================
        3️⃣ PAYMENT LOGIC
@@ -730,11 +756,9 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
       throw new Error("Only COD orders can be cancelled");
     }
 
-
     payment.status = "UNPAID";
     payment.note = "Order cancelled";
     await payment.save({ session });
-
 
     /* =======================
        4️⃣ UPDATE ORDER STATUS
@@ -742,7 +766,6 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
     const cancelled = await OrderStatusModel.findOne({
       name: "CANCELLED",
     }).session(session);
-
 
     try {
       await NotificationService.sendToUser(user_id, {
@@ -760,7 +783,6 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
     order.order_status_id = cancelled._id;
     await order.save({ session });
 
-
     await pushStatusHistory({
       order,
       fromStatus: status._id,
@@ -770,7 +792,6 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
       note: "Customer cancelled the order",
       session,
     });
-
 
     await session.commitTransaction();
     return { success: true };
@@ -782,11 +803,9 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
   }
 };
 
-
 const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
 
   try {
     /* =======================
@@ -805,7 +824,6 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
       throw new Error("This order has already been paid");
     }
 
-
     const failedStatus = await OrderStatusModel.findOne({ name: "PENDING" });
     if (!order.order_status_id.equals(failedStatus._id)) {
       throw new Error("The order status is not eligible for payment retry");
@@ -819,7 +837,6 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
       throw new Error("Payment information not found");
     }
     if (!["FAILED"].includes(payment.status)) {
-
       throw new Error("Invalid payment status for retry");
     }
     /* ===== CHECK RETRY PER PAYMENT STATUS ===== */
@@ -840,15 +857,12 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
     payment.provider_response = null;
     await payment.save({ session });
 
-
     /* =======================
        5️⃣ CREATE NEW VNPAY URL
     ======================= */
     const paymentUrl = createVnpayUrl(order._id, payment.amount, ip);
 
-
     await session.commitTransaction();
-
 
     return {
       success: true,
@@ -883,13 +897,11 @@ const parseStatusNames = (value) => {
   return [];
 };
 
-
 const getOrdersByUser = async (user_id, filters = {}) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(user_id)) {
       return { status: "ERR", message: "Invalid user_id" };
     }
-
 
     const {
       page = 1,
@@ -901,21 +913,27 @@ const getOrdersByUser = async (user_id, filters = {}) => {
       sortOrder = "desc",
     } = filters;
 
-
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 10));
     const skip = (pageNum - 1) * limitNum;
-
 
     const query = { user_id: new mongoose.Types.ObjectId(user_id) };
     // ✅ Search: khách hàng tìm theo ID đơn hàng — chấp nhận đủ 24 ký tự hex (khớp chính xác) hoặc một phần (ID kết thúc bằng chuỗi nhập)
     const searchValue = search?.toString().trim();
     if (searchValue && /^[a-fA-F0-9]+$/.test(searchValue)) {
-      if (searchValue.length === 24 && mongoose.Types.ObjectId.isValid(searchValue)) {
+      if (
+        searchValue.length === 24 &&
+        mongoose.Types.ObjectId.isValid(searchValue)
+      ) {
         query._id = new mongoose.Types.ObjectId(searchValue);
       } else {
         // Một phần ID: tìm đơn có _id kết thúc bằng chuỗi nhập (vd. 6–8 ký tự cuối)
-        query.$expr = { $regexMatch: { input: { $toString: "$_id" }, regex: `${searchValue}$` } };
+        query.$expr = {
+          $regexMatch: {
+            input: { $toString: "$_id" },
+            regex: `${searchValue}$`,
+          },
+        };
       }
     }
     const normalizedStatusNames = parseStatusNames(status_names || status_name);
@@ -932,12 +950,10 @@ const getOrdersByUser = async (user_id, filters = {}) => {
       query.order_status_id = { $in: statusDocs.map((doc) => doc._id) };
     }
 
-
     const allowedSortFields = ["createdAt", "updatedAt", "total_price"];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
     const sortDirection = sortOrder === "asc" ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
-
 
     const [data, total] = await Promise.all([
       OrderModel.find(query)
@@ -953,7 +969,10 @@ const getOrdersByUser = async (user_id, filters = {}) => {
     const orderIds = data.map((o) => o._id);
     let paymentMap = new Map();
     if (orderIds.length > 0) {
-      const payments = await PaymentModel.find({ order_id: { $in: orderIds }, type: "PAYMENT" }).lean();
+      const payments = await PaymentModel.find({
+        order_id: { $in: orderIds },
+        type: "PAYMENT",
+      }).lean();
       paymentMap = new Map(payments.map((p) => [p.order_id.toString(), p]));
     }
 
@@ -978,7 +997,6 @@ const getOrdersByUser = async (user_id, filters = {}) => {
   }
 };
 
-
 const getOrderByUser = async (order_id, user_id) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(order_id)) {
@@ -987,7 +1005,6 @@ const getOrderByUser = async (order_id, user_id) => {
     if (!mongoose.Types.ObjectId.isValid(user_id)) {
       return { status: "ERR", message: "Invalid user_id" };
     }
-
 
     const order = await OrderModel.findOne({
       _id: new mongoose.Types.ObjectId(order_id),
@@ -999,11 +1016,9 @@ const getOrderByUser = async (order_id, user_id) => {
       .populate("status_history.changed_by", "user_name email")
       .lean();
 
-
     if (!order) {
       return { status: "ERR", message: "Order does not exist" };
     }
-
 
     const [details, reviews] = await Promise.all([
       OrderDetailModel.find({ order_id: order._id }).lean(),
@@ -1014,19 +1029,19 @@ const getOrderByUser = async (order_id, user_id) => {
     ]);
 
     // Get payment info (PAYMENT) for this order
-    const payment = await PaymentModel.findOne({ order_id: order._id, type: "PAYMENT" }).lean();
-
+    const payment = await PaymentModel.findOne({
+      order_id: order._id,
+      type: "PAYMENT",
+    }).lean();
 
     const reviewMap = new Map(
       reviews.map((review) => [review.product_id?.toString(), review]),
     );
 
-
     const detailsWithReview = details.map((detail) => ({
       ...detail,
       review: reviewMap.get(detail.product_id?.toString()) || null,
     }));
-
 
     return {
       status: "OK",
@@ -1047,7 +1062,6 @@ const getOrderByUser = async (order_id, user_id) => {
   }
 };
 
-
 /* =====================================================
    ADMIN ORDER MANAGEMENT
 ===================================================== */
@@ -1064,14 +1078,11 @@ const getOrdersForAdmin = async (filters = {}) => {
       sortOrder = "desc",
     } = filters;
 
-
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
 
-
     const query = {};
-
 
     if (search) {
       const escaped = search
@@ -1081,7 +1092,6 @@ const getOrdersForAdmin = async (filters = {}) => {
       const regex = new RegExp(escaped, "i");
       query.$or = [{ receiver_name: regex }, { receiver_phone: regex }];
     }
-
 
     const normalizedStatusNames = parseStatusNames(status_names);
     if (normalizedStatusNames.length > 0) {
@@ -1101,17 +1111,14 @@ const getOrdersForAdmin = async (filters = {}) => {
       query.order_status_id = { $in: statusDocs.map((doc) => doc._id) };
     }
 
-
     if (payment_method) {
       query.payment_method = normalizeToken(payment_method);
     }
-
 
     const allowedSortFields = ["createdAt", "updatedAt", "total_price"];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
     const sortDirection = sortOrder === "asc" ? 1 : -1;
     const sortObj = { [sortField]: sortDirection };
-
 
     const [orders, total] = await Promise.all([
       OrderModel.find(query)
@@ -1123,7 +1130,6 @@ const getOrdersForAdmin = async (filters = {}) => {
       OrderModel.countDocuments(query),
     ]);
 
-
     const orderIds = orders.map((order) => order._id);
     const paymentQuery = {
       order_id: { $in: orderIds },
@@ -1133,12 +1139,10 @@ const getOrdersForAdmin = async (filters = {}) => {
       paymentQuery.status = normalizeToken(payment_status);
     }
 
-
     const payments = await PaymentModel.find(paymentQuery).lean();
     const paymentMap = new Map(
       payments.map((payment) => [payment.order_id.toString(), payment]),
     );
-
 
     const data = orders
       .map((order) => ({
@@ -1151,7 +1155,6 @@ const getOrdersForAdmin = async (filters = {}) => {
         if (!payment_status) return true;
         return order.payment !== null;
       });
-
 
     return {
       status: "OK",
@@ -1169,13 +1172,11 @@ const getOrdersForAdmin = async (filters = {}) => {
   }
 };
 
-
 const getOrderDetailForAdmin = async (order_id) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(order_id)) {
       return { status: "ERR", message: "Invalid order_id" };
     }
-
 
     const order = await OrderModel.findById(order_id)
       .populate("order_status_id", "name description")
@@ -1184,17 +1185,14 @@ const getOrderDetailForAdmin = async (order_id) => {
       .populate("status_history.changed_by", "user_name email")
       .lean();
 
-
     if (!order) {
       return { status: "ERR", message: "Order does not exist" };
     }
-
 
     const [details, payment] = await Promise.all([
       OrderDetailModel.find({ order_id: order._id }).lean(),
       PaymentModel.findOne({ order_id: order._id, type: "PAYMENT" }).lean(),
     ]);
-
 
     return {
       status: "OK",
@@ -1214,11 +1212,9 @@ const getOrderDetailForAdmin = async (order_id) => {
   }
 };
 
-
 const getOrderStatusCounts = async () => {
   try {
     const statuses = await OrderStatusModel.find().lean();
-
 
     const counts = await OrderModel.aggregate([
       {
@@ -1229,7 +1225,6 @@ const getOrderStatusCounts = async () => {
       },
     ]);
 
-
     const countMap = new Map(
       counts.map((item) => [item._id?.toString(), item.total]),
     );
@@ -1239,9 +1234,7 @@ const getOrderStatusCounts = async () => {
       total: countMap.get(status._id.toString()) || 0,
     }));
 
-
     const totalOrders = data.reduce((sum, item) => sum + item.total, 0);
-
 
     return {
       status: "OK",
@@ -1327,7 +1320,6 @@ const getOrderStatusLogs = async (filters = {}) => {
       const escaped = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       unwindMatch["status_history.note"] = { $regex: escaped, $options: "i" };
     }
-
     const allowedSortFields = ["changed_at", "changed_by_role", "order_id", "createdAt"];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "changed_at";
     const sortDirection = sortOrder === "asc" ? 1 : -1;
