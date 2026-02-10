@@ -2,6 +2,7 @@ const ContactModel = require("../models/ContactModel");
 const ReplyContactModel = require("../models/ReplyContactModel");
 const ContactAttachmentModel = require("../models/ContactAttachmentModel");
 const UserModel = require("../models/UserModel");
+const NotificationService = require("./NotificationService");
 const cloudinary = require("../config/cloudinaryConfig");
 const { Readable } = require("stream");
 
@@ -352,6 +353,26 @@ const createReply = async (contactId, userId, isAdmin, { message }) => {
         // Nếu Contact đang ở trạng thái OPEN và Admin reply, tự động chuyển sang IN_PROGRESS
         if (contact.status === "OPEN" && isAdmin) {
             await ContactModel.findByIdAndUpdate(contactId, { status: "IN_PROGRESS" });
+        }
+
+        // Thông báo cho customer khi admin reply (chỉ gửi cho owner của contact)
+        if (isAdmin) {
+            try {
+                const customerId = contact.user_id.toString();
+                const contactIdStr = contactId.toString();
+                await NotificationService.sendToUser(customerId, {
+                    title: "Admin đã phản hồi yêu cầu của bạn",
+                    body: "Bạn có phản hồi mới từ admin. Nhấn để xem chi tiết.",
+                    type: "contact",
+                    data: {
+                        type: "contact",
+                        action: "view_contact",
+                        contactId: contactIdStr,
+                    },
+                });
+            } catch (notifErr) {
+                console.error("Failed to send contact reply notification to customer:", notifErr);
+            }
         }
 
         const populatedReply = await ReplyContactModel.findById(newReply._id)

@@ -1,0 +1,99 @@
+================================================================================
+THÔNG BÁO KHI ADMIN REPLY CONTACT – BE ĐÃ LÀM GÌ & FE CẦN LÀM GÌ
+================================================================================
+
+Mục tiêu: Khi admin gửi reply cho một contact của customer → customer nhận thông báo;
+bấm vào thông báo thì mở trang Lịch sử liên hệ (có thể mở đúng contact đó).
+
+--------------------------------------------------------------------------------
+PHẦN 1 – BACKEND (BE) ĐÃ LÀM
+--------------------------------------------------------------------------------
+
+1.1. Thời điểm gửi thông báo
+    - Gửi ngay sau khi admin tạo reply thành công (sau khi lưu reply và cập nhật Contact).
+    - API: POST /contacts/:id/replies (admin gửi reply).
+
+1.2. Đối tượng nhận
+    - Chỉ gửi cho customer sở hữu contact (contact.user_id).
+    - Không gửi cho admin.
+
+1.3. Nội dung thông báo (đã cấu hình)
+    - title: "Admin đã phản hồi yêu cầu của bạn"
+    - body:  "Bạn có phản hồi mới từ admin. Nhấn để xem chi tiết."
+    - type:  "contact" (lưu trong DB và gửi qua FCM)
+    - data:  { type: "contact", action: "view_contact", contactId: "<_id của contact>" }
+
+1.4. Luồng BE đã implement
+    - Trong ContactService.createReply:
+      + Sau khi lưu reply và cập nhật trạng thái contact;
+      + Nếu isAdmin === true → gọi NotificationService.sendToUser(customerId, {...});
+      + Thông báo được lưu vào DB và gửi FCM (nếu customer đã đăng ký FCM token).
+    - Lỗi gửi thông báo được bắt trong try-catch, không làm fail API tạo reply.
+
+1.5. API notification chung (đã có sẵn)
+    - POST /notifications/register-token  → FE gửi FCM token khi đăng nhập.
+    - GET  /notifications                → Lấy danh sách thông báo (có thông báo type "contact").
+    - GET  /notifications/unread-count    → Số thông báo chưa đọc (badge).
+    - PUT  /notifications/:id/read        → Đánh dấu đã đọc.
+    - PUT  /notifications/read-all       → Đánh dấu tất cả đã đọc.
+
+--------------------------------------------------------------------------------
+PHẦN 2 – FRONTEND (FE) CẦN LÀM
+--------------------------------------------------------------------------------
+
+2.1. Đã có sẵn (chỉ cần đảm bảo)
+    - Đăng ký FCM token sau khi customer đăng nhập: POST /notifications/register-token.
+    - NotificationBell / trang thông báo: gọi GET /notifications, GET /notifications/unread-count.
+    - Khi user click vào một thông báo: gọi hàm xử lý với notification.data (vd. handleNotificationClick(notification.data)).
+
+2.2. Bắt buộc: Xử lý click thông báo loại "contact"
+    - File gợi ý: src/services/notificationService.js (hoặc nơi FE xử lý click thông báo).
+    - Hàm: handleNotificationClick(notificationData) (hoặc tên tương đương).
+
+    Thêm khối xử lý (cùng cấp với order, discount, preorder, ...):
+
+      if (notificationData?.type === 'contact') {
+        if (notificationData?.action === 'view_contact') {
+          const contactId = notificationData?.contactId;
+          if (contactId) {
+            // Điều hướng tới Lịch sử liên hệ và mở đúng contact
+            window.location.href = `/customer/contact-history?contactId=${encodeURIComponent(contactId)}`;
+          } else {
+            window.location.href = '/customer/contact-history';
+          }
+          return;
+        }
+      }
+
+    - Nếu FE dùng React Router (vd. navigate): thay window.location.href bằng navigate(...) tương ứng.
+
+2.3. Tuỳ chọn: Trang Lịch sử liên hệ đọc contactId từ URL
+    - Trên trang Contact History, đọc query contactId (vd. useSearchParams hoặc URL params).
+    - Sau khi load danh sách contact, nếu có contactId thì:
+      + Set selectedContact = contactId (hoặc mở đúng item trong danh sách);
+      + Gọi API lấy chi tiết contact (vd. GET contact detail hoặc mở panel chi tiết) để hiển thị đúng contact và reply.
+
+--------------------------------------------------------------------------------
+PHẦN 3 – ĐỐI CHIẾU NHANH
+--------------------------------------------------------------------------------
+
+| Hạng mục              | BE đã làm                          | FE cần làm |
+|-----------------------|------------------------------------|------------|
+| Gửi thông báo         | Khi admin tạo reply → sendToUser   | —          |
+| Người nhận            | contact.user_id (customer)         | Đăng ký FCM token khi đăng nhập |
+| type                  | "contact"                           | if (data?.type === 'contact') |
+| data.action           | "view_contact"                     | if (data?.action === 'view_contact') |
+| data.contactId        | Gửi kèm trong data                | Điều hướng ?contactId=... |
+| Danh sách / badge     | GET /notifications đã trả về      | NotificationBell dùng đúng API |
+| Đánh dấu đọc          | API PUT read / read-all có sẵn    | Gọi khi user đọc / đọc tất cả |
+| Click mở đúng contact | —                                  | handleNotificationClick + (tuỳ chọn) đọc contactId từ URL |
+
+--------------------------------------------------------------------------------
+CHECKLIST FE
+--------------------------------------------------------------------------------
+
+  [ ] handleNotificationClick: thêm nhánh type === 'contact', action === 'view_contact',
+      điều hướng tới /customer/contact-history (và contactId nếu có).
+  [ ] (Tuỳ chọn) Trang Contact History: đọc contactId từ URL, auto-select và mở chi tiết contact đó.
+
+================================================================================
