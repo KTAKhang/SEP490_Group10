@@ -2,94 +2,145 @@ const mongoose = require("mongoose");
 const HarvestBatchModel = require("../models/HarvestBatchModel");
 const SupplierModel = require("../models/SupplierModel");
 const ProductModel = require("../models/ProductModel");
-
+const FruitTypeModel = require("../models/FruitTypeModel");
+const NotificationService = require("./NotificationService");
 
 /**
- * Tạo lô thu hoạch (Admin)
+ * Tạo lô thu hoạch (Admin).
+ * - isPreOrderBatch !== true: flow cũ, lô product bình thường (supplier + product). Không đổi logic.
+ * - isPreOrderBatch === true: flow pre-order (supplier + fruitTypeId); receivedQuantity = 0, nhập tại Pre-order Import.
  */
 const createHarvestBatch = async (payload = {}) => {
   try {
     const {
       supplierId,
       productId,
+      fruitTypeId,
+      isPreOrderBatch,
       batchNumber,
       harvestDate,
       location,
       notes,
     } = payload;
 
+    const isPreOrder = isPreOrderBatch === true || isPreOrderBatch === "true";
 
     if (!mongoose.isValidObjectId(supplierId)) {
       return { status: "ERR", message: "Invalid supplierId" };
     }
-
-
-    if (!mongoose.isValidObjectId(productId)) {
-      return { status: "ERR", message: "Invalid productId" };
-    }
-
-
     if (!batchNumber || !batchNumber.toString().trim()) {
       return { status: "ERR", message: "Batch number is required" };
     }
-
-
     if (!harvestDate) {
       return { status: "ERR", message: "Harvest date is required" };
     }
 
-
-    // ✅ BR-SUP-12: Validation harvestDate không được lớn hơn ngày hiện tại
     const harvestDateObj = new Date(harvestDate);
     harvestDateObj.setHours(0, 0, 0, 0);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     if (harvestDateObj > today) {
-      return {
-        status: "ERR",
-        message: "Harvest date cannot be later than today",
-      };
+      return { status: "ERR", message: "Harvest date cannot be later than today" };
     }
 
-    // Kiểm tra supplier và product tồn tại
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {
       return { status: "ERR", message: "Supplier does not exist" };
     }
+    if (supplier.cooperationStatus !== "ACTIVE") {
+      return {
+        status: "ERR",
+        message: `Cannot create harvest batch for supplier with status ${supplier.cooperationStatus}. Only ACTIVE suppliers are allowed.`,
+      };
+    }
 
+    const batchNumberTrimmed = batchNumber.toString().trim();
+    const harvestDateNormalized = new Date(harvestDate);
+    harvestDateNormalized.setHours(0, 0, 0, 0);
+    const harvestDateEnd = new Date(harvestDateNormalized.getTime() + 24 * 60 * 60 * 1000);
 
+    if (isPreOrder) {
+      // Pre-order harvest batch: require fruitTypeId, no product
+      if (!mongoose.isValidObjectId(fruitTypeId)) {
+        return { status: "ERR", message: "Fruit type is required for pre-order harvest batch. Please check the pre-order batch option and select a fruit type." };
+      }
+      const fruitType = await FruitTypeModel.findById(fruitTypeId).lean();
+      if (!fruitType) {
+        return { status: "ERR", message: "Fruit type does not exist" };
+      }
+      const existingSameDay = await HarvestBatchModel.findOne({
+        supplier: new mongoose.Types.ObjectId(supplierId),
+        isPreOrderBatch: true,
+        fruitTypeId: new mongoose.Types.ObjectId(fruitTypeId),
+        batchNumber: batchNumberTrimmed,
+        harvestDate: { $gte: harvestDateNormalized, $lt: harvestDateEnd },
+      });
+      if (existingSameDay) {
+        return {
+          status: "ERR",
+          message: `Batch number "${batchNumberTrimmed}" already exists for this fruit type on the same harvest date. Please choose a different batch number.`,
+        };
+      }
+      const harvestBatch = new HarvestBatchModel({
+        supplier: new mongoose.Types.ObjectId(supplierId),
+        product: null,
+        isPreOrderBatch: true,
+        fruitTypeId: new mongoose.Types.ObjectId(fruitTypeId),
+        batchNumber: batchNumberTrimmed,
+        harvestDate: new Date(harvestDate),
+        location: location?.toString().trim() || "",
+        notes: notes?.toString().trim() || "",
+        receivedQuantity: 0,
+      });
+      await harvestBatch.save();
+      supplier.totalBatches = (supplier.totalBatches || 0) + 1;
+      await supplier.save();
+      const populated = await HarvestBatchModel.findById(harvestBatch._id)
+        .populate("supplier", "name type")
+        .populate("fruitTypeId", "name")
+        .lean();
+
+      const fruitName = populated?.fruitTypeId?.name || "pre-order";
+      const notification = {
+        title: "Harvest batch is created by admin",
+        body: `The harvest batch for ${fruitName} has been created. Please proceed to import to fulfill the order.`,
+        data: {
+          type: "harvest_batch_preorder",
+          harvestBatchId: harvestBatch._id.toString(),
+          fruitTypeId: fruitTypeId.toString(),
+          action: "preorder_import",
+        },
+      };
+      Promise.allSettled([
+        NotificationService.sendToRole("sales-staff", notification),
+      ]).then((results) => {
+        results.forEach((r, i) => {
+          if (r.status === "rejected") console.warn("FCM harvest batch notify failed:", r.reason?.message);
+        });
+      });
+
+      return { status: "OK", message: "Harvest batch created successfully", data: populated };
+    }
+
+    // Normal product harvest batch (flow như cũ): bắt buộc productId
+    if (!mongoose.isValidObjectId(productId)) {
+      return { status: "ERR", message: "Product is required. Select a product from the supplier." };
+    }
     const product = await ProductModel.findById(productId);
     if (!product) {
       return { status: "ERR", message: "Product does not exist" };
     }
-
-
-    // ✅ BR-SUP-26: Không cho tạo harvest batch với supplier SUSPENDED/TERMINATED
-    if (supplier.cooperationStatus !== "ACTIVE") {
-      return {
-        status: "ERR",
-        message: `Cannot create harvest batch for supplier with status ${supplier.cooperationStatus}. Only ACTIVE suppliers are allowed.`
-      };
-    }
-
-
-    // ✅ Validation: product phải có supplier trùng với supplierId
     if (!product.supplier || product.supplier.toString() !== supplierId) {
       return {
         status: "ERR",
         message: `Product "${product.name}" does not belong to supplier "${supplier.name}". Please choose a product from this supplier.`,
       };
     }
-
-    // ✅ Validation: cùng supplier + product + ngày thu hoạch thì batchNumber không được trùng
-    const harvestDateNormalized = new Date(harvestDate);
-    harvestDateNormalized.setHours(0, 0, 0, 0);
-    const batchNumberTrimmed = batchNumber.toString().trim();
     const existingSameDay = await HarvestBatchModel.findOne({
       supplier: new mongoose.Types.ObjectId(supplierId),
       product: new mongoose.Types.ObjectId(productId),
       batchNumber: batchNumberTrimmed,
-      harvestDate: { $gte: harvestDateNormalized, $lt: new Date(harvestDateNormalized.getTime() + 24 * 60 * 60 * 1000) },
+      harvestDate: { $gte: harvestDateNormalized, $lt: harvestDateEnd },
     });
     if (existingSameDay) {
       return {
@@ -97,37 +148,24 @@ const createHarvestBatch = async (payload = {}) => {
         message: `Batch number "${batchNumberTrimmed}" already exists for this product on the same harvest date. Please choose a different batch number.`,
       };
     }
-
-
     const harvestBatch = new HarvestBatchModel({
       supplier: new mongoose.Types.ObjectId(supplierId),
       product: new mongoose.Types.ObjectId(productId),
+      isPreOrderBatch: false,
+      fruitTypeId: null,
       batchNumber: batchNumberTrimmed,
       harvestDate: new Date(harvestDate),
       location: location?.toString().trim() || "",
       notes: notes?.toString().trim() || "",
     });
-
-
     await harvestBatch.save();
-
-
-    // Cập nhật thống kê supplier
     supplier.totalBatches = (supplier.totalBatches || 0) + 1;
     await supplier.save();
-
-
     const populated = await HarvestBatchModel.findById(harvestBatch._id)
       .populate("supplier", "name type")
       .populate("product", "name brand")
       .lean();
-
-
-    return {
-      status: "OK",
-      message: "Harvest batch created successfully",
-      data: populated,
-    };
+    return { status: "OK", message: "Harvest batch created successfully", data: populated };
   } catch (error) {
     return { status: "ERR", message: error.message };
   }
@@ -180,17 +218,25 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
         if (harvestDateNorm) {
           harvestDateNorm.setHours(0, 0, 0, 0);
           const endOfDay = new Date(harvestDateNorm.getTime() + 24 * 60 * 60 * 1000);
-          const existingSameDay = await HarvestBatchModel.findOne({
+          const sameDayQuery = {
             supplier: harvestBatch.supplier,
-            product: harvestBatch.product,
             batchNumber: newBatchNumber,
             harvestDate: { $gte: harvestDateNorm, $lt: endOfDay },
             _id: { $ne: harvestBatchId },
-          });
+          };
+          if (harvestBatch.isPreOrderBatch) {
+            sameDayQuery.isPreOrderBatch = true;
+            sameDayQuery.fruitTypeId = harvestBatch.fruitTypeId;
+          } else {
+            sameDayQuery.product = harvestBatch.product;
+          }
+          const existingSameDay = await HarvestBatchModel.findOne(sameDayQuery);
           if (existingSameDay) {
             return {
               status: "ERR",
-              message: `Batch number "${newBatchNumber}" already exists for this product on the same harvest date. Please choose a different batch number.`,
+              message: harvestBatch.isPreOrderBatch
+                ? `Batch number "${newBatchNumber}" already exists for this fruit type on the same harvest date.`
+                : `Batch number "${newBatchNumber}" already exists for this product on the same harvest date. Please choose a different batch number.`,
             };
           }
         }
@@ -242,8 +288,8 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
     const populated = await HarvestBatchModel.findById(harvestBatch._id)
       .populate("supplier", "name type")
       .populate("product", "name brand")
+      .populate("fruitTypeId", "name")
       .lean();
-
 
     return {
       status: "OK",
@@ -254,7 +300,6 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
     return { status: "ERR", message: error.message };
   }
 };
-
 
 /**
  * Xóa lô thu hoạch (Admin)
@@ -314,6 +359,8 @@ const getHarvestBatches = async (filters = {}) => {
       search = "",
       supplierId,
       productId,
+      fruitTypeId,
+      isPreOrderBatch,
       minReceivedQuantity,
       maxReceivedQuantity,
       harvestDateFrom,
@@ -360,6 +407,18 @@ const getHarvestBatches = async (filters = {}) => {
 
     if (productId && mongoose.isValidObjectId(productId)) {
       query.product = new mongoose.Types.ObjectId(productId);
+    }
+    if (fruitTypeId && mongoose.isValidObjectId(fruitTypeId)) {
+      query.fruitTypeId = new mongoose.Types.ObjectId(fruitTypeId);
+    }
+    if (isPreOrderBatch !== undefined && isPreOrderBatch !== "" && isPreOrderBatch !== "all") {
+      const wantPreOrder = isPreOrderBatch === "true" || isPreOrderBatch === true;
+      if (wantPreOrder) {
+        query.isPreOrderBatch = true;
+      } else {
+        // Chỉ lấy lô product: isPreOrderBatch khác true (gồm false hoặc không có field - lô cũ)
+        query.isPreOrderBatch = { $ne: true };
+      }
     }
     if (minReceivedQuantity !== undefined || maxReceivedQuantity !== undefined) {
       query.receivedQuantity = {};
@@ -471,8 +530,9 @@ const getHarvestBatches = async (filters = {}) => {
 
     const [data, total] = await Promise.all([
       HarvestBatchModel.find(query)
-        .populate("supplier", "name type")
+        .populate("supplier", "name type cooperationStatus")
         .populate("product", "name brand")
+        .populate("fruitTypeId", "name")
         .sort(sortObj)
         .skip(skip)
         .limit(limitNum)
@@ -511,6 +571,7 @@ const getHarvestBatchById = async (harvestBatchId) => {
     const harvestBatch = await HarvestBatchModel.findById(harvestBatchId)
       .populate("supplier", "name type cooperationStatus")
       .populate("product", "name brand")
+      .populate("fruitTypeId", "name")
       .lean();
 
 

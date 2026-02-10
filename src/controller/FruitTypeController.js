@@ -1,5 +1,17 @@
+/**
+ * Fruit Type Controller
+ *
+ * HTTP layer for fruit types. Used by customer pre-order (list available, get by ID) and admin pre-order (list, get, create, update, delete).
+ *
+ * Handles:
+ * - listAvailable, getAvailableById: public/customer pre-order listing (only visible fruit types)
+ * - listAdmin, getById, create, update, remove: admin/sales-staff fruit type CRUD (demand and campaign-closed rules enforced in service)
+ *
+ * @module controller/FruitTypeController
+ */
 const FruitTypeService = require("../services/FruitTypeService");
 
+/** List fruit types available for pre-order (customer). */
 const listAvailable = async (req, res) => {
   try {
     const response = await FruitTypeService.listAvailableForPreOrder(req.query);
@@ -14,11 +26,12 @@ const getAvailableById = async (req, res) => {
     const response = await FruitTypeService.getAvailableById(req.params.id);
     return res.status(200).json(response);
   } catch (err) {
-    const code = err.message && err.message.includes("Không tìm thấy") ? 404 : 500;
+    const code = err.message && err.message.includes("not found") ? 404 : 500;
     return res.status(code).json({ status: "ERR", message: err.message });
   }
 };
 
+/** Admin: list fruit types with demand and pagination. */
 const listAdmin = async (req, res) => {
   try {
     const response = await FruitTypeService.listAdmin(req.query);
@@ -28,16 +41,18 @@ const listAdmin = async (req, res) => {
   }
 };
 
+/** Admin: get fruit type by ID. */
 const getById = async (req, res) => {
   try {
     const response = await FruitTypeService.getById(req.params.id);
     return res.status(200).json(response);
   } catch (err) {
-    const code = err.message && err.message.includes("Không tìm thấy") ? 404 : 500;
+    const code = err.message && err.message.includes("not found") ? 404 : 500;
     return res.status(code).json({ status: "ERR", message: err.message });
   }
 };
 
+/** Admin: create fruit type. */
 const create = async (req, res) => {
   try {
     const response = await FruitTypeService.create(req.body);
@@ -52,7 +67,7 @@ const update = async (req, res) => {
     const response = await FruitTypeService.update(req.params.id, req.body);
     return res.status(200).json(response);
   } catch (err) {
-    const code = err.message && err.message.includes("Không tìm thấy") ? 404 : 400;
+    const code = err.message && err.message.includes("not found") ? 404 : 400;
     return res.status(code).json({ status: "ERR", message: err.message });
   }
 };

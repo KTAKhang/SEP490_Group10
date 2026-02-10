@@ -2,26 +2,23 @@ const jwt = require("jsonwebtoken");
 const UserModel = require("../models/UserModel");
 require("dotenv").config();
 
-// Role nhân viên quản lý kho trong DB (hỗ trợ cả warehouse_staff và warehouse-staff)
-const WAREHOUSE_ROLE_NAMES = ["warehouse_staff", "warehouse-staff"];
-
 const getToken = (req) => req.headers.authorization?.split(" ")[1] || req.headers.authorization;
 
 const inventoryAuthMiddleware = async (req, res, next) => {
   try {
     const token = getToken(req);
     if (!token) {
-      return res.status(401).json({ status: "ERR", message: "Token không được cung cấp" });
+      return res.status(401).json({ status: "ERR", message: "Token not provided" });
     }
 
     const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
     const user = await UserModel.findById(decoded._id).populate("role_id", "name");
 
     if (!user) {
-      return res.status(404).json({ status: "ERR", message: "Người dùng không tồn tại" });
+      return res.status(404).json({ status: "ERR", message: "User not found" });
     }
     if (user.status === false) {
-      return res.status(403).json({ status: "ERR", message: "Tài khoản bị khóa" });
+      return res.status(403).json({ status: "ERR", message: "Account is locked" });
     }
 
     const roleName = user.role_id?.name || "customer";
@@ -36,10 +33,10 @@ const inventoryAuthMiddleware = async (req, res, next) => {
     next();
   } catch (error) {
     if (error.name === "TokenExpiredError") {
-      return res.status(401).json({ status: "ERR", message: "Token đã hết hạn" });
+      return res.status(401).json({ status: "ERR", message: "Token expired" });
     }
     if (error.name === "JsonWebTokenError") {
-      return res.status(401).json({ status: "ERR", message: "Token không hợp lệ" });
+      return res.status(401).json({ status: "ERR", message: "Invalid token" });
     }
     return res.status(500).json({ status: "ERR", message: error.message });
   }
@@ -48,7 +45,7 @@ const inventoryAuthMiddleware = async (req, res, next) => {
 const inventoryAdminMiddleware = async (req, res, next) => {
   await inventoryAuthMiddleware(req, res, async () => {
     if (req.user?.role !== "admin") {
-      return res.status(403).json({ status: "ERR", message: "Chỉ Admin mới có quyền truy cập" });
+      return res.status(403).json({ status: "ERR", message: "Only Admin can access" });
     }
     next();
   });
@@ -57,10 +54,10 @@ const inventoryAdminMiddleware = async (req, res, next) => {
 const inventoryWarehouseMiddleware = async (req, res, next) => {
   await inventoryAuthMiddleware(req, res, async () => {
     const roleName = req.user?.role || "customer";
-    if (!WAREHOUSE_ROLE_NAMES.includes(roleName)) {
+    if (roleName !== "warehouse_staff") {
       return res.status(403).json({
         status: "ERR",
-        message: "Chỉ nhân viên kho mới có quyền truy cập",
+        message: "Only warehouse staff can access",
       });
     }
     next();
@@ -72,12 +69,12 @@ const inventoryAdminOrWarehouseMiddleware = async (req, res, next) => {
   await inventoryAuthMiddleware(req, res, async () => {
     const roleName = req.user?.role || "customer";
     const isAdmin = roleName === "admin";
-    const isWarehouse = WAREHOUSE_ROLE_NAMES.includes(roleName);
-    
+    const isWarehouse = roleName === "warehouse_staff";
+
     if (!isAdmin && !isWarehouse) {
       return res.status(403).json({
         status: "ERR",
-        message: "Chỉ Admin hoặc nhân viên kho mới có quyền truy cập",
+        message: "Only Admin or warehouse staff can access",
       });
     }
     next();
@@ -89,13 +86,46 @@ const inventoryAdminOrWarehouseOrQcStaffMiddleware = async (req, res, next) => {
   await inventoryAuthMiddleware(req, res, async () => {
     const roleName = req.user?.role || "customer";
     const isAdmin = roleName === "admin";
-    const isWarehouse = WAREHOUSE_ROLE_NAMES.includes(roleName);
+    const isWarehouse = roleName === "warehouse_staff";
     const isQcStaff = roleName === "qc_staff";
     
     if (!isAdmin && !isWarehouse && !isQcStaff) {
       return res.status(403).json({
         status: "ERR",
-        message: "Chỉ Admin, nhân viên kho hoặc nhân viên QC mới có quyền truy cập",
+        message: "Only Admin, warehouse staff or QC staff can access",
+      });
+    }
+    next();
+  });
+};
+
+// Admin hoặc Sales-staff (dùng cho tạo pre-order receive batch, quản lý pre-order)
+const inventoryAdminOrSalesStaffMiddleware = async (req, res, next) => {
+  await inventoryAuthMiddleware(req, res, async () => {
+    const roleName = req.user?.role || "customer";
+    const isAdmin = roleName === "admin";
+    const isSalesStaff = roleName === "sales-staff";
+    if (!isAdmin && !isSalesStaff) {
+      return res.status(403).json({
+        status: "ERR",
+        message: "Only Admin or Sales staff can access",
+      });
+    }
+    next();
+  });
+};
+
+// Admin, Warehouse staff hoặc Sales-staff (dùng cho GET harvest batch / preorder-batches khi sales-staff quản lý pre-order)
+const inventoryAdminOrWarehouseOrSalesStaffMiddleware = async (req, res, next) => {
+  await inventoryAuthMiddleware(req, res, async () => {
+    const roleName = req.user?.role || "customer";
+    const isAdmin = roleName === "admin";
+    const isWarehouse = roleName === "warehouse_staff";
+    const isSalesStaff = roleName === "sales-staff";
+    if (!isAdmin && !isWarehouse && !isSalesStaff) {
+      return res.status(403).json({
+        status: "ERR",
+        message: "Only Admin, warehouse staff or Sales staff can access",
       });
     }
     next();
@@ -108,6 +138,7 @@ module.exports = {
   inventoryWarehouseMiddleware,
   inventoryAdminOrWarehouseMiddleware,
   inventoryAdminOrWarehouseOrQcStaffMiddleware,
-  WAREHOUSE_ROLE_NAMES,
+  inventoryAdminOrSalesStaffMiddleware,
+  inventoryAdminOrWarehouseOrSalesStaffMiddleware,
 };
 

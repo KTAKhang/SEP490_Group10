@@ -142,7 +142,10 @@ const createReceipt = async (userId, payload = {}) => {
         if (currentHarvestBatch.receiptEligible === false) {
           throw new Error("This harvest batch is not eligible for warehouse receipt");
         }
-        if (currentHarvestBatch.product.toString() !== productId) {
+        if (currentHarvestBatch.isPreOrderBatch === true) {
+          throw new Error("This harvest batch is for pre-order only. Receive stock at Pre-order Import page.");
+        }
+        if (!currentHarvestBatch.product || currentHarvestBatch.product.toString() !== productId) {
           throw new Error("Harvest batch does not match the product");
         }
         // ✅ Validate: harvest batch phải thuộc cùng supplier với product

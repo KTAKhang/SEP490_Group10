@@ -1,18 +1,20 @@
 /**
  * Pre-order Service
  *
- * Business logic layer for customer pre-orders (deposit + remaining payment) and admin pre-order management.
+ * Business logic for customer pre-orders (deposit + remaining payment) and admin pre-order management.
  *
  * This service handles:
  * - Customer: create payment intent (deposit 50%), pay remaining 50% after allocation, list my pre-orders
- * - Admin: list/filter pre-orders, view detail, mark order completed when delivery is done
+ * - Admin: list/filter pre-orders, view detail, mark completed when delivery is done, mark refund
  *
  * Core flow:
- * 1. Customer creates payment intent → pays deposit via VNPay → fulfillPaymentIntent creates PreOrder (status WAITING_FOR_ALLOCATION)
+ * 1. Customer creates payment intent → pays deposit via VNPay → fulfillPaymentIntent creates PreOrder (WAITING_FOR_ALLOCATION)
  * 2. Admin allocates stock (FIFO); allocated orders → ALLOCATED_WAITING_PAYMENT; customer pays remaining → READY_FOR_FULFILLMENT
  * 3. Admin marks completed when delivery is done (status COMPLETED)
  *
  * Pre-orders cannot be cancelled by customer.
+ *
+ * @module services/PreOrderService
  */
 
 const FruitTypeModel = require("../models/FruitTypeModel");
@@ -176,7 +178,7 @@ async function getAdminPreOrderDetail(id) {
  * @param {string} [query.status] - Optional: WAITING_FOR_ALLOCATION | WAITING_FOR_NEXT_BATCH | ALLOCATED_WAITING_PAYMENT | READY_FOR_FULFILLMENT | COMPLETED
  * @returns {Promise<{ status: string, data: Array, pagination: Object }>}
  */
-const PREORDER_STATUSES = ["WAITING_FOR_ALLOCATION", "WAITING_FOR_NEXT_BATCH", "ALLOCATED_WAITING_PAYMENT", "READY_FOR_FULFILLMENT", "COMPLETED", "WAITING_FOR_PRODUCT"];
+const PREORDER_STATUSES = ["WAITING_FOR_ALLOCATION", "WAITING_FOR_NEXT_BATCH", "ALLOCATED_WAITING_PAYMENT", "READY_FOR_FULFILLMENT", "COMPLETED", "REFUND", "CANCELLED", "WAITING_FOR_PRODUCT"];
 
 async function getMyPreOrders(userId, query = {}) {
   const { page = 1, limit = 20, sortBy = "createdAt", sortOrder = "desc", status } = query;
@@ -273,6 +275,13 @@ async function cancelPreOrder(preOrderId, userId) {
   throw new Error("Pre-orders cannot be cancelled. You confirmed this at checkout.");
 }
 
+/**
+ * Fulfill deposit payment intent (VNPay callback): create PreOrder (WAITING_FOR_ALLOCATION), mark intent SUCCESS. Runs inside a MongoDB session.
+ *
+ * @param {string} intentId - PreOrderPaymentIntent document ID
+ * @param {Object} session - MongoDB client session
+ * @returns {Promise<Object|null>} Created pre-order document or null if already fulfilled
+ */
 async function fulfillPaymentIntent(intentId, session) {
   const intent = await PreOrderPaymentIntentModel.findById(intentId).session(session);
   if (!intent) throw new Error("PreOrder payment intent not found");
@@ -331,6 +340,8 @@ async function fulfillRemainingPayment(remainingIntentId, session) {
     await intent.save({ session });
     throw new Error("Payment session expired");
   }
+  const preOrder = await PreOrderModel.findById(intent.preOrderId).session(session).select("fruitTypeId").lean();
+  const fruitTypeId = preOrder?.fruitTypeId?._id || preOrder?.fruitTypeId;
   const now = new Date();
   await PreOrderModel.updateOne(
     { _id: intent.preOrderId },
@@ -339,6 +350,12 @@ async function fulfillRemainingPayment(remainingIntentId, session) {
   );
   intent.status = "SUCCESS";
   await intent.save({ session });
+  if (fruitTypeId) {
+    const FruitTypeService = require("./FruitTypeService");
+    FruitTypeService.maybeSetInactiveWhenDemandZero(fruitTypeId).catch((e) =>
+      console.warn("FruitTypeService.maybeSetInactiveWhenDemandZero failed:", e.message)
+    );
+  }
   return intent;
 }
 
@@ -360,6 +377,37 @@ async function markPreOrderCompleted(preOrderId) {
     throw new Error("Only orders with status Ready for fulfillment can be marked completed. Current: " + (po.status || "unknown"));
   }
   await PreOrderModel.updateOne({ _id: preOrderId }, { $set: { status: "COMPLETED" } });
+  const FruitTypeService = require("./FruitTypeService");
+  const fruitTypeId = po.fruitTypeId && (po.fruitTypeId._id || po.fruitTypeId);
+  if (fruitTypeId) {
+    FruitTypeService.maybeSetInactiveWhenDemandZero(fruitTypeId).catch((e) =>
+      console.warn("FruitTypeService.maybeSetInactiveWhenDemandZero failed:", e.message)
+    );
+  }
+  return { status: "OK", data: await PreOrderModel.findById(preOrderId).populate("userId", "user_name email").populate("fruitTypeId", "name estimatedPrice").lean() };
+}
+
+/**
+ * Admin: mark pre-order as Refund (customer contacted for refund; refund handled outside system).
+ * Allowed from any status except already REFUND.
+ *
+ * @param {string} preOrderId - Pre-order document ID
+ * @returns {Promise<{ status: string, data: Object }>}
+ */
+async function markPreOrderRefunded(preOrderId) {
+  const po = await PreOrderModel.findById(preOrderId).lean();
+  if (!po) throw new Error("Pre-order not found");
+  if (po.status === "REFUND") {
+    throw new Error("This pre-order is already marked as Refund.");
+  }
+  await PreOrderModel.updateOne({ _id: preOrderId }, { $set: { status: "REFUND" } });
+  const FruitTypeService = require("./FruitTypeService");
+  const fruitTypeId = po.fruitTypeId && (po.fruitTypeId._id || po.fruitTypeId);
+  if (fruitTypeId) {
+    FruitTypeService.maybeSetInactiveWhenDemandZero(fruitTypeId).catch((e) =>
+      console.warn("FruitTypeService.maybeSetInactiveWhenDemandZero failed:", e.message)
+    );
+  }
   return { status: "OK", data: await PreOrderModel.findById(preOrderId).populate("userId", "user_name email").populate("fruitTypeId", "name estimatedPrice").lean() };
 }
 
@@ -373,5 +421,6 @@ module.exports = {
   fulfillPaymentIntent,
   fulfillRemainingPayment,
   markPreOrderCompleted,
+  markPreOrderRefunded,
   CANCEL_WINDOW_HOURS,
 };

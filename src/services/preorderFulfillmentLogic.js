@@ -1,9 +1,15 @@
 /**
  * Pre-order Fulfillment Logic (post-allocation notifications)
  *
- * Called after admin allocates stock for a fruit type. Does NOT change pre-order status to READY_FOR_FULFILLMENT
- * (status becomes READY only after customer pays the remaining 50%). This module only sends email and FCM
- * notifications to customers asking them to pay the remaining balance. Does not use Product model.
+ * Called after admin runs allocation for a fruit type. Sends email and FCM to customers with ALLOCATED_WAITING_PAYMENT
+ * asking them to pay the remaining 50%. Does NOT change pre-order status to READY_FOR_FULFILLMENT (that happens when
+ * customer pays via fulfillRemainingPayment). Also notifies customers when their order is moved to WAITING_FOR_NEXT_BATCH.
+ *
+ * This module handles:
+ * - triggerReadyAndNotifyForFruitType: notify all ALLOCATED_WAITING_PAYMENT orders for a fruit type to pay remaining balance
+ * - notifyPreOrderDelayed: notify one customer when their order is set to WAITING_FOR_NEXT_BATCH (insufficient stock this round)
+ *
+ * @module services/preorderFulfillmentLogic
  */
 
 const mongoose = require("mongoose");
@@ -123,7 +129,7 @@ async function notifyPreOrderDelayed(preOrder) {
   ]);
   if (!user) return { sent: false };
 
-  const fruitName = fruitType?.name || "sản phẩm đặt trước";
+  const fruitName = fruitType?.name || "pre-order product";
   const qty = preOrder.quantityKg ?? 0;
 
   if (user.email) {

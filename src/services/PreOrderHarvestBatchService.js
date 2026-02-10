@@ -1,8 +1,16 @@
 /**
  * Pre-order Harvest Batch Service
  *
- * A fruit type can have MULTIPLE harvest batches. Warehouse can receive stock MULTIPLE TIMES (partial deliveries).
- * Demand = sum(quantityKg) of PreOrders with status WAITING_FOR_ALLOCATION, WAITING_FOR_NEXT_BATCH, ALLOCATED_WAITING_PAYMENT.
+ * Business logic for pre-order receive batches (admin/sales-staff create batches; warehouse receives into stock).
+ *
+ * This service handles:
+ * - Create pre-order receive batch: link fruit type + harvest batch (or supplier + harvest date + batch number); one batch per (fruitTypeId, harvest date, batch number, supplier)
+ * - List batches with filters (fruitTypeId, supplierId, status), keyword search, sort and pagination; each batch has status NOT_RECEIVED | PARTIAL | FULLY_RECEIVED
+ * - Get batch by ID
+ *
+ * A fruit type can have multiple harvest batches; warehouse can receive stock multiple times (partial deliveries).
+ *
+ * @module services/PreOrderHarvestBatchService
  */
 
 const mongoose = require("mongoose");
@@ -59,6 +67,13 @@ async function createBatch({
       .populate("supplier", "name cooperationStatus")
       .lean();
     if (!hb) throw new Error("Harvest batch not found. Create at Harvest Batch Management.");
+    if (hb.isPreOrderBatch !== true) {
+      throw new Error("Only pre-order harvest batches can be used for pre-order receive batch. Create a pre-order harvest batch (check \"Pre-order harvest batch\") at Harvest Batch Management.");
+    }
+    const hbFruitId = hb.fruitTypeId?._id?.toString() || hb.fruitTypeId?.toString();
+    if (hbFruitId && fruitTypeId && hbFruitId !== String(fruitTypeId)) {
+      throw new Error("Harvest batch fruit type must match the selected fruit type. Select a harvest batch for this fruit type.");
+    }
     if (hb.supplier?.cooperationStatus && hb.supplier.cooperationStatus !== "ACTIVE") {
       throw new Error("Harvest batch supplier is not ACTIVE.");
     }
@@ -87,9 +102,13 @@ async function createBatch({
   const existingBatch = await PreOrderHarvestBatchModel.findOne({
     fruitTypeId: new mongoose.Types.ObjectId(fruitTypeId),
     harvestDate: { $gte: harvestDayStart, $lt: harvestDayEnd },
+    batchNumber: finalBatchNumber,
+    supplierId: new mongoose.Types.ObjectId(finalSupplierId),
   }).lean();
   if (existingBatch) {
-    throw new Error("A pre-order receive batch already exists for this fruit type and harvest date.");
+    throw new Error(
+      "A pre-order receive batch already exists for this fruit type, harvest date, batch number and supplier. Use a different batch number or supplier for the same day."
+    );
   }
 
   const batch = await PreOrderHarvestBatchModel.create({

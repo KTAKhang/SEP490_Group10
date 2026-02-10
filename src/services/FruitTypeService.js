@@ -1,3 +1,18 @@
+/**
+ * Fruit Type Service
+ *
+ * Business logic for fruit types, including pre-order visibility and admin CRUD.
+ *
+ * This service handles:
+ * - List available for pre-order (customer): allowPreOrder, status ACTIVE; hidden when harvest within N days or closed by allocation
+ * - Admin list: all fruit types with demandKg and hasClosedPreOrders; effective status INACTIVE when campaign closed
+ * - Admin create/update/delete: allowed only when pre-order demand is 0 and campaign not closed; harvest date must be at least 4 days from today
+ * - getPreOrderDemandKg, hasClosedPreOrders, maybeSetInactiveWhenDemandZero: used by pre-order flow and admin list
+ *
+ * Pre-order lock: fruit is hidden from customer pre-order list when within DAYS_BEFORE_HARVEST_TO_LOCK days of harvest, or when allocation has been run for that fruit type.
+ *
+ * @module services/FruitTypeService
+ */
 const mongoose = require("mongoose");
 const FruitTypeModel = require("../models/FruitTypeModel");
 const PreOrderModel = require("../models/PreOrderModel");
@@ -6,11 +21,35 @@ const cloudinary = require("../config/cloudinaryConfig");
 /** Pre-order statuses that count toward demand (no edit/delete when demand > 0). */
 const PREORDER_DEMAND_STATUSES = ["WAITING_FOR_ALLOCATION", "WAITING_FOR_NEXT_BATCH", "ALLOCATED_WAITING_PAYMENT", "WAITING_FOR_PRODUCT"];
 
+/** Pre-order statuses that mean "campaign closed" for this fruit (demand 0 → INACTIVE, no edit/delete). Includes READY_FOR_FULFILLMENT so when last customer pays remaining we close the campaign. */
+const PREORDER_TERMINAL_STATUSES = ["COMPLETED", "REFUND", "CANCELLED", "READY_FOR_FULFILLMENT"];
+
 /** Statuses that mean "admin has run allocation" for this fruit type → ẩn khỏi /customer/pre-orders (chốt đơn sớm). */
 const ALLOCATION_CLOSED_STATUSES = ["ALLOCATED_WAITING_PAYMENT", "READY_FOR_FULFILLMENT"];
 
 /** Số ngày trước ngày thu hoạch: từ thời điểm này trở đi pre-order bị ẩn (chốt đơn). Đổi 3 → 5 hoặc 6 tùy nghiệp vụ. */
 const DAYS_BEFORE_HARVEST_TO_LOCK = 3;
+
+/** Ngày thu hoạch tối thiểu khi tạo/sửa fruit type: phải sau hôm nay + DAYS_BEFORE_HARVEST_TO_LOCK (không cho chọn hôm nay và 3 ngày tới). */
+function getMinHarvestDate() {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const min = new Date(today);
+  min.setUTCDate(min.getUTCDate() + DAYS_BEFORE_HARVEST_TO_LOCK + 1);
+  return min;
+}
+
+function validateHarvestDate(estimatedHarvestDate) {
+  if (!estimatedHarvestDate) return;
+  const harvest = new Date(estimatedHarvestDate);
+  harvest.setUTCHours(0, 0, 0, 0);
+  const minAllowed = getMinHarvestDate();
+  if (harvest.getTime() < minAllowed.getTime()) {
+    throw new Error(
+      `Estimated harvest date must be at least ${DAYS_BEFORE_HARVEST_TO_LOCK + 1} days from today. Today and the next ${DAYS_BEFORE_HARVEST_TO_LOCK} days are not allowed (fruit would be hidden from pre-order).`
+    );
+  }
+}
 
 /**
  * Get pre-order demand (sum quantityKg) for a fruit type. Used to block edit/delete when demand > 0.
@@ -23,6 +62,34 @@ const getPreOrderDemandKg = async (fruitTypeId) => {
     { $group: { _id: null, demandKg: { $sum: "$quantityKg" } } },
   ]);
   return agg[0]?.demandKg ?? 0;
+};
+
+/**
+ * Whether this fruit type has at least one pre-order in a terminal/closed state (COMPLETED, REFUND, CANCELLED, READY_FOR_FULFILLMENT).
+ * Used to treat "campaign closed" (demand 0 but had orders that are done or paid) → show Closed, no edit/delete.
+ */
+const hasClosedPreOrders = async (fruitTypeId) => {
+  const count = await PreOrderModel.countDocuments({
+    fruitTypeId: new mongoose.Types.ObjectId(fruitTypeId),
+    status: { $in: PREORDER_TERMINAL_STATUSES },
+  });
+  return count > 0;
+};
+
+/**
+ * After a pre-order is marked completed/refunded/cancelled: if open demand for this fruit type is now 0,
+ * set fruit type status to INACTIVE so admin list shows "Closed" and edit/delete stay blocked.
+ */
+const maybeSetInactiveWhenDemandZero = async (fruitTypeId) => {
+  if (!fruitTypeId) return;
+  const demandKg = await getPreOrderDemandKg(fruitTypeId);
+  if (demandKg > 0) return;
+  const closed = await hasClosedPreOrders(fruitTypeId);
+  if (!closed) return;
+  await FruitTypeModel.updateOne(
+    { _id: fruitTypeId },
+    { $set: { status: "INACTIVE" } }
+  );
 };
 
 /** Trước ngày thu hoạch DAYS_BEFORE_HARVEST_TO_LOCK ngày thì chốt đặt trước: không cho đặt loại trái đó nữa. */
@@ -64,8 +131,13 @@ function isVisibleForPreOrderCustomer(ft, closedByAllocationIds) {
 
 /**
  * List fruit types available for pre-order (allowPreOrder = true, status = ACTIVE).
- * Visibility: ẩn khi (1) harvest trong vòng 3 ngày, HOẶC (2) admin đã chốt đơn (có pre-order ALLOCATED_WAITING_PAYMENT/READY_FOR_FULFILLMENT).
- * Backend quyết định visibility; chỉ trả về các item visible.
+ * Hidden when: (1) harvest within DAYS_BEFORE_HARVEST_TO_LOCK days, OR (2) closed by allocation (has pre-order in ALLOCATED_WAITING_PAYMENT/READY_FOR_FULFILLMENT).
+ *
+ * @param {Object} [query={}] - Query options
+ * @param {number} [query.page=1] - Page number
+ * @param {number} [query.limit=20] - Items per page
+ * @param {string} [query.keyword] - Search by fruit name (case-insensitive)
+ * @returns {Promise<{ status: string, data: Array, pagination: Object }>}
  */
 const listAvailableForPreOrder = async (query = {}) => {
   const { page = 1, limit = 20, keyword } = query;
@@ -90,8 +162,10 @@ const listAvailableForPreOrder = async (query = {}) => {
 };
 
 /**
- * Get one fruit type by id if available for pre-order (public).
- * Trả lỗi nếu: không tồn tại / không ACTIVE+allowPreOrder / chốt bởi harvest (<=3 ngày) / chốt bởi allocation (admin đã chạy allocation).
+ * Get one fruit type by ID if available for pre-order (public). Throws if not found, not ACTIVE+allowPreOrder, locked by harvest, or closed by allocation.
+ *
+ * @param {string} id - Fruit type document ID
+ * @returns {Promise<{ status: string, data: Object }>}
  */
 const getAvailableById = async (id) => {
   const doc = await FruitTypeModel.findOne({
@@ -112,8 +186,17 @@ const getAvailableById = async (id) => {
 };
 
 /**
- * Admin: list all fruit types with optional filter, search (keyword by name), sort.
- * Each item includes demandKg (pre-order demand for this fruit type). When demandKg > 0, edit/delete are not allowed.
+ * Admin: list all fruit types with optional filter, search (keyword by name), sort. Each item includes demandKg and hasClosedPreOrders; effective status INACTIVE when campaign closed.
+ *
+ * @param {Object} [query={}] - Query options
+ * @param {string} [query.status] - Filter by status (ACTIVE | INACTIVE)
+ * @param {boolean|string} [query.allowPreOrder] - Filter by allowPreOrder
+ * @param {number} [query.page=1] - Page number
+ * @param {number} [query.limit=20] - Items per page
+ * @param {string} [query.keyword] - Search by name (case-insensitive)
+ * @param {string} [query.sortBy=createdAt] - Sort field: name | estimatedPrice | createdAt
+ * @param {string} [query.sortOrder=desc] - asc | desc
+ * @returns {Promise<{ status: string, data: Array, pagination: Object }>}
  */
 const listAdmin = async (query = {}) => {
   const { status, allowPreOrder, page = 1, limit = 20, keyword, sortBy = "createdAt", sortOrder = "desc" } = query;
@@ -128,19 +211,31 @@ const listAdmin = async (query = {}) => {
 
   const limitNum = Math.max(1, Math.min(100, Number(limit) || 20));
   const pageNum = Math.max(1, Number(page) || 1);
-  const [data, total, demandAgg] = await Promise.all([
+  const [data, total, demandAgg, closedAgg] = await Promise.all([
     FruitTypeModel.find(filter).sort(sortOpt).skip((pageNum - 1) * limitNum).limit(limitNum).lean(),
     FruitTypeModel.countDocuments(filter),
     PreOrderModel.aggregate([
       { $match: { status: { $in: PREORDER_DEMAND_STATUSES } } },
       { $group: { _id: "$fruitTypeId", demandKg: { $sum: "$quantityKg" } } },
     ]),
+    PreOrderModel.aggregate([
+      { $match: { status: { $in: PREORDER_TERMINAL_STATUSES } } },
+      { $group: { _id: "$fruitTypeId" } },
+    ]),
   ]);
   const demandMap = Object.fromEntries((demandAgg || []).map((d) => [d._id.toString(), d.demandKg ?? 0]));
-  const dataWithDemand = data.map((item) => ({
-    ...item,
-    demandKg: demandMap[item._id.toString()] ?? 0,
-  }));
+  const closedFruitTypeIds = new Set((closedAgg || []).map((d) => (d._id && d._id.toString ? d._id.toString() : String(d._id))));
+  const dataWithDemand = data.map((item) => {
+    const demandKg = demandMap[item._id.toString()] ?? 0;
+    const hasClosedPreOrders = closedFruitTypeIds.has(item._id.toString());
+    const effectiveStatus = hasClosedPreOrders && demandKg === 0 ? "INACTIVE" : item.status;
+    return {
+      ...item,
+      demandKg,
+      hasClosedPreOrders,
+      status: effectiveStatus,
+    };
+  });
   return {
     status: "OK",
     data: dataWithDemand,
@@ -198,6 +293,7 @@ const create = async (payload) => {
   if (Number.isNaN(priceNum) || priceNum < 0) {
     throw new Error("Estimated price must be a valid number greater than or equal to 0");
   }
+  validateHarvestDate(estimatedHarvestDate);
 
   const nameTrimmed = String(name).trim();
   const harvestDay = estimatedHarvestDate ? new Date(estimatedHarvestDate).toISOString().slice(0, 10) : null;
@@ -243,6 +339,10 @@ const update = async (id, payload) => {
   if (demandKg > 0) {
     throw new Error("Cannot edit fruit type when there is pre-order demand. Demand must be 0 to edit.");
   }
+  const closed = await hasClosedPreOrders(id);
+  if (closed) {
+    throw new Error("Cannot edit: this fruit type's pre-order campaign has closed (all orders completed/refunded/cancelled).");
+  }
 
   const {
     name,
@@ -261,7 +361,7 @@ const update = async (id, payload) => {
   const shouldRemoveImage = removeImage === true || removeImage === "true";
   if (shouldRemoveImage && doc.imagePublicId) {
     cloudinary.uploader.destroy(doc.imagePublicId).catch((e) =>
-      console.warn("Không thể xóa ảnh FruitType trên Cloudinary:", e.message)
+      console.warn("Could not delete FruitType image on Cloudinary:", e.message)
     );
     doc.image = null;
     doc.imagePublicId = null;
@@ -271,7 +371,10 @@ const update = async (id, payload) => {
   if (estimatedPrice !== undefined) doc.estimatedPrice = Number(estimatedPrice);
   if (minOrderKg !== undefined) doc.minOrderKg = Number(minOrderKg);
   if (maxOrderKg !== undefined) doc.maxOrderKg = Number(maxOrderKg);
-  if (estimatedHarvestDate !== undefined) doc.estimatedHarvestDate = estimatedHarvestDate ? new Date(estimatedHarvestDate) : null;
+  if (estimatedHarvestDate !== undefined) {
+    validateHarvestDate(estimatedHarvestDate);
+    doc.estimatedHarvestDate = estimatedHarvestDate ? new Date(estimatedHarvestDate) : null;
+  }
   if (allowPreOrder !== undefined) doc.allowPreOrder = !!allowPreOrder;
   if (status !== undefined) doc.status = status === "INACTIVE" ? "INACTIVE" : "ACTIVE";
   if (image !== undefined) doc.image = image && String(image).trim() ? String(image).trim() : null;
@@ -297,6 +400,10 @@ const remove = async (id) => {
   if (demandKg > 0) {
     throw new Error("Cannot delete fruit type when there is pre-order demand. Demand must be 0 to delete.");
   }
+  const closed = await hasClosedPreOrders(id);
+  if (closed) {
+    throw new Error("Cannot delete: this fruit type's pre-order campaign has closed (all orders completed/refunded/cancelled).");
+  }
 
   if (doc.imagePublicId) {
     cloudinary.uploader.destroy(doc.imagePublicId).catch((e) =>
@@ -318,4 +425,6 @@ module.exports = {
   update,
   remove,
   getPreOrderDemandKg,
+  hasClosedPreOrders,
+  maybeSetInactiveWhenDemandZero,
 };

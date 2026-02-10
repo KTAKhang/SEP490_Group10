@@ -1085,7 +1085,32 @@ const DiscountService = {
                 averageDiscountPerOrder: 0,
             };
 
-            return { status: "OK", data: stats };
+            // When filtering by year only (no month), add usage breakdown by month for charts
+            let usageByMonth = [];
+            if (
+                year !== undefined && year !== "" && year !== null &&
+                (month === undefined || month === "" || month === null) &&
+                matchStage.usedAt
+            ) {
+                const byMonthPipeline = [
+                    { $lookup: { from: "discounts", localField: "discountId", foreignField: "_id", as: "discount" } },
+                    { $unwind: "$discount" },
+                    { $match: { "discount.isBirthdayDiscount": true, usedAt: matchStage.usedAt } },
+                    {
+                        $group: {
+                            _id: { $month: "$usedAt" },
+                            usage: { $sum: 1 },
+                            totalAmount: { $sum: "$discountAmount" },
+                        },
+                    },
+                    { $sort: { _id: 1 } },
+                    { $project: { month: "$_id", usage: 1, totalAmount: 1, _id: 0 } },
+                ];
+                usageByMonth = await DiscountUsageModel.aggregate(byMonthPipeline);
+            }
+            const data = { ...stats, usageByMonth };
+
+            return { status: "OK", data };
         } catch (error) {
             return { status: "ERR", message: error.message };
         }

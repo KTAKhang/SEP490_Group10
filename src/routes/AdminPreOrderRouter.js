@@ -3,21 +3,23 @@ const router = express.Router();
 const FruitTypeController = require("../controller/FruitTypeController");
 const PreOrderAllocationController = require("../controller/PreOrderAllocationController");
 const AdminPreOrderController = require("../controller/AdminPreOrderController");
-const { authAdminMiddleware } = require("../middleware/authMiddleware");
+const { authAdminOrSalesStaffForOrderMiddleware } = require("../middleware/authMiddleware");
 const { uploadFruitTypeImage } = require("../middleware/uploadMiddleware");
 
-router.get("/pre-orders", authAdminMiddleware, AdminPreOrderController.listPreOrders);
-router.get("/pre-orders/:id", authAdminMiddleware, AdminPreOrderController.getPreOrderDetail);
-router.put("/pre-orders/:id/complete", authAdminMiddleware, AdminPreOrderController.markCompleted);
+// Admin + Sales-staff: quản lý pre-order (deposit orders, demand, fruit types, allocations)
+router.get("/pre-orders", authAdminOrSalesStaffForOrderMiddleware, AdminPreOrderController.listPreOrders);
+router.get("/pre-orders/:id", authAdminOrSalesStaffForOrderMiddleware, AdminPreOrderController.getPreOrderDetail);
+router.put("/pre-orders/:id/complete", authAdminOrSalesStaffForOrderMiddleware, AdminPreOrderController.markCompleted);
+router.put("/pre-orders/:id/refund", authAdminOrSalesStaffForOrderMiddleware, AdminPreOrderController.markRefund);
 
-router.get("/demand", authAdminMiddleware, PreOrderAllocationController.getDemand);
-router.get("/allocations", authAdminMiddleware, PreOrderAllocationController.listAllocations);
-router.post("/allocations", authAdminMiddleware, PreOrderAllocationController.upsertAllocation);
+router.get("/demand", authAdminOrSalesStaffForOrderMiddleware, PreOrderAllocationController.getDemand);
+router.get("/allocations", authAdminOrSalesStaffForOrderMiddleware, PreOrderAllocationController.listAllocations);
+router.post("/allocations", authAdminOrSalesStaffForOrderMiddleware, PreOrderAllocationController.upsertAllocation);
 
-router.get("/fruit-types", authAdminMiddleware, FruitTypeController.listAdmin);
-router.get("/fruit-types/:id", authAdminMiddleware, FruitTypeController.getById);
-router.post("/fruit-types", authAdminMiddleware, uploadFruitTypeImage, FruitTypeController.create);
-router.put("/fruit-types/:id", authAdminMiddleware, uploadFruitTypeImage, FruitTypeController.update);
-router.delete("/fruit-types/:id", authAdminMiddleware, FruitTypeController.remove);
+router.get("/fruit-types", authAdminOrSalesStaffForOrderMiddleware, FruitTypeController.listAdmin);
+router.get("/fruit-types/:id", authAdminOrSalesStaffForOrderMiddleware, FruitTypeController.getById);
+router.post("/fruit-types", authAdminOrSalesStaffForOrderMiddleware, uploadFruitTypeImage, FruitTypeController.create);
+router.put("/fruit-types/:id", authAdminOrSalesStaffForOrderMiddleware, uploadFruitTypeImage, FruitTypeController.update);
+router.delete("/fruit-types/:id", authAdminOrSalesStaffForOrderMiddleware, FruitTypeController.remove);
 
 module.exports = router;

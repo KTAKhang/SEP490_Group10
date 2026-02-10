@@ -33,6 +33,7 @@ const preOrderSchema = new mongoose.Schema(
         "READY_FOR_FULFILLMENT",
         "COMPLETED",
         "CANCELLED",
+        "REFUND", // admin marked refund (customer contacts for refund)
         "WAITING_FOR_PRODUCT", // legacy; treat as WAITING_FOR_ALLOCATION in demand/allocation
       ],
       default: "WAITING_FOR_ALLOCATION",
