@@ -10,13 +10,26 @@ const createProduct = async (payload = {}) => {
     const { name, short_desc, price, plannedQuantity, category, images, imagePublicIds, brand, detail_desc, status } =
       payload;
     if (!name || !name.toString().trim()) return { status: "ERR", message: "Product name is required" };
+    const nameStr = name.toString().trim();
+    if (nameStr.length > 200) return { status: "ERR", message: "Product name must be at most 200 characters" };
     if (price === undefined || price === null || Number.isNaN(Number(price)) || Number(price) < 0) {
       return { status: "ERR", message: "Invalid product price" };
     }
-    if (plannedQuantity === undefined || plannedQuantity === null || Number.isNaN(Number(plannedQuantity)) || Number(plannedQuantity) < 0) {
+    const plannedNum = Number(plannedQuantity);
+    if (plannedQuantity === undefined || plannedQuantity === null || Number.isNaN(plannedNum) || plannedNum < 0) {
       return { status: "ERR", message: "Invalid plannedQuantity value" };
     }
+    if (!Number.isInteger(plannedNum)) {
+      return { status: "ERR", message: "plannedQuantity must be an integer" };
+    }
     if (!category) return { status: "ERR", message: "Category is required" };
+    if (!mongoose.Types.ObjectId.isValid(category)) {
+      return { status: "ERR", message: "Invalid category ID" };
+    }
+    const shortDescStr = (short_desc ?? "").toString();
+    if (shortDescStr.length > 200) return { status: "ERR", message: "Short description (short_desc) must be at most 200 characters" };
+    const detailDescStr = (detail_desc ?? "").toString();
+    if (detailDescStr.length > 1000) return { status: "ERR", message: "Detail description (detail_desc) must be at most 1000 characters" };
     // ✅ Validate brand: bắt buộc phải có (không cho phép null/empty)
     if (!brand || !brand.toString().trim()) {
       return { status: "ERR", message: "Brand is required" };
@@ -59,18 +72,18 @@ const createProduct = async (payload = {}) => {
       // Hoặc có thể để mặc định 0, QC Staff sẽ update sau
     }
 
+    const sellingPrice = Number(price);
+    if (purchasePrice >= sellingPrice) {
+      return { status: "ERR", message: "Purchase price must be lower than selling price" };
+    }
 
     // ✅ Check unique constraint: không cho phép trùng (name + brand)
-    const normalizedName = name.toString().trim();
     const existingProduct = await ProductModel.findOne({
-      name: normalizedName,
+      name: nameStr,
       brand: normalizedBrand,
     });
     if (existingProduct) {
-      return {
-        status: "ERR",
-        message: `Product "${normalizedName}" with brand "${normalizedBrand}" already exists. Please use the existing product or choose another brand.`,
-      };
+      return { status: "ERR", message: "Product name with this brand already exists" };
     }
 
 
@@ -90,7 +103,7 @@ const createProduct = async (payload = {}) => {
 
 
     const product = new ProductModel({
-      name: name.toString().trim(),
+      name: nameStr,
       short_desc: (short_desc ?? "").toString(),
       price: Number(price),
       purchasePrice: purchasePrice, // ✅ Giá nhập hàng
@@ -128,6 +141,9 @@ const createProduct = async (payload = {}) => {
       .populate("supplier", "name type cooperationStatus");
     return { status: "OK", message: "Product created successfully", data: populated };
   } catch (error) {
+    if (error.code === 11000) {
+      return { status: "ERR", message: "Product name with this brand already exists" };
+    }
     return { status: "ERR", message: error.message };
   }
 };
@@ -148,20 +164,35 @@ const getProducts = async (filters = {}) => {
     } = filters;
 
 
-    const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    if (pageNum > 10000) return { status: "ERR", message: "Invalid page (max 10000)" };
     const skip = (pageNum - 1) * limitNum;
 
-
     const query = {};
-    if (search) query.name = { $regex: search, $options: "i" };
-    if (category) query.category = category;
+    if (search) query.name = { $regex: typeof search === "string" ? search : String(search), $options: "i" };
+    if (category) {
+      if (!mongoose.Types.ObjectId.isValid(category)) {
+        return { status: "ERR", message: "Invalid category ID" };
+      }
+      query.category = category;
+    }
     if (status !== undefined) query.status = status === "true" || status === true;
-    if (receivingStatus) query.receivingStatus = receivingStatus;
-    if (stockStatus) query.stockStatus = stockStatus;
+    const allowedReceivingStatus = ["NOT_RECEIVED", "PARTIAL", "RECEIVED"];
+    if (receivingStatus) {
+      if (!allowedReceivingStatus.includes(receivingStatus)) {
+        return { status: "ERR", message: "receivingStatus must be NOT_RECEIVED, PARTIAL or RECEIVED" };
+      }
+      query.receivingStatus = receivingStatus;
+    }
+    const allowedStockStatus = ["IN_STOCK", "OUT_OF_STOCK"];
+    if (stockStatus) {
+      if (!allowedStockStatus.includes(stockStatus)) {
+        return { status: "ERR", message: "stockStatus must be IN_STOCK or OUT_OF_STOCK" };
+      }
+      query.stockStatus = stockStatus;
+    }
 
-
-    // Sort options
     const allowedSortFields = ["name", "price", "createdAt", "updatedAt", "status", "onHandQuantity", "receivedQuantity"];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
     const sortDirection = sortOrder === "asc" ? 1 : -1;
@@ -199,6 +230,9 @@ const getProducts = async (filters = {}) => {
 
 const getProductById = async (id) => {
   try {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return { status: "ERR", message: "Invalid product ID" };
+    }
     const product = await ProductModel.findById(id).populate("category", "name").lean();
     if (!product) return { status: "ERR", message: "Product does not exist" };
     const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
@@ -212,6 +246,9 @@ const getProductById = async (id) => {
 
 const updateProductAdmin = async (id, payload = {}) => {
   try {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return { status: "ERR", message: "Invalid product ID" };
+    }
     const product = await ProductModel.findById(id);
     if (!product) return { status: "ERR", message: "Product does not exist" };
     // Whitelist fields (Admin được sửa plannedQuantity, price, purchasePrice, mô tả...)
@@ -247,7 +284,7 @@ const updateProductAdmin = async (id, payload = {}) => {
         return {
           status: "ERR",
           message:
-            "Khi sản phẩm đã có hàng trong kho (đã nhập / còn tồn), chỉ được cập nhật mô tả (short_desc) và mô tả chi tiết (detail_desc). Để sửa giá, số lượng, ảnh, ... cần đợi xuất hết và reset lô.",
+            "When the product already has stock in warehouse (received or on hand), only short_desc and detail_desc can be updated. To change price, quantity, images, etc., clear stock and reset the batch first.",
         };
       }
     }
@@ -255,11 +292,25 @@ const updateProductAdmin = async (id, payload = {}) => {
     if (payload.name !== undefined) {
       const newName = (payload.name ?? "").toString().trim();
       if (!newName) return { status: "ERR", message: "Product name is required" };
+      if (newName.length > 200) return { status: "ERR", message: "Product name must be at most 200 characters" };
+      const currentBrand = (product.brand && product.brand.toString) ? product.brand.toString() : String(product.brand || "");
+      const existingByNameBrand = await ProductModel.findOne({
+        _id: { $ne: id },
+        name: newName,
+        brand: currentBrand,
+      });
+      if (existingByNameBrand) {
+        return { status: "ERR", message: "Product name with this brand already exists" };
+      }
       product.name = newName;
     }
 
 
-    if (payload.short_desc !== undefined) product.short_desc = (payload.short_desc ?? "").toString();
+    if (payload.short_desc !== undefined) {
+      const shortDesc = (payload.short_desc ?? "").toString();
+      if (shortDesc.length > 200) return { status: "ERR", message: "Short description (short_desc) must be at most 200 characters" };
+      product.short_desc = shortDesc;
+    }
     if (payload.price !== undefined) {
       const p = Number(payload.price);
       if (Number.isNaN(p) || p < 0) return { status: "ERR", message: "Invalid product price" };
@@ -293,6 +344,7 @@ const updateProductAdmin = async (id, payload = {}) => {
     if (payload.plannedQuantity !== undefined) {
       const planned = Number(payload.plannedQuantity);
       if (Number.isNaN(planned) || planned < 0) return { status: "ERR", message: "Invalid plannedQuantity value" };
+      if (!Number.isInteger(planned)) return { status: "ERR", message: "plannedQuantity must be an integer" };
       // Chặn giảm planned thấp hơn số đã nhập
       if ((product.receivedQuantity ?? 0) > planned) {
         return { status: "ERR", message: "plannedQuantity cannot be less than the current receivedQuantity" };
@@ -302,6 +354,9 @@ const updateProductAdmin = async (id, payload = {}) => {
 
 
     if (payload.category !== undefined) {
+      if (!mongoose.Types.ObjectId.isValid(payload.category)) {
+        return { status: "ERR", message: "Invalid category ID" };
+      }
       const categoryDoc = await CategoryModel.findById(payload.category);
       if (!categoryDoc) return { status: "ERR", message: "Category does not exist" };
       // Kiểm tra category không được ẩn
@@ -336,8 +391,6 @@ const updateProductAdmin = async (id, payload = {}) => {
         };
       }
 
-
-      // Kiểm tra unique constraint nếu brand thay đổi
       if (product.brand !== newBrand) {
         const existingProduct = await ProductModel.findOne({
           _id: { $ne: id },
@@ -345,10 +398,7 @@ const updateProductAdmin = async (id, payload = {}) => {
           brand: newBrand,
         });
         if (existingProduct) {
-          return {
-            status: "ERR",
-            message: `Product "${product.name}" with brand "${newBrand}" already exists. Please choose another brand.`,
-          };
+          return { status: "ERR", message: "Product name with this brand already exists" };
         }
       }
 
@@ -405,8 +455,11 @@ const updateProductAdmin = async (id, payload = {}) => {
       product.imagePublicIds = newImagePublicIds;
     }
    
-    // Brand đã được xử lý ở trên với supplier validation
-    if (payload.detail_desc !== undefined) product.detail_desc = (payload.detail_desc ?? "").toString();
+    if (payload.detail_desc !== undefined) {
+      const detailDesc = (payload.detail_desc ?? "").toString();
+      if (detailDesc.length > 1000) return { status: "ERR", message: "Detail description (detail_desc) must be at most 1000 characters" };
+      product.detail_desc = detailDesc;
+    }
     if (payload.status !== undefined) product.status = payload.status;
     if (payload.nearExpiryDaysThreshold !== undefined) {
       const v = Number(payload.nearExpiryDaysThreshold);
@@ -418,6 +471,27 @@ const updateProductAdmin = async (id, payload = {}) => {
       if (Number.isNaN(v) || v < 0 || v > 100) return { status: "ERR", message: "nearExpiryDiscountPercent must be between 0 and 100" };
       product.nearExpiryDiscountPercent = v;
     }
+
+    const finalPurchasePrice = product.purchasePrice ?? 0;
+    const finalSellingPrice = product.price ?? 0;
+    if (finalPurchasePrice >= finalSellingPrice) {
+      return { status: "ERR", message: "Purchase price must be lower than selling price" };
+    }
+
+    // ✅ Final duplicate check (name + brand) before save
+    const finalName = (product.name && product.name.toString()) ? product.name.toString().trim() : "";
+    const finalBrand = (product.brand && product.brand.toString()) ? product.brand.toString().trim() : "";
+    if (finalName && finalBrand) {
+      const duplicate = await ProductModel.findOne({
+        _id: { $ne: id },
+        name: finalName,
+        brand: finalBrand,
+      });
+      if (duplicate) {
+        return { status: "ERR", message: "Product name with this brand already exists" };
+      }
+    }
+
     // ✅ Save product trước
     await product.save();
 
@@ -439,6 +513,9 @@ const updateProductAdmin = async (id, payload = {}) => {
       .populate("supplier", "name type cooperationStatus");
     return { status: "OK", message: "Product updated successfully", data: populated };
   } catch (error) {
+    if (error.code === 11000) {
+      return { status: "ERR", message: "Product name with this brand already exists" };
+    }
     return { status: "ERR", message: error.message };
   }
 };
@@ -448,6 +525,9 @@ const updateProductAdmin = async (id, payload = {}) => {
 
 const updateProductExpiryDate = async (id, payload = {}) => {
   try {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return { status: "ERR", message: "Invalid product ID" };
+    }
     const product = await ProductModel.findById(id);
     if (!product) return { status: "ERR", message: "Product does not exist" };
 
@@ -527,6 +607,9 @@ const updateProductExpiryDate = async (id, payload = {}) => {
 
 const deleteProduct = async (id) => {
   try {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return { status: "ERR", message: "Invalid product ID" };
+    }
     const product = await ProductModel.findById(id);
     if (!product) return { status: "ERR", message: "Product does not exist" };
     // Xóa tất cả ảnh trên Cloudinary nếu có

@@ -15,6 +15,10 @@ const upload = multer({
     limits: { fileSize: 5 * 1024 * 1024 }, // giới hạn 5MB
 });
 
+// Single, clear error message for invalid file type (avoid duplicate or vague messages)
+const ALLOWED_IMAGE_MIMES = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"];
+const IMAGE_FILE_TYPE_ERROR = "Only image files are allowed (jpg, png, webp, gif). Documents and other file types are not accepted.";
+
 // Helper: Resize và compress ảnh trước khi upload (giảm kích thước file đáng kể)
 const optimizeImage = async (buffer) => {
     try {
@@ -74,6 +78,10 @@ const uploadCategoryImage = (req, res, next) => {
         }
         try {
             if (req.file && req.file.buffer) {
+                // Validate file type first: only images allowed (reject doc, pdf, etc.) — single response, no double error
+                if (!ALLOWED_IMAGE_MIMES.includes(req.file.mimetype)) {
+                    return res.status(400).json({ status: "ERR", message: IMAGE_FILE_TYPE_ERROR });
+                }
                 // ✅ Tự động lấy ảnh cũ từ database nếu đang update (có req.params.id)
                 let oldImagePublicId = null;
                 if (req.params && req.params.id) {
@@ -125,6 +133,9 @@ const uploadFruitTypeImage = (req, res, next) => {
         }
         try {
             if (req.file && req.file.buffer) {
+                if (!ALLOWED_IMAGE_MIMES.includes(req.file.mimetype)) {
+                    return res.status(400).json({ status: "ERR", message: IMAGE_FILE_TYPE_ERROR });
+                }
                 let oldImagePublicId = null;
                 if (req.params && req.params.id) {
                     try {
@@ -214,6 +225,18 @@ const uploadProductImages = (req, res, next) => {
                 existingImagePublicIds = oldImagePublicIdsFromDB;
             }
             
+            // ✅ Validate: only allow image files (reject doc, pdf, etc.) — single 400 response, clear message
+            if (Array.isArray(req.files) && req.files.length > 0) {
+                const invalidFiles = req.files.filter((file) => !ALLOWED_IMAGE_MIMES.includes(file.mimetype));
+                if (invalidFiles.length > 0) {
+                    const names = invalidFiles.map((f) => f.originalname || f.fieldname).join(", ");
+                    return res.status(400).json({
+                        status: "ERR",
+                        message: IMAGE_FILE_TYPE_ERROR + (names ? " Rejected file(s): " + names : ""),
+                    });
+                }
+            }
+
             // ✅ Xử lý file upload thực tế - Upload song song với stream + optimization
             if (Array.isArray(req.files) && req.files.length > 0) {
                 // Upload tất cả ảnh song song với stream (nhanh hơn base64)
@@ -552,7 +575,7 @@ const uploadNewsThumbnail = (req, res, next) => {
                 if (!allowedMimes.includes(req.file.mimetype)) {
                     return res.status(400).json({
                         status: "ERR",
-                        message: "Thumbnail phải là định dạng jpg, png hoặc webp",
+                        message: "Thumbnail must be jpg, png or webp format",
                     });
                 }
 
@@ -611,7 +634,7 @@ const uploadNewsContentImage = (req, res, next) => {
                 if (!allowedMimes.includes(req.file.mimetype)) {
                     return res.status(400).json({
                         status: "ERR",
-                        message: "Ảnh phải là định dạng jpg, png hoặc webp",
+                        message: "Image must be jpg, png or webp format",
                     });
                 }
 
@@ -626,7 +649,7 @@ const uploadNewsContentImage = (req, res, next) => {
             } else {
                 return res.status(400).json({
                     status: "ERR",
-                    message: "Không có file ảnh được upload",
+                    message: "No image file was uploaded",
                 });
             }
             return next();
@@ -652,7 +675,7 @@ const uploadShopDescriptionImage = (req, res, next) => {
                 if (!allowedMimes.includes(req.file.mimetype)) {
                     return res.status(400).json({
                         status: "ERR",
-                        message: "Ảnh phải là định dạng jpg, png hoặc webp",
+                        message: "Image must be jpg, png or webp format",
                     });
                 }
 
@@ -667,7 +690,7 @@ const uploadShopDescriptionImage = (req, res, next) => {
             } else {
                 return res.status(400).json({
                     status: "ERR",
-                    message: "Không có file ảnh được upload",
+                    message: "No image file was uploaded",
                 });
             }
             return next();
@@ -743,14 +766,14 @@ const uploadShopImages = (req, res, next) => {
                     if (!allowedMimes.includes(file.mimetype)) {
                         return res.status(400).json({
                             status: "ERR",
-                            message: "Chỉ cho phép upload file ảnh hợp lệ (jpg, png, webp)",
+                            message: "Only valid image files are allowed (jpg, png, webp)",
                         });
                     }
                     // BR-23: Check file size (5MB limit from multer config)
                     if (file.size > 5 * 1024 * 1024) {
                         return res.status(400).json({
                             status: "ERR",
-                            message: `Kích thước file ${file.originalname} vượt quá 5MB`,
+                            message: `File size of ${file.originalname} exceeds 5MB`,
                         });
                     }
                 }
@@ -857,7 +880,7 @@ const uploadShopImage = (req, res, next) => {
                 if (!allowedMimes.includes(req.file.mimetype)) {
                     return res.status(400).json({
                         status: "ERR",
-                        message: "Ảnh phải là định dạng jpg, png hoặc webp",
+                        message: "Image must be jpg, png or webp format",
                     });
                 }
 
@@ -865,7 +888,7 @@ const uploadShopImage = (req, res, next) => {
                 if (req.file.size > 5 * 1024 * 1024) {
                     return res.status(400).json({
                         status: "ERR",
-                        message: "Kích thước file vượt quá 5MB",
+                        message: "File size exceeds 5MB",
                     });
                 }
 
@@ -880,7 +903,7 @@ const uploadShopImage = (req, res, next) => {
             } else {
                 return res.status(400).json({
                     status: "ERR",
-                    message: "Không có file ảnh được upload",
+                    message: "No image file was uploaded",
                 });
             }
             return next();
@@ -906,7 +929,7 @@ const uploadHomepageAssetImage = (req, res, next) => {
                 if (!allowedMimes.includes(req.file.mimetype)) {
                     return res.status(400).json({
                         status: "ERR",
-                        message: "Ảnh phải là định dạng jpg, png hoặc webp",
+                        message: "Image must be jpg, png or webp format",
                     });
                 }
 
@@ -914,7 +937,7 @@ const uploadHomepageAssetImage = (req, res, next) => {
                 if (req.file.size > 5 * 1024 * 1024) {
                     return res.status(400).json({
                         status: "ERR",
-                        message: "Kích thước file vượt quá 5MB",
+                        message: "File size exceeds 5MB",
                     });
                 }
 
@@ -929,7 +952,7 @@ const uploadHomepageAssetImage = (req, res, next) => {
             } else {
                 return res.status(400).json({
                     status: "ERR",
-                    message: "Không có file ảnh được upload",
+                    message: "No image file was uploaded",
                 });
             }
             return next();

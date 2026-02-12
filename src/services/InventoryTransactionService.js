@@ -339,7 +339,7 @@ const createReceipt = async (userId, payload = {}) => {
 
 
     const populatedTx = await InventoryTransactionModel.findById(txDoc._id)
-      .populate("product", "name plannedQuantity receivedQuantity onHandQuantity reservedQuantity receivingStatus stockStatus")
+      .populate("product", "name plannedQuantity receivedQuantity onHandQuantity receivingStatus stockStatus")
       .populate("createdBy", "user_name email")
       .populate({
         path: "harvestBatch",
@@ -491,7 +491,7 @@ const createIssue = async (userId, payload = {}) => {
 
 
     const populatedTx = await InventoryTransactionModel.findById(txDoc._id)
-      .populate("product", "name plannedQuantity receivedQuantity onHandQuantity reservedQuantity receivingStatus stockStatus")
+      .populate("product", "name plannedQuantity receivedQuantity onHandQuantity receivingStatus stockStatus")
       .populate("createdBy", "user_name email")
       .lean();
 
@@ -782,7 +782,7 @@ const getReceiptById = async (transactionId) => {
     })
       .populate({
         path: "product",
-        select: "name price category brand images description warehouseEntryDate warehouseEntryDateStr expiryDate expiryDateStr plannedQuantity receivedQuantity onHandQuantity reservedQuantity receivingStatus stockStatus status",
+        select: "name price category brand images description warehouseEntryDate warehouseEntryDateStr expiryDate expiryDateStr plannedQuantity receivedQuantity onHandQuantity receivingStatus stockStatus status",
         populate: {
           path: "category",
           select: "name status",

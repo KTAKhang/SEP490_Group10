@@ -161,8 +161,8 @@ const resetProductForNewBatch = async (productId, completionReason = "SOLD_OUT")
     }
 
 
-    // Lấy product hiện tại
-    const product = await ProductModel.findById(productId).session(session);
+    // Lấy product hiện tại (populate category để snapshot tên danh mục)
+    const product = await ProductModel.findById(productId).populate("category", "name").session(session);
     if (!product) {
       await session.abortTransaction();
       return { status: "ERR", message: "Product does not exist" };
@@ -253,10 +253,18 @@ const resetProductForNewBatch = async (productId, completionReason = "SOLD_OUT")
       batchSnapshot.warehouseEntryDate || batchSnapshot.warehouseEntryDateStr,
       today
     );
+    // Snapshot name, category, brand tại thời điểm chốt lô (minh bạch, không đổi khi product sửa sau)
+    const productNameSnapshot = (product.name && product.name.toString()) ? product.name.toString().trim() : "";
+    const productCategoryNameSnapshot = (product.category && product.category.name) ? String(product.category.name).trim() : "";
+    const productBrandSnapshot = (product.brand && product.brand.toString()) ? product.brand.toString().trim() : "";
+
     // ✅ Tạo batch history với dữ liệu snapshot (TRƯỚC KHI reset)
     const batchHistory = new ProductBatchHistoryModel({
       product: new mongoose.Types.ObjectId(productId),
-      harvestBatch: harvestBatchId, // ✅ Liên kết với harvestBatch nếu có
+      productNameSnapshot,
+      productCategoryNameSnapshot,
+      productBrandSnapshot,
+      harvestBatch: harvestBatchId,
       batchNumber: batchSnapshot.batchNumber,
       plannedQuantity: batchSnapshot.plannedQuantity,
       receivedQuantity: batchSnapshot.receivedQuantity,
@@ -287,7 +295,6 @@ const resetProductForNewBatch = async (productId, completionReason = "SOLD_OUT")
     product.plannedQuantity = 0;
     product.receivedQuantity = 0;
     product.onHandQuantity = 0;
-    product.reservedQuantity = 0;
     product.warehouseEntryDate = null;
     product.warehouseEntryDateStr = null;
     product.expiryDate = null;

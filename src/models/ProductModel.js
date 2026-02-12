@@ -15,7 +15,12 @@ const makeVNDateStr = (date) => {
 
 const productSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true, trim: true },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: [200, "Product name must be at most 200 characters"],
+    },
 
 
     short_desc: {
@@ -44,7 +49,7 @@ const productSchema = new mongoose.Schema(
       min: 0,
       validate: {
         validator: Number.isInteger,
-        message: "plannedQuantity phải là số nguyên",
+        message: "plannedQuantity must be an integer",
       },
     },
 
@@ -56,7 +61,7 @@ const productSchema = new mongoose.Schema(
       min: 0,
       validate: {
         validator: Number.isInteger,
-        message: "receivedQuantity phải là số nguyên",
+        message: "receivedQuantity must be an integer",
       },
     },
 
@@ -68,19 +73,7 @@ const productSchema = new mongoose.Schema(
       min: 0,
       validate: {
         validator: Number.isInteger,
-        message: "onHandQuantity phải là số nguyên",
-      },
-    },
-
-
-    // Giữ hàng cho đơn (nếu bạn có flow đặt hàng)
-    reservedQuantity: {
-      type: Number,
-      default: 0,
-      min: 0,
-      validate: {
-        validator: Number.isInteger,
-        message: "reservedQuantity phải là số nguyên",
+        message: "onHandQuantity must be an integer",
       },
     },
 
@@ -123,7 +116,7 @@ const productSchema = new mongoose.Schema(
         validator: function (v) {
           return v.length <= 10;
         },
-        message: "Số lượng ảnh không được vượt quá 10",
+        message: "Number of images must not exceed 10",
       },
     },
     imagePublicIds: {
@@ -132,7 +125,7 @@ const productSchema = new mongoose.Schema(
         validator: function (v) {
           return v.length <= 10;
         },
-        message: "Số lượng imagePublicIds không được vượt quá 10",
+        message: "Number of imagePublicIds must not exceed 10",
       },
     },
 
@@ -190,7 +183,7 @@ const productSchema = new mongoose.Schema(
     warehouseEntryDateStr: {
       type: String,
       default: null,
-      match: [/^\d{4}-\d{2}-\d{2}$/, "warehouseEntryDateStr phải có format YYYY-MM-DD"],
+      match: [/^\d{4}-\d{2}-\d{2}$/, "warehouseEntryDateStr must be in YYYY-MM-DD format"],
     },
 
 
@@ -205,14 +198,14 @@ const productSchema = new mongoose.Schema(
     expiryDateStr: {
       type: String,
       default: null,
-      match: [/^\d{4}-\d{2}-\d{2}$/, "expiryDateStr phải có format YYYY-MM-DD"],
+      match: [/^\d{4}-\d{2}-\d{2}$/, "expiryDateStr must be in YYYY-MM-DD format"],
     },
     // ✅ Giá sắp hết hạn: còn ≤ nearExpiryDaysThreshold ngày thì bán với giá giảm (effectivePrice = price * (1 - nearExpiryDiscountPercent/100))
     nearExpiryDaysThreshold: {
       type: Number,
       default: 7,
       min: 0,
-      validate: { validator: Number.isInteger, message: "nearExpiryDaysThreshold phải là số nguyên" },
+      validate: { validator: Number.isInteger, message: "nearExpiryDaysThreshold must be an integer" },
     },
     nearExpiryDiscountPercent: {
       type: Number,
@@ -229,10 +222,6 @@ const productSchema = new mongoose.Schema(
 );
 // ✅ Unique constraint: không cho phép trùng (name + brand)
 productSchema.index({ name: 1, brand: 1 }, { unique: true });
-// Virtual: available = onHand - reserved
-productSchema.virtual("availableQuantity").get(function () {
-  return Math.max(0, (this.onHandQuantity || 0) - (this.reservedQuantity || 0));
-});
 // Virtual: profit = price - purchasePrice
 productSchema.virtual("profit").get(function () {
   return Math.max(0, (this.price || 0) - (this.purchasePrice || 0));
@@ -245,64 +234,71 @@ productSchema.virtual("profitMargin").get(function () {
   return Math.round(((price - purchasePrice) / price) * 100 * 100) / 100; // Làm tròn 2 chữ số thập phân
 });
 // Tự cập nhật trạng thái khi lưu - Chuẩn hóa logic
-productSchema.pre("save", function (next) {
-  const planned = this.plannedQuantity ?? 0;
-  const received = this.receivedQuantity ?? 0;
-  const onHand = this.onHandQuantity ?? 0;
-  const reserved = this.reservedQuantity ?? 0;
-  // ✅ Đảm bảo invariant: 0 ≤ onHandQuantity ≤ receivedQuantity ≤ plannedQuantity
-  if (onHand < 0) {
-    return next(new Error("onHandQuantity không được âm"));
+productSchema.pre("save", async function (next) {
+  try {
+    const planned = this.plannedQuantity ?? 0;
+    const received = this.receivedQuantity ?? 0;
+    const onHand = this.onHandQuantity ?? 0;
+    // ✅ Đảm bảo invariant: 0 ≤ onHandQuantity ≤ receivedQuantity ≤ plannedQuantity
+    if (onHand < 0) {
+      return next(new Error("onHandQuantity cannot be negative"));
+    }
+    if (received < 0) {
+      return next(new Error("receivedQuantity cannot be negative"));
+    }
+    if (onHand > received) {
+      return next(new Error("onHandQuantity cannot exceed receivedQuantity"));
+    }
+    if (received > planned) {
+      return next(new Error("receivedQuantity cannot exceed plannedQuantity"));
+    }
+    // ✅ Chuẩn hóa receivingStatus
+    if (received === 0) {
+      this.receivingStatus = "NOT_RECEIVED";
+    } else if (received < planned) {
+      this.receivingStatus = "PARTIAL";
+    } else {
+      this.receivingStatus = "RECEIVED";
+    }
+    // ✅ Chuẩn hóa stockStatus
+    if (onHand > 0) {
+      this.stockStatus = "IN_STOCK";
+    } else {
+      this.stockStatus = "OUT_OF_STOCK";
+    }
+    const imagesLength = Array.isArray(this.images) ? this.images.length : 0;
+    const imagePublicIdsLength = Array.isArray(this.imagePublicIds) ? this.imagePublicIds.length : 0;
+    if (imagesLength !== imagePublicIdsLength) {
+      return next(new Error("Number of images and imagePublicIds must match"));
+    }
+    // ✅ Unique (name + brand): reject duplicate before save
+    if (this.isModified("name") || this.isModified("brand")) {
+      const nameStr = (this.name && this.name.toString()) ? this.name.toString().trim() : "";
+      const brandStr = (this.brand && this.brand.toString()) ? this.brand.toString().trim() : "";
+      if (nameStr && brandStr) {
+        const existing = await this.constructor.findOne({
+          name: nameStr,
+          brand: brandStr,
+          _id: { $ne: this._id },
+        });
+        if (existing) {
+          return next(new Error("Product name with this brand already exists"));
+        }
+      }
+    }
+    if (this.isModified("warehouseEntryDate")) {
+      this.warehouseEntryDateStr = this.warehouseEntryDate ? makeVNDateStr(this.warehouseEntryDate) : null;
+    } else if (this.warehouseEntryDate && !this.warehouseEntryDateStr) {
+      this.warehouseEntryDateStr = makeVNDateStr(this.warehouseEntryDate);
+    }
+    if (this.isModified("expiryDate")) {
+      this.expiryDateStr = this.expiryDate ? makeVNDateStr(this.expiryDate) : null;
+    } else if (this.expiryDate && !this.expiryDateStr) {
+      this.expiryDateStr = makeVNDateStr(this.expiryDate);
+    }
+    next();
+  } catch (err) {
+    next(err);
   }
-  if (received < 0) {
-    return next(new Error("receivedQuantity không được âm"));
-  }
-  if (onHand > received) {
-    return next(new Error("onHandQuantity không được vượt receivedQuantity"));
-  }
-  if (received > planned) {
-    return next(new Error("receivedQuantity không được vượt plannedQuantity"));
-  }
-  // ✅ Chuẩn hóa receivingStatus
-  if (received === 0) {
-    this.receivingStatus = "NOT_RECEIVED";
-  } else if (received < planned) {
-    this.receivingStatus = "PARTIAL";
-  } else {
-    // received === planned
-    this.receivingStatus = "RECEIVED";
-  }
-  // ✅ Chuẩn hóa stockStatus
-  if (onHand > 0) {
-    this.stockStatus = "IN_STOCK";
-  } else {
-    // onHand === 0
-    this.stockStatus = "OUT_OF_STOCK";
-  }
-  // ✅ Safety: reserved không được vượt onHand
-  if (reserved > onHand) {
-    return next(new Error("reservedQuantity cannot exceed onHandQuantity"));
-  }
-  // ✅ Validate images.length === imagePublicIds.length
-  const imagesLength = Array.isArray(this.images) ? this.images.length : 0;
-  const imagePublicIdsLength = Array.isArray(this.imagePublicIds) ? this.imagePublicIds.length : 0;
-  if (imagesLength !== imagePublicIdsLength) {
-    return next(new Error("Số lượng images và imagePublicIds phải bằng nhau"));
-  }
-  // ✅ Tự động sync date string fields từ Date objects khi Date thay đổi
-  // Xử lý cả case Date bị set về null
-  if (this.isModified("warehouseEntryDate")) {
-    this.warehouseEntryDateStr = this.warehouseEntryDate ? makeVNDateStr(this.warehouseEntryDate) : null;
-  } else if (this.warehouseEntryDate && !this.warehouseEntryDateStr) {
-    // Fallback: sync nếu Date có nhưng Str chưa có (cho data cũ)
-    this.warehouseEntryDateStr = makeVNDateStr(this.warehouseEntryDate);
-  }
-  if (this.isModified("expiryDate")) {
-    this.expiryDateStr = this.expiryDate ? makeVNDateStr(this.expiryDate) : null;
-  } else if (this.expiryDate && !this.expiryDateStr) {
-    // Fallback: sync nếu Date có nhưng Str chưa có (cho data cũ)
-    this.expiryDateStr = makeVNDateStr(this.expiryDate);
-  }
-  next();
 });
 module.exports = mongoose.model("products", productSchema);

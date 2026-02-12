@@ -13,17 +13,17 @@ const supplierSchema = new mongoose.Schema(
     // ========================
     name: {
       type: String,
-      required: [true, "Tên nhà cung cấp là bắt buộc"],
+      required: [true, "Supplier name is required"],
       trim: true,
-      minlength: [2, "Tên nhà cung cấp phải có ít nhất 2 ký tự"],
-      maxlength: [100, "Tên nhà cung cấp không được vượt quá 100 ký tự"],
+      minlength: [2, "Supplier name must be at least 2 characters"],
+      maxlength: [100, "Supplier name must be at most 100 characters"],
       index: true,
     },
 
     type: {
       type: String,
       enum: ["FARM", "COOPERATIVE", "BUSINESS"],
-      required: [true, "Loại nhà cung cấp là bắt buộc"],
+      required: [true, "Supplier type is required"],
       index: true,
     },
 
@@ -32,7 +32,7 @@ const supplierSchema = new mongoose.Schema(
       type: String,
       trim: true,
       uppercase: true,
-      maxlength: [20, "Mã nhà cung cấp không được vượt quá 20 ký tự"],
+      maxlength: [20, "Supplier code must be at most 20 characters"],
       immutable: true,
     },
 
@@ -42,32 +42,32 @@ const supplierSchema = new mongoose.Schema(
     contactPerson: {
       type: String,
       trim: true,
-      maxlength: [50, "Tên người liên hệ không được vượt quá 50 ký tự"],
+      maxlength: [50, "Contact person name must be at most 50 characters"],
     },
 
     phone: {
       type: String,
       trim: true,
-      match: [/^[0-9+\-\s()]+$/, "Số điện thoại không hợp lệ"],
+      match: [/^[0-9+\-\s()]+$/, "Invalid phone number format"],
     },
 
     email: {
       type: String,
       trim: true,
       lowercase: true,
-      match: [/\S+@\S+\.\S+/, "Định dạng email không hợp lệ"],
+      match: [/\S+@\S+\.\S+/, "Invalid email format"],
     },
 
     address: {
       type: String,
       trim: true,
-      maxlength: [500, "Địa chỉ không được vượt quá 500 ký tự"],
+      maxlength: [500, "Address must be at most 500 characters"],
     },
 
     // Trạng thái hợp tác
     cooperationStatus: {
       type: String,
-      enum: ["ACTIVE", "SUSPENDED", "TERMINATED"],
+      enum: ["ACTIVE", "TERMINATED"],
       default: "ACTIVE",
       index: true,
     },
@@ -118,7 +118,7 @@ const supplierSchema = new mongoose.Schema(
     notes: {
       type: String,
       trim: true,
-      maxlength: [1000, "Ghi chú không được vượt quá 1000 ký tự"],
+      maxlength: [1000, "Notes must be at most 1000 characters"],
       default: "",
     },
 
@@ -201,7 +201,7 @@ const buildSupplierCode = async (supplierDoc) => {
 
 supplierSchema.pre("save", async function (next) {
   if (!this.phone && !this.email) {
-    return next(new Error("Phải có ít nhất số điện thoại hoặc email"));
+    return next(new Error("At least one phone number or email is required"));
   }
 
   if (this.isNew) {
@@ -209,7 +209,7 @@ supplierSchema.pre("save", async function (next) {
   }
 
   if (!this.isNew && this.isModified("code")) {
-    return next(new Error("Mã nhà cung cấp không thể chỉnh sửa sau khi tạo"));
+    return next(new Error("Supplier code cannot be modified after creation"));
   }
 
   next();

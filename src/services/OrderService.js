@@ -340,7 +340,8 @@ const confirmCheckoutAndCreateOrder = async ({
         amount: finalTotalPrice,
         session,
       });
-      // ✅ Tự động chốt lô (reset) sản phẩm bán hết sau khi trừ kho (COD)
+      await session.commitTransaction();
+      // ✅ Chốt lô ngay sau khi commit (sản phẩm về 0 đã được ghi DB)
       const ProductBatchService = require("./ProductBatchService");
       for (const item of cartItems) {
         try {
@@ -352,20 +353,12 @@ const confirmCheckoutAndCreateOrder = async ({
             product.onHandQuantity === 0 &&
             (product.warehouseEntryDate || product.warehouseEntryDateStr)
           ) {
-            await ProductBatchService.autoResetSoldOutProduct(
-              item.product_id.toString(),
-            );
+            await ProductBatchService.autoResetSoldOutProduct(item.product_id.toString());
           }
         } catch (e) {
-          console.error(
-            "Auto-reset sold out product failed:",
-            item.product_id,
-            e,
-          );
+          console.error("Auto-reset sold out product failed:", item.product_id, e);
         }
       }
-     
-      await session.commitTransaction();
        if (discount_id && discountCode) {
         try {
           await DiscountService.applyDiscountCode(
@@ -442,7 +435,24 @@ const confirmCheckoutAndCreateOrder = async ({
         session,
       });
       await session.commitTransaction();
-
+      // ✅ Chốt lô ngay sau khi commit (VNPay: trừ kho đã xong lúc đặt đơn, sản phẩm về 0 thì chốt lô)
+      const ProductBatchService = require("./ProductBatchService");
+      for (const item of cartItems) {
+        try {
+          const product = await ProductModel.findById(item.product_id)
+            .select("onHandQuantity warehouseEntryDate warehouseEntryDateStr")
+            .lean();
+          if (
+            product &&
+            product.onHandQuantity === 0 &&
+            (product.warehouseEntryDate || product.warehouseEntryDateStr)
+          ) {
+            await ProductBatchService.autoResetSoldOutProduct(item.product_id.toString());
+          }
+        } catch (e) {
+          console.error("Auto-reset sold out product failed:", item.product_id, e);
+        }
+      }
       if (discount_id && discountCode) {
         try {
           await DiscountService.applyDiscountCode(
