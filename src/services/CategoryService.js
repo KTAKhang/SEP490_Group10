@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const CategoryModel = require("../models/CategoryModel");
 const ProductModel = require("../models/ProductModel");
 const cloudinary = require("../config/cloudinaryConfig");
@@ -8,9 +9,14 @@ const createCategory = async ({ name, description, image, imagePublicId, status 
     if (!name || !name.trim()) {
       return { status: "ERR", message: "Category name is required" };
     }
-
-
     const normalizedName = name.trim();
+    if (normalizedName.length > 100) {
+      return { status: "ERR", message: "Category name must be at most 100 characters" };
+    }
+    const descStr = (description ?? "").toString();
+    if (descStr.length > 500) {
+      return { status: "ERR", message: "Category description must be at most 500 characters" };
+    }
     const existing = await CategoryModel.findOne({
       name: { $regex: new RegExp(`^${normalizedName}$`, "i") },
     });
@@ -33,6 +39,9 @@ const createCategory = async ({ name, description, image, imagePublicId, status 
 
     return { status: "OK", message: "Category created successfully", data: category };
   } catch (error) {
+    if (error.code === 11000) {
+      return { status: "ERR", message: "Category name already exists" };
+    }
     return { status: "ERR", message: error.message };
   }
 };
@@ -40,8 +49,9 @@ const createCategory = async ({ name, description, image, imagePublicId, status 
 
 const getCategories = async ({ page = 1, limit = 20, search = "", status, sortBy = "createdAt", sortOrder = "desc" } = {}) => {
   try {
-    const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    if (pageNum > 10000) return { status: "ERR", message: "Invalid page (max 10000)" };
     const skip = (pageNum - 1) * limitNum;
 
 
@@ -75,6 +85,9 @@ const getCategories = async ({ page = 1, limit = 20, search = "", status, sortBy
       },
     };
   } catch (error) {
+    if (error.code === 11000) {
+      return { status: "ERR", message: "Category name already exists" };
+    }
     return { status: "ERR", message: error.message };
   }
 };
@@ -82,10 +95,16 @@ const getCategories = async ({ page = 1, limit = 20, search = "", status, sortBy
 
 const getCategoryById = async (id) => {
   try {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return { status: "ERR", message: "Invalid category ID" };
+    }
     const category = await CategoryModel.findById(id);
     if (!category) return { status: "ERR", message: "Category does not exist" };
     return { status: "OK", message: "Fetched category successfully", data: category };
   } catch (error) {
+    if (error.code === 11000) {
+      return { status: "ERR", message: "Category name already exists" };
+    }
     return { status: "ERR", message: error.message };
   }
 };
@@ -93,15 +112,17 @@ const getCategoryById = async (id) => {
 
 const updateCategory = async (id, payload = {}) => {
   try {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return { status: "ERR", message: "Invalid category ID" };
+    }
     const category = await CategoryModel.findById(id);
     if (!category) return { status: "ERR", message: "Category does not exist" };
-    // Lưu ảnh cũ để xóa sau nếu có ảnh mới
     const oldImagePublicId = category.imagePublicId;
-
 
     if (payload.name !== undefined) {
       const newName = (payload.name ?? "").toString().trim();
       if (!newName) return { status: "ERR", message: "Category name is required" };
+      if (newName.length > 100) return { status: "ERR", message: "Category name must be at most 100 characters" };
       const existing = await CategoryModel.findOne({
         _id: { $ne: id },
         name: { $regex: new RegExp(`^${newName}$`, "i") },
@@ -111,7 +132,11 @@ const updateCategory = async (id, payload = {}) => {
     }
 
 
-    if (payload.description !== undefined) category.description = (payload.description ?? "").toString();
+    if (payload.description !== undefined) {
+      const desc = (payload.description ?? "").toString();
+      if (desc.length > 500) return { status: "ERR", message: "Category description must be at most 500 characters" };
+      category.description = desc;
+    }
    
     // Xử lý ảnh: nếu có ảnh mới, xóa ảnh cũ trên Cloudinary
     if (payload.image !== undefined && payload.imagePublicId !== undefined) {
@@ -142,6 +167,9 @@ const updateCategory = async (id, payload = {}) => {
     await category.save();
     return { status: "OK", message: "Category updated successfully", data: category };
   } catch (error) {
+    if (error.code === 11000) {
+      return { status: "ERR", message: "Category name already exists" };
+    }
     return { status: "ERR", message: error.message };
   }
 };
@@ -149,6 +177,9 @@ const updateCategory = async (id, payload = {}) => {
 
 const deleteCategory = async (id) => {
   try {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return { status: "ERR", message: "Invalid category ID" };
+    }
     const category = await CategoryModel.findById(id);
     if (!category) return { status: "ERR", message: "Category does not exist" };
     // Kiểm tra xem có sản phẩm nào đang sử dụng category này không
@@ -171,6 +202,9 @@ const deleteCategory = async (id) => {
     await CategoryModel.findByIdAndDelete(id);
     return { status: "OK", message: "Category deleted successfully" };
   } catch (error) {
+    if (error.code === 11000) {
+      return { status: "ERR", message: "Category name already exists" };
+    }
     return { status: "ERR", message: error.message };
   }
 };
@@ -195,6 +229,9 @@ const getCategoryStats = async () => {
       },
     };
   } catch (error) {
+    if (error.code === 11000) {
+      return { status: "ERR", message: "Category name already exists" };
+    }
     return { status: "ERR", message: error.message };
   }
 };

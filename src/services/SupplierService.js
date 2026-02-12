@@ -3,9 +3,54 @@ const SupplierModel = require("../models/SupplierModel");
 const HarvestBatchModel = require("../models/HarvestBatchModel");
 const ProductModel = require("../models/ProductModel");
 
-
-// Import các service đã tách
 const HarvestBatchService = require("./HarvestBatchService");
+
+/** Phone: only digits, spaces, + - ( ); digit count must be 10–12. Returns { valid, message }. */
+function validatePhone(phoneStr) {
+  if (!phoneStr || !phoneStr.toString().trim()) {
+    return { valid: true };
+  }
+  const s = phoneStr.toString().trim();
+  if (!/^[0-9+\-\s()]+$/.test(s)) {
+    return { valid: false, message: "Phone number can only contain digits, spaces, and + - ( )" };
+  }
+  const digitCount = (s.match(/\d/g) || []).length;
+  if (digitCount < 10) {
+    return { valid: false, message: "Phone number must contain 10 to 12 digits" };
+  }
+  if (digitCount > 12) {
+    return { valid: false, message: "Phone number must contain 10 to 12 digits" };
+  }
+  return { valid: true };
+}
+
+/** Email: detailed validation. Returns { valid, message }. */
+function validateEmail(emailStr) {
+  if (!emailStr || !emailStr.toString().trim()) {
+    return { valid: true };
+  }
+  const s = emailStr.toString().trim();
+  if (s.indexOf("@") === -1) {
+    return { valid: false, message: "Email must contain @" };
+  }
+  if ((s.match(/@/g) || []).length > 1) {
+    return { valid: false, message: "Email must contain exactly one @" };
+  }
+  const [local, domain] = s.split("@");
+  if (!local || !local.length) {
+    return { valid: false, message: "Email must have a local part before @" };
+  }
+  if (!domain || !domain.length) {
+    return { valid: false, message: "Email must have a domain after @" };
+  }
+  if (domain.indexOf(".") === -1) {
+    return { valid: false, message: "Email domain must contain a dot (e.g. example.com)" };
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) {
+    return { valid: false, message: "Invalid email format (e.g. name@example.com)" };
+  }
+  return { valid: true };
+}
 
 
 /**
@@ -13,6 +58,10 @@ const HarvestBatchService = require("./HarvestBatchService");
  */
 const createSupplier = async (userId, payload = {}) => {
   try {
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return { status: "ERR", message: "Invalid user ID" };
+    }
+
     const {
       name,
       type,
@@ -24,11 +73,16 @@ const createSupplier = async (userId, payload = {}) => {
       status = true,
     } = payload;
 
-
     if (!name || !name.toString().trim()) {
       return { status: "ERR", message: "Supplier name is required" };
     }
-
+    const normalizedName = name.toString().trim();
+    if (normalizedName.length < 2) {
+      return { status: "ERR", message: "Supplier name must be at least 2 characters" };
+    }
+    if (normalizedName.length > 100) {
+      return { status: "ERR", message: "Supplier name must be at most 100 characters" };
+    }
 
     if (!type || !["FARM", "COOPERATIVE", "BUSINESS"].includes(type)) {
       return {
@@ -37,8 +91,22 @@ const createSupplier = async (userId, payload = {}) => {
       };
     }
 
+    const contactPersonStr = (contactPerson ?? "").toString().trim();
+    if (contactPersonStr.length > 50) {
+      return { status: "ERR", message: "Contact person name must be at most 50 characters" };
+    }
 
-    // ✅ BR-SUP-02: Phải có phone hoặc email (ít nhất 1)
+    const addressStr = (address ?? "").toString().trim();
+    if (addressStr.length > 500) {
+      return { status: "ERR", message: "Address must be at most 500 characters" };
+    }
+
+    const notesStr = (notes ?? "").toString().trim();
+    if (notesStr.length > 1000) {
+      return { status: "ERR", message: "Notes must be at most 1000 characters" };
+    }
+
+    // ✅ BR-SUP-02: At least phone or email required
     const normalizedPhone = phone?.toString().trim() || "";
     const normalizedEmail = email?.toString().trim() || "";
     if (!normalizedPhone && !normalizedEmail) {
@@ -47,12 +115,21 @@ const createSupplier = async (userId, payload = {}) => {
         message: "At least one phone number or email is required",
       };
     }
+    if (normalizedPhone) {
+      const phoneCheck = validatePhone(normalizedPhone);
+      if (!phoneCheck.valid) {
+        return { status: "ERR", message: phoneCheck.message };
+      }
+    }
+    if (normalizedEmail) {
+      const emailCheck = validateEmail(normalizedEmail);
+      if (!emailCheck.valid) {
+        return { status: "ERR", message: emailCheck.message };
+      }
+    }
 
 
-    // ✅ BR-SUP-03: Kiểm tra trùng (name + phone)
-    const normalizedName = name.toString().trim();
-
-
+    // ✅ BR-SUP-03: Check duplicate (name + phone)
     if (normalizedPhone) {
       const existingByNamePhone = await SupplierModel.findOne({
         name: normalizedName,
@@ -70,11 +147,11 @@ const createSupplier = async (userId, payload = {}) => {
     const supplier = new SupplierModel({
       name: normalizedName,
       type,
-      contactPerson: contactPerson?.toString().trim() || "",
+      contactPerson: contactPersonStr || "",
       phone: normalizedPhone || "",
       email: normalizedEmail || "",
-      address: address?.toString().trim() || "",
-      notes: notes?.toString().trim() || "",
+      address: addressStr || "",
+      notes: notesStr || "",
       status,
       cooperationStatus: "ACTIVE", // ✅ BR-SUP-05: Trạng thái mặc định Active
       createdBy: new mongoose.Types.ObjectId(userId),
@@ -90,6 +167,9 @@ const createSupplier = async (userId, payload = {}) => {
       data: supplier,
     };
   } catch (error) {
+    if (error.code === 11000) {
+      return { status: "ERR", message: "Supplier with this name and phone number already exists" };
+    }
     return { status: "ERR", message: error.message };
   }
 };
@@ -100,6 +180,13 @@ const createSupplier = async (userId, payload = {}) => {
  */
 const updateSupplier = async (supplierId, userId, payload = {}) => {
   try {
+    if (!supplierId || !mongoose.Types.ObjectId.isValid(supplierId)) {
+      return { status: "ERR", message: "Invalid supplier ID" };
+    }
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return { status: "ERR", message: "Invalid user ID" };
+    }
+
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {
       return { status: "ERR", message: "Supplier does not exist" };
@@ -152,10 +239,15 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
 
     // Track changes
     if (payload.name !== undefined && payload.name !== supplier.name) {
-      changes.set("name", { old: supplier.name, new: payload.name });
       const normalizedName = payload.name.toString().trim();
-     
-      // ✅ BR-SUP-03: Kiểm tra trùng (name + phone) nếu phone có
+      if (normalizedName.length < 2) {
+        return { status: "ERR", message: "Supplier name must be at least 2 characters" };
+      }
+      if (normalizedName.length > 100) {
+        return { status: "ERR", message: "Supplier name must be at most 100 characters" };
+      }
+      changes.set("name", { old: supplier.name, new: payload.name });
+      // ✅ BR-SUP-03: Check duplicate (name + phone) when phone present
       if (newPhone) {
         const existingByNamePhone = await SupplierModel.findOne({
           _id: { $ne: supplierId },
@@ -186,32 +278,54 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
 
 
     if (payload.contactPerson !== undefined) {
-      changes.set("contactPerson", { old: supplier.contactPerson, new: payload.contactPerson });
-      supplier.contactPerson = payload.contactPerson?.toString().trim() || "";
+      const val = payload.contactPerson?.toString().trim() || "";
+      if (val.length > 50) {
+        return { status: "ERR", message: "Contact person name must be at most 50 characters" };
+      }
+      changes.set("contactPerson", { old: supplier.contactPerson, new: val });
+      supplier.contactPerson = val;
     }
-
 
     if (payload.phone !== undefined) {
-      changes.set("phone", { old: supplier.phone, new: payload.phone });
-      supplier.phone = payload.phone?.toString().trim() || "";
+      const val = payload.phone?.toString().trim() || "";
+      if (val) {
+        const phoneCheck = validatePhone(val);
+        if (!phoneCheck.valid) {
+          return { status: "ERR", message: phoneCheck.message };
+        }
+      }
+      changes.set("phone", { old: supplier.phone, new: val });
+      supplier.phone = val;
     }
-
 
     if (payload.email !== undefined) {
-      changes.set("email", { old: supplier.email, new: payload.email });
-      supplier.email = payload.email?.toString().trim() || "";
+      const val = payload.email?.toString().trim() || "";
+      if (val) {
+        const emailCheck = validateEmail(val);
+        if (!emailCheck.valid) {
+          return { status: "ERR", message: emailCheck.message };
+        }
+      }
+      changes.set("email", { old: supplier.email, new: val });
+      supplier.email = val;
     }
-
 
     if (payload.address !== undefined) {
-      changes.set("address", { old: supplier.address, new: payload.address });
-      supplier.address = payload.address?.toString().trim() || "";
+      const val = payload.address?.toString().trim() || "";
+      if (val.length > 500) {
+        return { status: "ERR", message: "Address must be at most 500 characters" };
+      }
+      changes.set("address", { old: supplier.address, new: val });
+      supplier.address = val;
     }
 
-
     if (payload.notes !== undefined) {
-      changes.set("notes", { old: supplier.notes, new: payload.notes });
-      supplier.notes = payload.notes?.toString().trim() || "";
+      const val = payload.notes?.toString().trim() || "";
+      if (val.length > 1000) {
+        return { status: "ERR", message: "Notes must be at most 1000 characters" };
+      }
+      changes.set("notes", { old: supplier.notes, new: val });
+      supplier.notes = val;
     }
 
 
@@ -231,6 +345,9 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
       data: supplier,
     };
   } catch (error) {
+    if (error.code === 11000) {
+      return { status: "ERR", message: "Supplier with this name and phone number already exists" };
+    }
     return { status: "ERR", message: error.message };
   }
 };
@@ -264,10 +381,12 @@ const getSuppliers = async (filters = {}) => {
     } = filters;
 
 
-    const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    if (pageNum > 10000) {
+      return { status: "ERR", message: "Invalid page (max 10000)" };
+    }
     const skip = (pageNum - 1) * limitNum;
-
 
     const query = {};
 
@@ -289,12 +408,16 @@ const getSuppliers = async (filters = {}) => {
 
 
     // Filter
-    if (type && ["FARM", "COOPERATIVE", "BUSINESS"].includes(type)) {
+    if (type) {
+      if (!["FARM", "COOPERATIVE", "BUSINESS"].includes(type)) {
+        return { status: "ERR", message: "type must be FARM, COOPERATIVE, or BUSINESS" };
+      }
       query.type = type;
     }
-
-
-    if (cooperationStatus && ["ACTIVE", "SUSPENDED", "TERMINATED"].includes(cooperationStatus)) {
+    if (cooperationStatus) {
+      if (!["ACTIVE", "TERMINATED"].includes(cooperationStatus)) {
+        return { status: "ERR", message: "cooperationStatus must be ACTIVE or TERMINATED" };
+      }
       query.cooperationStatus = cooperationStatus;
     }
 
@@ -446,18 +569,16 @@ const getSuppliers = async (filters = {}) => {
  */
 const deleteSupplier = async (supplierId, userId) => {
   try {
-    if (!mongoose.isValidObjectId(supplierId)) {
-      return { status: "ERR", message: "Invalid supplierId" };
+    if (!supplierId || !mongoose.Types.ObjectId.isValid(supplierId)) {
+      return { status: "ERR", message: "Invalid supplier ID" };
     }
-
 
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {
       return { status: "ERR", message: "Supplier does not exist" };
     }
 
-
-    // Kiểm tra có products đang sử dụng supplier này không
+    // Check if any products use this supplier
     const productsCount = await ProductModel.countDocuments({ supplier: supplier._id });
     if (productsCount > 0) {
       return {
@@ -555,13 +676,11 @@ const updatePurchaseCost = async (supplierId, userId, payload = {}) => {
     const { productId, cost } = payload;
 
 
-    if (!mongoose.isValidObjectId(supplierId)) {
-      return { status: "ERR", message: "Invalid supplierId" };
+    if (!supplierId || !mongoose.Types.ObjectId.isValid(supplierId)) {
+      return { status: "ERR", message: "Invalid supplier ID" };
     }
-
-
-    if (!mongoose.isValidObjectId(productId)) {
-      return { status: "ERR", message: "Invalid productId" };
+    if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
+      return { status: "ERR", message: "Invalid product ID" };
     }
 
 
@@ -625,13 +744,18 @@ const updateCooperationStatus = async (supplierId, userId, payload = {}) => {
     const { cooperationStatus, notes } = payload;
 
 
-    if (!cooperationStatus || !["ACTIVE", "SUSPENDED", "TERMINATED"].includes(cooperationStatus)) {
+    if (!supplierId || !mongoose.Types.ObjectId.isValid(supplierId)) {
+      return { status: "ERR", message: "Invalid supplier ID" };
+    }
+    if (!cooperationStatus || !["ACTIVE", "TERMINATED"].includes(cooperationStatus)) {
       return {
         status: "ERR",
-        message: "Cooperation status must be ACTIVE, SUSPENDED, or TERMINATED",
+        message: "Cooperation status must be ACTIVE or TERMINATED",
       };
     }
-
+    if (notes !== undefined && notes !== null && notes.toString().trim().length > 1000) {
+      return { status: "ERR", message: "Notes must be at most 1000 characters" };
+    }
 
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {

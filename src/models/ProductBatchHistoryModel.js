@@ -10,6 +10,10 @@ const productBatchHistorySchema = new mongoose.Schema(
       index: true,
     },
 
+    // Snapshot tại thời điểm chốt lô (không đổi khi product được sửa sau này)
+    productNameSnapshot: { type: String, trim: true, default: "" },
+    productCategoryNameSnapshot: { type: String, trim: true, default: "" },
+    productBrandSnapshot: { type: String, trim: true, default: "" },
 
     // ✅ Liên kết với Harvest Batch (nếu có)
     harvestBatch: {
@@ -72,7 +76,7 @@ const productBatchHistorySchema = new mongoose.Schema(
     warehouseEntryDateStr: {
       type: String,
       required: true,
-      match: [/^\d{4}-\d{2}-\d{2}$/, "warehouseEntryDateStr phải có format YYYY-MM-DD"],
+      match: [/^\d{4}-\d{2}-\d{2}$/, "warehouseEntryDateStr must be YYYY-MM-DD"],
     },
 
 
@@ -86,7 +90,7 @@ const productBatchHistorySchema = new mongoose.Schema(
     expiryDateStr: {
       type: String,
       default: null,
-      match: [/^\d{4}-\d{2}-\d{2}$/, "expiryDateStr phải có format YYYY-MM-DD"],
+      match: [/^\d{4}-\d{2}-\d{2}$/, "expiryDateStr must be YYYY-MM-DD"],
     },
 
 
@@ -100,7 +104,7 @@ const productBatchHistorySchema = new mongoose.Schema(
     completedDateStr: {
       type: String,
       required: true,
-      match: [/^\d{4}-\d{2}-\d{2}$/, "completedDateStr phải có format YYYY-MM-DD"],
+      match: [/^\d{4}-\d{2}-\d{2}$/, "completedDateStr must be YYYY-MM-DD"],
     },
 
 
