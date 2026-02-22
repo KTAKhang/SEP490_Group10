@@ -28,6 +28,7 @@ const loginWithGoogle = async (req, res) => {
       data: response.data,
       token: {
         access_token: response.token.access_token, // chỉ trả access_token
+        refresh_token: response.token.refresh_token,
       },
     });
   } catch (error) {
@@ -69,6 +70,7 @@ const loginUser = async (req, res) => {
       data: response.data,
       token: {
         access_token: response.token.access_token,
+        refresh_token: response.token.refresh_token,
       },
     });
   } catch (error) {
@@ -103,7 +105,28 @@ const refreshTokenController = async (req, res) => {
 
 const logoutController = async (req, res) => {
   try {
-    const refreshToken = req.cookies?.refreshToken;
+    // 1️⃣ Lấy refreshToken từ nhiều nguồn
+    const refreshToken =
+      req.cookies?.refreshToken ||        // Web cookie
+      req.body?.refreshToken ||           // Mobile body
+      req.headers["x-refresh-token"];     // Mobile header
+
+    if (!refreshToken) {
+      return res.status(400).json({
+        status: "ERR",
+        message: "Refresh token missing",
+      });
+    }
+
+    // 2️⃣ Tìm user theo refreshToken
+    const user = await UserModel.findOne({ refreshToken });
+
+    if (user) {
+      // Xoá refreshToken trong DB
+      await AuthService.logoutUser(user._id);
+    }
+
+    // 3️⃣ Clear cookie (web)
     res.clearCookie("refreshToken", {
       httpOnly: true,
       secure: true,
@@ -111,26 +134,19 @@ const logoutController = async (req, res) => {
       path: "/",
     });
 
-    if (!refreshToken) {
-      return res
-        .status(400)
-        .json({ status: "OK", message: "No users are logged in" });
-    }
+    return res.status(200).json({
+      status: "OK",
+      message: "Logout Successful",
+    });
 
-    // Tìm user theo refresh token
-    const user = await UserModel.findOne({ refreshToken });
-    if (user) {
-      // Xoá refresh token trong DB
-      await AuthService.logoutUser(user._id);
-    }
-
-    return res
-      .status(200)
-      .json({ status: "OK", message: "Logout Successful" });
   } catch (error) {
-    return res.status(500).json({ status: "ERR", message: error.message });
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message,
+    });
   }
 };
+
 
 const sendRegisterOTP = async (req, res) => {
   try {

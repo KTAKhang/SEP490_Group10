@@ -133,6 +133,10 @@ const orderSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    is_mobile: {
+      type: Boolean,
+      default: false,
+    },
     status: {
       type: Boolean,
       required: [true, "Trạng thái là bắt buộc"],

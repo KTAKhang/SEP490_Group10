@@ -3,6 +3,7 @@ const TempOTPModel = require("../models/TempOTPModel");
 const RoleModel = require("../models/RolesModel");
 const nodemailer = require("nodemailer");
 const { OAuth2Client } = require("google-auth-library");
+const client = new OAuth2Client();
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
@@ -21,18 +22,25 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+// const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const loginWithGoogle = async (idToken) => {
   try {
+    // Danh sách client ID hợp lệ
+    const CLIENT_IDS = [
+      process.env.GOOGLE_WEB_CLIENT_ID,
+      process.env.GOOGLE_EXPO_CLIENT_ID,
+      process.env.GOOGLE_ANDROID_CLIENT_ID,
+      process.env.GOOGLE_WEB_CLIENT_ID_2,
+    ];
+
     const ticket = await client.verifyIdToken({
       idToken,
-      audience: process.env.GOOGLE_CLIENT_ID,
+      audience: CLIENT_IDS,
     });
 
     const payload = ticket.getPayload();
     const { sub: googleId, email, name, picture } = payload;
-
     let user = await UserModel.findOne({
       $or: [{ googleId }, { email }],
     });
@@ -61,7 +69,6 @@ const loginWithGoogle = async (idToken) => {
     }
 
     await user.save();
-
     const populatedUser = await UserModel.findById(user._id).populate(
       "role_id",
       "name -_id",
@@ -83,7 +90,6 @@ const loginWithGoogle = async (idToken) => {
 
     user.refreshToken = refreshToken;
     await user.save();
-
     return {
       status: "OK",
       message: "Đăng nhập Google thành công",
@@ -195,7 +201,15 @@ const logoutUser = async (userId) => {
   return { status: "OK", message: "Đăng xuất thành công", userId };
 };
 
-const sendRegisterOTP = async (user_name, email, password, phone, address, birthday, gender) => {
+const sendRegisterOTP = async (
+  user_name,
+  email,
+  password,
+  phone,
+  address,
+  birthday,
+  gender,
+) => {
   const existingUser = await UserModel.findOne({ email });
   const existingUserName = await UserModel.findOne({ user_name });
   if (existingUser) {
@@ -270,8 +284,7 @@ const confirmRegisterOTP = async (email, otp) => {
   if (!customerRole) {
     return {
       status: "ERR",
-      message:
-        "The 'customer' role does not exist in the system",
+      message: "The 'customer' role does not exist in the system",
     };
   }
 
@@ -284,9 +297,9 @@ const confirmRegisterOTP = async (email, otp) => {
     address: tempRecord.address,
     birthday: tempRecord.birthday,
     gender: tempRecord.gender,
-    avatar: "https://res.cloudinary.com/dkbsae4kc/image/upload/v1768096992/avatars/h1nqjlbxgemeymkobhr3.jpg",
-});
-
+    avatar:
+      "https://res.cloudinary.com/dkbsae4kc/image/upload/v1768096992/avatars/h1nqjlbxgemeymkobhr3.jpg",
+  });
 
   await newUser.save();
   await TempOTPModel.deleteOne({ email });
@@ -338,7 +351,10 @@ const sendResetPasswordOTP = async (email) => {
     };
   }
 
-  return { status: "OK", message: "The OTP has been successfully sent to your email" };
+  return {
+    status: "OK",
+    message: "The OTP has been successfully sent to your email",
+  };
 };
 
 const resetPassword = async (email, otp, newPassword) => {

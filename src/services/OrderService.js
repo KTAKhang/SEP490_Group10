@@ -144,6 +144,7 @@ const confirmCheckoutAndCreateOrder = async ({
   ip,
   city,
   discount_id,
+  isMobile = false,
 }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -259,6 +260,7 @@ const confirmCheckoutAndCreateOrder = async ({
           status: true,
           discount_code: discountCode,
           discount_amount: discountAmount,
+          is_mobile: isMobile, 
         },
       ],
       { session },

@@ -241,6 +241,16 @@ const vnpayReturn = async (req, res) => {
       throw new Error("Order not found");
     }
 
+    const isMobile = order.is_mobile === true;
+
+    const successRedirect = isMobile
+      ? `myshopapps://payment-success?status=success&orderId=${orderId}`
+      : `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`;
+
+    const failRedirect = isMobile
+      ? `myshopapps://payment-fail?status=failed&orderId=${orderId}`
+      : `http://localhost:5173/customer/payment-fail?status=failed&orderId=${orderId}`;
+
     const paidStatus = await OrderStatusModel.findOne({
       name: "PAID",
     }).session(session);
@@ -255,9 +265,7 @@ const vnpayReturn = async (req, res) => {
     ======================= */
     if (order.order_status_id.equals(paidStatus._id)) {
       await session.commitTransaction();
-      return res.redirect(
-        `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
-      );
+      return res.redirect(successRedirect);
     }
 
     /* =======================
@@ -329,9 +337,7 @@ const vnpayReturn = async (req, res) => {
         console.error("Failed to send payment failure email:", emailErr);
       }
 
-      return res.redirect(
-        `http://localhost:5173/customer/payment-result?status=success&orderId=${orderId}`,
-      );
+     return res.redirect(successRedirect);
     }
 
     /* =====================
@@ -398,9 +404,7 @@ const vnpayReturn = async (req, res) => {
     }
 
     /* ===== REDIRECT ===== */
-    return res.redirect(
-      `http://localhost:5173/customer/payment-fail?status=failed&orderId=${orderId}`,
-    );
+   return res.redirect(failRedirect);
   } catch (err) {
     console.error("🔥 VNPAY RETURN ERROR:", err.message);
     await session.abortTransaction();
@@ -424,8 +428,7 @@ const refundVNPay = async (req, res) => {
       status: "SUCCESS",
     }).session(session);
 
-    if (!payment)
-      throw new Error("No valid transaction found for refund");
+    if (!payment) throw new Error("No valid transaction found for refund");
 
     const result = await refund({
       order_id,
