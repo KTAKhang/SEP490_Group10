@@ -82,11 +82,12 @@ require("./sockets/chat.socket")(io);
 mongoose
   .connect(process.env.MONGO_URL)
   .then(() => {
-    console.log("✅ Connected to MongoDB");
+     console.log("✅ Connected to MongoDB");
     require("./jobs/autoDeleteFailedOrders");
     require("./jobs/preorderFulfillmentJob").run();
-    // ✅ Start product batch job SAU KHI DB đã kết nối (để startup check expired chạy đúng)
+    require("./jobs/preorderCancelOverdueJob").run();
     startProductBatchJob();
+    startBirthdayVoucherJob();
   })
   .catch((error) =>
     console.error("❌ MongoDB connection error:", error)

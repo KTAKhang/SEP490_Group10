@@ -124,7 +124,7 @@ const uploadCategoryImage = (req, res, next) => {
     });
 };
 
-// Middleware: Upload ảnh FruitType (pre-order) lên Cloudinary nếu có file 'image'
+// Middleware: Upload ảnh FruitType (pre-order) lên Cloudinary nếu có file 'image' (single - legacy)
 const uploadFruitTypeImage = (req, res, next) => {
     const handler = upload.single("image");
     handler(req, res, async (err) => {
@@ -164,7 +164,76 @@ const uploadFruitTypeImage = (req, res, next) => {
     });
 };
 
-module.exports = { uploadCategoryImage, uploadFruitTypeImage };
+// Middleware: Upload nhiều ảnh FruitType (pre-order) lên Cloudinary - field "images" (max 10)
+const uploadFruitTypeImages = (req, res, next) => {
+    const handler = upload.array("images", 10);
+    handler(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ status: "ERR", message: err.message });
+        }
+        try {
+            let oldImagesFromDB = [];
+            let oldImagePublicIdsFromDB = [];
+            if (req.params && req.params.id) {
+                try {
+                    const ft = await FruitTypeModel.findById(req.params.id).select("images imagePublicIds image imagePublicId");
+                    if (ft) {
+                        oldImagesFromDB = Array.isArray(ft.images) && ft.images.length > 0 ? ft.images : (ft.image ? [ft.image] : []);
+                        oldImagePublicIdsFromDB = Array.isArray(ft.imagePublicIds) && ft.imagePublicIds.length > 0 ? ft.imagePublicIds : (ft.imagePublicId ? [ft.imagePublicId] : []);
+                    }
+                } catch (e) {
+                    console.warn("Could not load existing FruitType images:", e.message);
+                }
+            }
+            let existingImages = [];
+            let existingImagePublicIds = [];
+            if (req.body.existingImages) {
+                try {
+                    existingImages = typeof req.body.existingImages === "string" ? JSON.parse(req.body.existingImages) : req.body.existingImages;
+                } catch (e) {
+                    existingImages = Array.isArray(req.body.existingImages) ? req.body.existingImages : [];
+                }
+            }
+            if (req.body.existingImagePublicIds) {
+                try {
+                    existingImagePublicIds = typeof req.body.existingImagePublicIds === "string" ? JSON.parse(req.body.existingImagePublicIds) : req.body.existingImagePublicIds;
+                } catch (e) {
+                    existingImagePublicIds = Array.isArray(req.body.existingImagePublicIds) ? req.body.existingImagePublicIds : [];
+                }
+            }
+            if (existingImages.length === 0 && oldImagesFromDB.length > 0) existingImages = oldImagesFromDB;
+            if (existingImagePublicIds.length === 0 && oldImagePublicIdsFromDB.length > 0) existingImagePublicIds = oldImagePublicIdsFromDB;
+
+            if (Array.isArray(req.files) && req.files.length > 0) {
+                const uploads = req.files.map((file) => uploadToCloudinary(file.buffer, "fruit-types"));
+                const results = await Promise.all(uploads);
+                const newImages = results.map((r) => r.secure_url);
+                const newImagePublicIds = results.map((r) => r.public_id);
+                const finalImages = [...existingImages, ...newImages];
+                const finalImagePublicIds = [...existingImagePublicIds, ...newImagePublicIds];
+                const allOld = oldImagePublicIdsFromDB.length > 0 ? oldImagePublicIdsFromDB : existingImagePublicIds;
+                const toDelete = allOld.filter((id) => !finalImagePublicIds.includes(id));
+                if (toDelete.length > 0) {
+                    Promise.all(toDelete.map((publicId) => cloudinary.uploader.destroy(publicId).catch((e) => console.warn("FruitType image delete failed:", e.message)))).catch(() => {});
+                }
+                req.body.images = finalImages;
+                req.body.imagePublicIds = finalImagePublicIds;
+                req.body.image = finalImages[0] || null;
+                req.body.imagePublicId = finalImagePublicIds[0] || null;
+            } else {
+                req.body.images = existingImages;
+                req.body.imagePublicIds = existingImagePublicIds;
+                req.body.image = existingImages[0] || null;
+                req.body.imagePublicId = existingImagePublicIds[0] || null;
+            }
+            return next();
+        } catch (error) {
+            return res.status(500).json({ status: "ERR", message: error.message });
+        }
+    });
+};
+
+module.exports = { uploadCategoryImage, uploadFruitTypeImage, uploadFruitTypeImages };
 
 // Middleware: Upload nhiều ảnh product lên Cloudinary nếu có field 'images'
 const uploadProductImages = (req, res, next) => {

@@ -31,6 +31,7 @@ InventoryRouter.get(
 
 // ----- Kho trả đơn đặt trước (tách riêng Product) -----
 InventoryRouter.get("/preorder-stock", inventoryAdminOrWarehouseMiddleware, PreOrderStockController.listStock);
+InventoryRouter.post("/preorder-stock/simulate-import", inventoryAdminOrWarehouseMiddleware, PreOrderStockController.simulateImport);
 InventoryRouter.post("/preorder-stock/receive", inventoryWarehouseMiddleware, PreOrderStockController.createReceive);
 InventoryRouter.post(
   "/preorder-stock/receive-by-batch",

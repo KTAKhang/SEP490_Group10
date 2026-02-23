@@ -30,6 +30,13 @@ const ALLOCATION_CLOSED_STATUSES = ["ALLOCATED_WAITING_PAYMENT", "READY_FOR_FULF
 /** Số ngày trước ngày thu hoạch: từ thời điểm này trở đi pre-order bị ẩn (chốt đơn). Đổi 3 → 5 hoặc 6 tùy nghiệp vụ. */
 const DAYS_BEFORE_HARVEST_TO_LOCK = 3;
 
+/** Normalize fruit type doc to always have images array (for API response). */
+function normalizeImages(doc) {
+  if (!doc) return doc;
+  const images = Array.isArray(doc.images) && doc.images.length > 0 ? doc.images : doc.image ? [doc.image] : [];
+  return { ...doc, images };
+}
+
 /** Ngày thu hoạch tối thiểu khi tạo/sửa fruit type: phải sau hôm nay + DAYS_BEFORE_HARVEST_TO_LOCK (không cho chọn hôm nay và 3 ngày tới). */
 function getMinHarvestDate() {
   const today = new Date();
@@ -137,23 +144,44 @@ function isVisibleForPreOrderCustomer(ft, closedByAllocationIds) {
  * @param {number} [query.page=1] - Page number
  * @param {number} [query.limit=20] - Items per page
  * @param {string} [query.keyword] - Search by fruit name (case-insensitive)
+ * @param {string} [query.sortBy=createdAt] - Sort field: name | estimatedPrice | createdAt
+ * @param {string} [query.sortOrder=desc] - asc | desc
  * @returns {Promise<{ status: string, data: Array, pagination: Object }>}
  */
 const listAvailableForPreOrder = async (query = {}) => {
-  const { page = 1, limit = 20, keyword } = query;
+  const { page = 1, limit = 20, keyword, sortBy = "createdAt", sortOrder = "desc" } = query;
   const filter = { allowPreOrder: true, status: "ACTIVE" };
   if (keyword && String(keyword).trim()) {
     filter.name = { $regex: String(keyword).trim(), $options: "i" };
   }
   const [list, closedByAllocationIds] = await Promise.all([
-    FruitTypeModel.find(filter).sort({ name: 1 }).lean(),
+    FruitTypeModel.find(filter).lean(),
     getFruitTypeIdsClosedByAllocation(),
   ]);
   const filtered = list.filter((ft) => isVisibleForPreOrderCustomer(ft, closedByAllocationIds));
+  const sortField = ["name", "estimatedPrice", "createdAt"].includes(sortBy) ? sortBy : "createdAt";
+  const dir = sortOrder === "asc" ? 1 : -1;
+  filtered.sort((a, b) => {
+    let va = a[sortField];
+    let vb = b[sortField];
+    if (sortField === "createdAt" || sortField === "estimatedHarvestDate") {
+      va = va ? new Date(va).getTime() : 0;
+      vb = vb ? new Date(vb).getTime() : 0;
+      return dir * (va - vb);
+    }
+    if (sortField === "name") {
+      va = (va || "").toString().toLowerCase();
+      vb = (vb || "").toString().toLowerCase();
+      return dir * va.localeCompare(vb);
+    }
+    va = Number(va) || 0;
+    vb = Number(vb) || 0;
+    return dir * (va - vb);
+  });
   const total = filtered.length;
   const limitNum = Math.max(1, Math.min(100, Number(limit) || 20));
   const pageNum = Math.max(1, Number(page) || 1);
-  const data = filtered.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+  const data = filtered.slice((pageNum - 1) * limitNum, pageNum * limitNum).map(normalizeImages);
   return {
     status: "OK",
     data,
@@ -182,7 +210,7 @@ const getAvailableById = async (id) => {
     throw new Error("Pre-order closed for this fruit: orders for this batch have already been allocated.");
   }
   if (doc.depositPercent == null) doc.depositPercent = 50;
-  return { status: "OK", data: doc };
+  return { status: "OK", data: normalizeImages(doc) };
 };
 
 /**
@@ -229,12 +257,12 @@ const listAdmin = async (query = {}) => {
     const demandKg = demandMap[item._id.toString()] ?? 0;
     const hasClosedPreOrders = closedFruitTypeIds.has(item._id.toString());
     const effectiveStatus = hasClosedPreOrders && demandKg === 0 ? "INACTIVE" : item.status;
-    return {
+    return normalizeImages({
       ...item,
       demandKg,
       hasClosedPreOrders,
       status: effectiveStatus,
-    };
+    });
   });
   return {
     status: "OK",
@@ -249,7 +277,7 @@ const listAdmin = async (query = {}) => {
 const getById = async (id) => {
   const doc = await FruitTypeModel.findById(id).lean();
   if (!doc) throw new Error("Fruit type not found");
-  return { status: "OK", data: doc };
+  return { status: "OK", data: normalizeImages(doc) };
 };
 
 /**
@@ -267,6 +295,8 @@ const create = async (payload) => {
     status = "ACTIVE",
     image,
     imagePublicId,
+    images,
+    imagePublicIds,
   } = payload;
 
   if (name == null || String(name).trim() === "") {
@@ -313,6 +343,10 @@ const create = async (payload) => {
     throw new Error("Fruit type already exists for this harvest.");
   }
 
+  const imgList = Array.isArray(images) && images.length > 0 ? images.filter((u) => u && String(u).trim()).map((u) => String(u).trim()) : [];
+  const pidList = Array.isArray(imagePublicIds) && imagePublicIds.length > 0 ? imagePublicIds.filter((p) => p && String(p).trim()).map((p) => String(p).trim()) : [];
+  const firstImg = imgList[0] || (image && String(image).trim() ? String(image).trim() : null);
+  const firstPid = pidList[0] || (imagePublicId && String(imagePublicId).trim() ? String(imagePublicId).trim() : null);
   const doc = await FruitTypeModel.create({
     name: name.trim(),
     description: (description || "").trim(),
@@ -322,10 +356,12 @@ const create = async (payload) => {
     estimatedHarvestDate: estimatedHarvestDate ? new Date(estimatedHarvestDate) : null,
     allowPreOrder: !!allowPreOrder,
     status: status === "INACTIVE" ? "INACTIVE" : "ACTIVE",
-    image: image && String(image).trim() ? String(image).trim() : null,
-    imagePublicId: imagePublicId && String(imagePublicId).trim() ? String(imagePublicId).trim() : null,
+    image: firstImg,
+    imagePublicId: firstPid,
+    images: imgList.length > 0 ? imgList : undefined,
+    imagePublicIds: pidList.length > 0 ? pidList : undefined,
   });
-  return { status: "OK", data: doc };
+  return { status: "OK", data: normalizeImages(doc.toObject ? doc.toObject() : doc) };
 };
 
 /**
@@ -355,16 +391,34 @@ const update = async (id, payload) => {
     status,
     image,
     imagePublicId,
+    images,
+    imagePublicIds,
     removeImage,
   } = payload;
 
   const shouldRemoveImage = removeImage === true || removeImage === "true";
-  if (shouldRemoveImage && doc.imagePublicId) {
-    cloudinary.uploader.destroy(doc.imagePublicId).catch((e) =>
-      console.warn("Could not delete FruitType image on Cloudinary:", e.message)
-    );
+  if (shouldRemoveImage) {
+    const oldPids = Array.isArray(doc.imagePublicIds) ? doc.imagePublicIds : doc.imagePublicId ? [doc.imagePublicId] : [];
+    oldPids.forEach((pid) => {
+      if (pid) cloudinary.uploader.destroy(pid).catch((e) => console.warn("Could not delete FruitType image on Cloudinary:", e.message));
+    });
     doc.image = null;
     doc.imagePublicId = null;
+    doc.images = [];
+    doc.imagePublicIds = [];
+  } else if (Array.isArray(images) || Array.isArray(imagePublicIds)) {
+    const newImages = Array.isArray(images) ? images.filter((u) => u && String(u).trim()).map((u) => String(u).trim()) : [];
+    const newPids = Array.isArray(imagePublicIds) ? imagePublicIds.filter((p) => p && String(p).trim()).map((p) => String(p).trim()) : [];
+    if (newImages.length !== newPids.length) {
+      throw new Error("images and imagePublicIds must have the same length");
+    }
+    const oldPids = Array.isArray(doc.imagePublicIds) ? [...doc.imagePublicIds] : doc.imagePublicId ? [doc.imagePublicId] : [];
+    const toDelete = oldPids.filter((pid) => pid && !newPids.includes(pid));
+    toDelete.forEach((pid) => cloudinary.uploader.destroy(pid).catch((e) => console.warn("Could not delete FruitType image on Cloudinary:", e.message)));
+    doc.images = newImages;
+    doc.imagePublicIds = newPids;
+    doc.image = newImages[0] || null;
+    doc.imagePublicId = newPids[0] || null;
   }
   if (name !== undefined) doc.name = name.trim();
   if (description !== undefined) doc.description = description.trim();
@@ -377,8 +431,10 @@ const update = async (id, payload) => {
   }
   if (allowPreOrder !== undefined) doc.allowPreOrder = !!allowPreOrder;
   if (status !== undefined) doc.status = status === "INACTIVE" ? "INACTIVE" : "ACTIVE";
-  if (image !== undefined) doc.image = image && String(image).trim() ? String(image).trim() : null;
-  if (imagePublicId !== undefined) doc.imagePublicId = imagePublicId && String(imagePublicId).trim() ? String(imagePublicId).trim() : null;
+  if (!shouldRemoveImage && !Array.isArray(images) && !Array.isArray(imagePublicIds)) {
+    if (image !== undefined) doc.image = image && String(image).trim() ? String(image).trim() : null;
+    if (imagePublicId !== undefined) doc.imagePublicId = imagePublicId && String(imagePublicId).trim() ? String(imagePublicId).trim() : null;
+  }
 
   const minKg = Number(doc.minOrderKg);
   const maxKg = Number(doc.maxOrderKg);
@@ -386,7 +442,7 @@ const update = async (id, payload) => {
     throw new Error("Min order (kg) cannot be greater than max order (kg)");
   }
   await doc.save();
-  return { status: "OK", data: doc };
+  return { status: "OK", data: normalizeImages(doc.toObject ? doc.toObject() : doc) };
 };
 
 /**
@@ -405,11 +461,10 @@ const remove = async (id) => {
     throw new Error("Cannot delete: this fruit type's pre-order campaign has closed (all orders completed/refunded/cancelled).");
   }
 
-  if (doc.imagePublicId) {
-    cloudinary.uploader.destroy(doc.imagePublicId).catch((e) =>
-      console.warn("FruitType image delete from Cloudinary failed:", e.message)
-    );
-  }
+  const allPids = Array.isArray(doc.imagePublicIds) ? doc.imagePublicIds : doc.imagePublicId ? [doc.imagePublicId] : [];
+  await Promise.allSettled(
+    allPids.map((pid) => (pid ? cloudinary.uploader.destroy(pid) : Promise.resolve()))
+  );
   await FruitTypeModel.findByIdAndDelete(id);
   return { status: "OK", message: "Fruit type deleted" };
 };

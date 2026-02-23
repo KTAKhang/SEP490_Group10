@@ -8,6 +8,7 @@
  * - GET /pre-orders/:id: get pre-order detail
  * - PUT /pre-orders/:id/complete: mark pre-order as completed (delivery done)
  * - PUT /pre-orders/:id/refund: mark pre-order as refunded
+ * - PUT /pre-orders/:id/cancel: mark pre-order as cancelled (admin only; customer cannot cancel)
  *
  * @module controller/AdminPreOrderController
  */
@@ -70,4 +71,17 @@ const markRefund = async (req, res) => {
   }
 };
 
-module.exports = { listPreOrders, getPreOrderDetail, markCompleted, markRefund };
+/**
+ * Mark pre-order as cancelled (admin only). Allowed only from WAITING_FOR_ALLOCATION, WAITING_FOR_NEXT_BATCH, ALLOCATED_WAITING_PAYMENT.
+ * Customer cannot cancel pre-orders (business rule).
+ */
+const markCancel = async (req, res) => {
+  try {
+    const response = await PreOrderService.markPreOrderCancelled(req.params.id);
+    return res.status(200).json(response);
+  } catch (err) {
+    return res.status(400).json({ status: "ERR", message: err.message });
+  }
+};
+
+module.exports = { listPreOrders, getPreOrderDetail, markCompleted, markRefund, markCancel };
