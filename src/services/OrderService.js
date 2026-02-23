@@ -1040,6 +1040,12 @@ const getOrderByUser = async (order_id, user_id) => {
       review: reviewMap.get(detail.product_id?.toString()) || null,
     }));
 
+    const shippingFee = order.shipping_fee ?? 0;
+    const discountAmount = order.discount_amount ?? 0;
+    const totalPrice = order.total_price ?? 0;
+    // Tổng tiền sản phẩm (chưa ship, chưa trừ voucher): total_price = subtotal_products + shipping_fee - discount_amount
+    const subtotalProducts = totalPrice - shippingFee + discountAmount;
+
     return {
       status: "OK",
       message: "Retrieved order details successfully",
@@ -1047,7 +1053,10 @@ const getOrderByUser = async (order_id, user_id) => {
         order: {
           ...order,
           discount_code: order.discount_code ?? null,
-          discount_amount: order.discount_amount ?? 0,
+          discount_amount: discountAmount,
+          shipping_fee: shippingFee,
+          total_price: totalPrice,
+          subtotal_products: subtotalProducts,
         },
         details: detailsWithReview,
         reviews,
@@ -1142,12 +1151,21 @@ const getOrdersForAdmin = async (filters = {}) => {
     );
 
     const data = orders
-      .map((order) => ({
-        ...order,
-        payment: paymentMap.get(order._id.toString()) || null,
-        discount_code: order.discount_code ?? null,
-        discount_amount: order.discount_amount ?? 0,
-      }))
+      .map((order) => {
+        const shippingFee = order.shipping_fee ?? 0;
+        const discountAmount = order.discount_amount ?? 0;
+        const totalPrice = order.total_price ?? 0;
+        const subtotalProducts = totalPrice - shippingFee + discountAmount;
+        return {
+          ...order,
+          payment: paymentMap.get(order._id.toString()) || null,
+          discount_code: order.discount_code ?? null,
+          discount_amount: discountAmount,
+          shipping_fee: shippingFee,
+          total_price: totalPrice,
+          subtotal_products: subtotalProducts,
+        };
+      })
       .filter((order) => {
         if (!payment_status) return true;
         return order.payment !== null;
@@ -1191,6 +1209,11 @@ const getOrderDetailForAdmin = async (order_id) => {
       PaymentModel.findOne({ order_id: order._id, type: "PAYMENT" }).lean(),
     ]);
 
+    const shippingFee = order.shipping_fee ?? 0;
+    const discountAmount = order.discount_amount ?? 0;
+    const totalPrice = order.total_price ?? 0;
+    const subtotalProducts = totalPrice - shippingFee + discountAmount;
+
     return {
       status: "OK",
       message: "Retrieved order details successfully",
@@ -1198,7 +1221,10 @@ const getOrderDetailForAdmin = async (order_id) => {
         order: {
           ...order,
           discount_code: order.discount_code ?? null,
-          discount_amount: order.discount_amount ?? 0,
+          discount_amount: discountAmount,
+          shipping_fee: shippingFee,
+          total_price: totalPrice,
+          subtotal_products: subtotalProducts,
         },
         details,
         payment,
