@@ -91,6 +91,8 @@ const createHarvestBatch = async (payload = {}) => {
         location: location?.toString().trim() || "",
         notes: notes?.toString().trim() || "",
         receivedQuantity: 0,
+        receiptEligible: true,
+        visibleInReceipt: true,
       });
       await harvestBatch.save();
       supplier.totalBatches = (supplier.totalBatches || 0) + 1;

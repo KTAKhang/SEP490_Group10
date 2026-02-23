@@ -55,8 +55,30 @@ const fruitTypeSchema = new mongoose.Schema(
       default: "ACTIVE",
       index: true,
     },
+    /** Single image (legacy). Prefer images[] for multiple. */
     image: { type: String, trim: true, default: null },
     imagePublicId: { type: String, trim: true, default: null },
+    /** Multiple images for detail gallery (like Product). Max 10. */
+    images: {
+      type: [{ type: String, trim: true }],
+      default: undefined,
+      validate: {
+        validator: function (v) {
+          return !v || v.length <= 10;
+        },
+        message: "Fruit type images cannot exceed 10",
+      },
+    },
+    imagePublicIds: {
+      type: [{ type: String, trim: true }],
+      default: undefined,
+      validate: {
+        validator: function (v) {
+          return !v || v.length <= 10;
+        },
+        message: "Fruit type imagePublicIds cannot exceed 10",
+      },
+    },
   },
   { timestamps: true }
 );

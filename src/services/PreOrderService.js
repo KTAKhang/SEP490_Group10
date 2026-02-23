@@ -17,13 +17,18 @@
  * @module services/PreOrderService
  */
 
+const mongoose = require("mongoose");
 const FruitTypeModel = require("../models/FruitTypeModel");
 const PreOrderModel = require("../models/PreOrderModel");
 const UserModel = require("../models/UserModel");
 const PreOrderPaymentIntentModel = require("../models/PreOrderPaymentIntentModel");
 const PreOrderRemainingPaymentModel = require("../models/PreOrderRemainingPaymentModel");
+const PreOrderAllocationModel = require("../models/PreOrderAllocationModel");
 const { isPreOrderLockedByHarvest, DAYS_BEFORE_HARVEST_TO_LOCK } = require("./FruitTypeService");
 const { createPreOrderVnpayUrl } = require("../utils/createVnpayUrl");
+
+/** Statuses from which admin can cancel (before remaining payment / fulfillment). */
+const CANCELLABLE_BY_ADMIN_STATUSES = ["WAITING_FOR_ALLOCATION", "WAITING_FOR_NEXT_BATCH", "ALLOCATED_WAITING_PAYMENT"];
 
 /** Payment intent expiry in minutes (VNPay redirect). */
 const INTENT_EXPIRE_MINUTES = 15;
@@ -411,6 +416,116 @@ async function markPreOrderRefunded(preOrderId) {
   return { status: "OK", data: await PreOrderModel.findById(preOrderId).populate("userId", "user_name email").populate("fruitTypeId", "name estimatedPrice").lean() };
 }
 
+/**
+ * Admin: mark pre-order as CANCELLED (business rule: e.g. overdue remaining payment, or admin decision).
+ * Allowed only from WAITING_FOR_ALLOCATION, WAITING_FOR_NEXT_BATCH, ALLOCATED_WAITING_PAYMENT.
+ * Customer cannot cancel pre-orders (use cancelPreOrder for customer path; it always throws).
+ *
+ * @param {string} preOrderId - Pre-order document ID
+ * @returns {Promise<{ status: string, data: Object }>}
+ */
+async function markPreOrderCancelled(preOrderId) {
+  const po = await PreOrderModel.findById(preOrderId).lean();
+  if (!po) throw new Error("Pre-order not found");
+  if (po.status === "CANCELLED") {
+    throw new Error("This pre-order is already cancelled.");
+  }
+  if (!CANCELLABLE_BY_ADMIN_STATUSES.includes(po.status)) {
+    throw new Error(
+      "Only orders in Waiting for allocation, Waiting for next batch, or Allocated (waiting payment) can be cancelled by admin. Current: " +
+        (po.status || "unknown")
+    );
+  }
+  const fruitTypeId = po.fruitTypeId && (po.fruitTypeId._id || po.fruitTypeId);
+  await PreOrderModel.updateOne({ _id: preOrderId }, { $set: { status: "CANCELLED" } });
+
+  if (fruitTypeId && po.status === "ALLOCATED_WAITING_PAYMENT") {
+    const ftObjId = fruitTypeId._id || fruitTypeId;
+    const allocAgg = await PreOrderModel.aggregate([
+      {
+        $match: {
+          fruitTypeId: new mongoose.Types.ObjectId(ftObjId.toString()),
+          status: { $in: ["ALLOCATED_WAITING_PAYMENT", "READY_FOR_FULFILLMENT", "COMPLETED"] },
+        },
+      },
+      { $group: { _id: null, allocatedKg: { $sum: "$quantityKg" } } },
+    ]);
+    const newAllocatedKg = allocAgg[0]?.allocatedKg ?? 0;
+    await PreOrderAllocationModel.findOneAndUpdate(
+      { fruitTypeId: ftObjId },
+      { $set: { allocatedKg: newAllocatedKg } },
+      { new: true, upsert: true }
+    );
+  }
+
+  const FruitTypeService = require("./FruitTypeService");
+  if (fruitTypeId) {
+    const fid = fruitTypeId._id || fruitTypeId;
+    FruitTypeService.maybeSetInactiveWhenDemandZero(fid).catch((e) =>
+      console.warn("FruitTypeService.maybeSetInactiveWhenDemandZero failed:", e.message)
+    );
+  }
+  return { status: "OK", data: await PreOrderModel.findById(preOrderId).populate("userId", "user_name email").populate("fruitTypeId", "name estimatedPrice").lean() };
+}
+
+/**
+ * Simulate pre-order import: FIFO full-order fulfillment only.
+ * Used before confirming an import to get recommended quantity and reject excess.
+ *
+ * @param {string} fruitTypeId - Fruit type document ID
+ * @param {number} supplierAvailableQuantity - Quantity (kg) supplier has available
+ * @returns {Promise<{ supplierAvailableQuantity: number, numberOfOrdersCanBeFulfilled: number, totalQuantityUsedForFulfillment: number, recommendedImportQuantity: number, excessQuantity: number }>}
+ */
+async function simulatePreOrderImport(fruitTypeId, supplierAvailableQuantity) {
+  const qty = Number(supplierAvailableQuantity);
+  if (!Number.isFinite(qty) || qty < 0) {
+    throw new Error("supplierAvailableQuantity must be a non-negative number");
+  }
+  const ftObjId = new mongoose.Types.ObjectId(fruitTypeId);
+  const nextBatch = await PreOrderModel.find({
+    fruitTypeId: ftObjId,
+    status: "WAITING_FOR_NEXT_BATCH",
+  })
+    .sort({ createdAt: 1 })
+    .select("_id quantityKg")
+    .lean();
+  const waitingAlloc = await PreOrderModel.find({
+    fruitTypeId: ftObjId,
+    status: { $in: ["WAITING_FOR_ALLOCATION", "WAITING_FOR_PRODUCT"] },
+  })
+    .sort({ createdAt: 1 })
+    .select("_id quantityKg")
+    .lean();
+  const queue = [...nextBatch, ...waitingAlloc];
+
+  let available = qty;
+  let totalQuantityUsedForFulfillment = 0;
+  let numberOfOrdersCanBeFulfilled = 0;
+
+  for (const po of queue) {
+    const orderQty = po.quantityKg ?? 0;
+    if (orderQty <= 0) continue;
+    if (available >= orderQty) {
+      numberOfOrdersCanBeFulfilled += 1;
+      totalQuantityUsedForFulfillment += orderQty;
+      available -= orderQty;
+    } else {
+      break;
+    }
+  }
+
+  const recommendedImportQuantity = totalQuantityUsedForFulfillment;
+  const excessQuantity = qty - totalQuantityUsedForFulfillment;
+
+  return {
+    supplierAvailableQuantity: qty,
+    numberOfOrdersCanBeFulfilled,
+    totalQuantityUsedForFulfillment: recommendedImportQuantity,
+    recommendedImportQuantity,
+    excessQuantity,
+  };
+}
+
 module.exports = {
   createPaymentIntentAndGetPayUrl,
   getMyPreOrders,
@@ -422,5 +537,7 @@ module.exports = {
   fulfillRemainingPayment,
   markPreOrderCompleted,
   markPreOrderRefunded,
+  markPreOrderCancelled,
+  simulatePreOrderImport,
   CANCEL_WINDOW_HOURS,
 };

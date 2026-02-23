@@ -19,23 +19,25 @@ const HarvestBatchModel = require("../models/HarvestBatchModel");
 const FruitTypeModel = require("../models/FruitTypeModel");
 const SupplierModel = require("../models/SupplierModel");
 const PreOrderModel = require("../models/PreOrderModel");
+const PreOrderService = require("./PreOrderService");
 
 /** Statuses that count toward demand. */
 const DEMAND_STATUSES = ["WAITING_FOR_ALLOCATION", "WAITING_FOR_NEXT_BATCH", "ALLOCATED_WAITING_PAYMENT"];
 
 /**
- * Admin: create a pre-order receive batch for a fruit type. Multiple batches per fruit type allowed.
+ * Admin: create a pre-order receive batch for a fruit type. Simulation runs HERE (full-order fulfillment).
+ * Batch is created with quantityKg = recommendedImportQuantity; warehouse will receive exactly that amount later.
  *
  * Business rules:
- * - Fruit type must exist; quantityKg must be a positive number
- * - quantityKg can be any positive (receive-time validation: total received must not exceed demand)
- * - Either harvestBatchId (linked harvest batch) or supplierId + harvestDate + batchNumber must be provided; supplier must be ACTIVE
+ * - Accept supplierAvailableQuantity; run simulation (FIFO full-order only)
+ * - Create batch only when supplierAvailableQuantity === recommendedImportQuantity (no excess, no partial)
+ * - Either harvestBatchId or supplierId + harvestDate + batchNumber must be provided
  *
  * @param {Object} params - Input parameters
- * @param {string} [params.harvestBatchId] - Optional linked harvest batch ID (supplier/date/number taken from it)
+ * @param {string} [params.harvestBatchId] - Optional linked harvest batch ID
  * @param {string} params.fruitTypeId - Fruit type document ID
- * @param {string} [params.supplierId] - Required if no harvestBatchId; supplier must be ACTIVE
- * @param {number} params.quantityKg - Planned quantity (kg)
+ * @param {string} [params.supplierId] - Required if no harvestBatchId
+ * @param {number} params.supplierAvailableQuantity - Quantity (kg) supplier has; must equal recommended (simulation)
  * @param {string} [params.harvestDate] - Required if no harvestBatchId
  * @param {string} [params.batchNumber] - Required if no harvestBatchId
  * @param {string} [params.notes] - Optional notes (max 500 chars)
@@ -45,7 +47,7 @@ async function createBatch({
   harvestBatchId,
   fruitTypeId,
   supplierId,
-  quantityKg,
+  supplierAvailableQuantity,
   harvestDate,
   batchNumber,
   notes,
@@ -55,9 +57,9 @@ async function createBatch({
   }
   const ft = await FruitTypeModel.findById(fruitTypeId).lean();
   if (!ft) throw new Error("Fruit type not found");
-  const qty = Number(quantityKg);
-  if (!Number.isFinite(qty) || qty <= 0) {
-    throw new Error("Quantity (kg) must be greater than 0");
+  const qty = Number(supplierAvailableQuantity);
+  if (!Number.isFinite(qty) || qty < 0) {
+    throw new Error("Supplier available quantity (kg) must be a non-negative number");
   }
 
   let finalSupplierId, finalHarvestDate, finalBatchNumber, finalHarvestBatchId = null;
@@ -69,6 +71,12 @@ async function createBatch({
     if (!hb) throw new Error("Harvest batch not found. Create at Harvest Batch Management.");
     if (hb.isPreOrderBatch !== true) {
       throw new Error("Only pre-order harvest batches can be used for pre-order receive batch. Create a pre-order harvest batch (check \"Pre-order harvest batch\") at Harvest Batch Management.");
+    }
+    if (hb.receiptEligible === false) {
+      throw new Error("This harvest batch is not eligible for receipt. Enable it at Harvest Batch Management.");
+    }
+    if (hb.visibleInReceipt !== true) {
+      throw new Error("This harvest batch has already been used for receive and is hidden from the list. Choose another batch.");
     }
     const hbFruitId = hb.fruitTypeId?._id?.toString() || hb.fruitTypeId?.toString();
     if (hbFruitId && fruitTypeId && hbFruitId !== String(fruitTypeId)) {
@@ -95,6 +103,30 @@ async function createBatch({
     finalBatchNumber = String(batchNumber).trim();
   }
 
+  const fruitTypeIdStr = fruitTypeId.toString();
+  const simulation = await PreOrderService.simulatePreOrderImport(fruitTypeIdStr, qty);
+  const { numberOfOrdersCanBeFulfilled, recommendedImportQuantity } = simulation;
+
+  if (numberOfOrdersCanBeFulfilled === 0 && recommendedImportQuantity === 0) {
+    throw new Error(
+      "No remaining pre-orders, or supplier quantity is less than the smallest order. Cannot create receive batch. Run simulation to see recommended quantity."
+    );
+  }
+  if (qty > recommendedImportQuantity) {
+    throw new Error(
+      "Import quantity will generate excess inventory. Please import the recommended quantity (" +
+        recommendedImportQuantity +
+        " kg)."
+    );
+  }
+  if (qty < recommendedImportQuantity) {
+    throw new Error(
+      "Supplier quantity is insufficient to fully fulfill the next order(s). Recommended: " +
+        recommendedImportQuantity +
+        " kg."
+    );
+  }
+
   const harvestDayStart = new Date(finalHarvestDate);
   harvestDayStart.setUTCHours(0, 0, 0, 0);
   const harvestDayEnd = new Date(harvestDayStart);
@@ -115,7 +147,7 @@ async function createBatch({
     harvestBatchId: finalHarvestBatchId,
     fruitTypeId: new mongoose.Types.ObjectId(fruitTypeId),
     supplierId: new mongoose.Types.ObjectId(finalSupplierId),
-    quantityKg: qty,
+    quantityKg: recommendedImportQuantity,
     harvestDate: finalHarvestDate,
     batchNumber: finalBatchNumber,
     notes: (notes || "").toString().trim().slice(0, 500),
