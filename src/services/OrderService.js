@@ -377,7 +377,7 @@ const confirmCheckoutAndCreateOrder = async ({
       const response = {
         success: true,
         type: "COD",
-        redirect_url: "http://localhost:5173/customer/order-success",
+        redirect_url: "myshopapps://payment-success",
         order_id: orderId,
       };
       setImmediate(async () => {
@@ -434,6 +434,7 @@ const confirmCheckoutAndCreateOrder = async ({
         order_id: order._id,
         user_id,
         ip,
+        isMobile,
         session,
       });
       await session.commitTransaction();

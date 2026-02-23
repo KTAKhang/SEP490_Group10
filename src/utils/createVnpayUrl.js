@@ -17,15 +17,28 @@ const createDate = () => {
   );
 };
 
-const createVnpayUrl = (orderId, amount, ipAddr = "127.0.0.1") => {
+const createVnpayUrl = (
+  orderId,
+  amount,
+  isMobile = false,
+  ipAddr = "127.0.0.1",
+) => {
   const dt = new Date();
   const yyyyMMddHHmmss =
     `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}` +
     `${pad(dt.getHours())}${pad(dt.getMinutes())}${pad(dt.getSeconds())}`;
 
-  const normalizedIp =
-    (ipAddr || "127.0.0.1").includes("::") ? "127.0.0.1" : ipAddr;
+  const ipString = String(ipAddr || "127.0.0.1");
 
+  const normalizedIp = ipString.includes("::") ? "127.0.0.1" : ipString;
+
+  let returnUrl;
+
+  if (isMobile) {
+    returnUrl = "myshopapps://payment-success";
+  } else {
+    returnUrl = vnpConfig.returnUrl;
+  }
   const baseParams = {
     vnp_Version: "2.1.0",
     vnp_Command: "pay",
@@ -35,8 +48,8 @@ const createVnpayUrl = (orderId, amount, ipAddr = "127.0.0.1") => {
     vnp_TxnRef: orderId.toString(),
     vnp_OrderInfo: `Thanh toán cho đơn hàng ${orderId}`,
     vnp_OrderType: "billpayment",
-    vnp_Amount: amount*100,
-    vnp_ReturnUrl: vnpConfig.returnUrl,
+    vnp_Amount: amount * 100,
+    vnp_ReturnUrl: returnUrl,
     vnp_IpAddr: normalizedIp,
     vnp_CreateDate: yyyyMMddHHmmss,
   };
@@ -82,8 +95,9 @@ const createPreOrderVnpayUrl = (intentId, amount, ipAddr = "127.0.0.1") => {
     `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}` +
     `${pad(dt.getHours())}${pad(dt.getMinutes())}${pad(dt.getSeconds())}`;
 
-  const normalizedIp =
-    (ipAddr || "127.0.0.1").includes("::") ? "127.0.0.1" : ipAddr;
+  const normalizedIp = (ipAddr || "127.0.0.1").includes("::")
+    ? "127.0.0.1"
+    : ipAddr;
 
   const baseParams = {
     vnp_Version: "2.1.0",
@@ -138,7 +152,7 @@ const refund = async ({ payment, refund }) => {
     vnp_TmnCode: vnpConfig.tmnCode,
     vnp_TransactionType: "02", // hoàn toàn phần
     vnp_TxnRef: payment.provider_response.vnp_TxnRef,
-    vnp_Amount: refund.amount*100, // ✅ REFUND → KHÔNG * 100
+    vnp_Amount: refund.amount * 100, // ✅ REFUND → KHÔNG * 100
     vnp_TransactionNo: payment.provider_response.vnp_TransactionNo,
     vnp_TransactionDate: payment.provider_response.vnp_PayDate,
     vnp_CreateBy: "system",
@@ -178,6 +192,5 @@ const refund = async ({ payment, refund }) => {
 
   return res.data;
 };
-
 
 module.exports = { createVnpayUrl, createPreOrderVnpayUrl, refund };
