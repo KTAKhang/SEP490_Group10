@@ -41,7 +41,7 @@ const createOnlinePendingPayment = async ({ order_id, amount, session }) => {
 };
 
 
-const createVnpayPaymentUrl = async ({ order_id, user_id, ip, session }) => {
+const createVnpayPaymentUrl = async ({ order_id, user_id, ip, isMobile, session }) => {
   /* =======================
      1️⃣ CHECK ORDER
   ======================= */
@@ -78,7 +78,7 @@ const createVnpayPaymentUrl = async ({ order_id, user_id, ip, session }) => {
   /* =======================
      3️⃣ CREATE VNPAY URL
   ======================= */
-  const payUrl = createVnpayUrl(order._id, payment.amount, ip);
+  const payUrl = createVnpayUrl(order._id, payment.amount, ip,isMobile);
 
 
   return payUrl;
