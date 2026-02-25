@@ -1,0 +1,181 @@
+HƯỚNG DẪN NHÚNG MAP BẰNG IFRAME (TIẾNG VIỆT)
+===========================================
+
+Mục tiêu: Dùng thẻ <iframe> để hiển thị bản đồ (ví dụ Google Maps) trên trang web.
+
+--------------------------------------------------
+1. KHÁI NIỆM CƠ BẢN VỀ IFRAME
+--------------------------------------------------
+- Thẻ <iframe> dùng để nhúng (embed) một trang web khác vào bên trong trang của bạn.
+- Khi nhúng map, thực chất bạn đang nhúng một URL đặc biệt của dịch vụ bản đồ (Google Maps, OpenStreetMap, v.v.).
+
+Ví dụ thẻ iframe cơ bản:
+
+<iframe src="https://example.com"
+        width="600"
+        height="450"
+        style="border:0;"
+        loading="lazy">
+</iframe>
+
+Trong đó:
+- src: đường dẫn (URL) của trang map sẽ được hiển thị.
+- width, height: kích thước iframe (chiều rộng, chiều cao).
+- style / border: style viền, padding, v.v.
+- loading="lazy": giúp tải chậm, tối ưu hiệu năng (có thể bỏ).
+
+--------------------------------------------------
+2. CÁCH LẤY MÃ NHÚNG GOOGLE MAPS (EMBED)
+--------------------------------------------------
+Các bước thực hiện trên trình duyệt:
+1) Mở Google Maps.
+2) Tìm địa điểm bạn muốn hiển thị (tên cửa hàng, địa chỉ, trường học, v.v.).
+3) Ở phần chia sẻ:
+   - Nhấn nút "Chia sẻ" (Share).
+   - Chọn tab "Nhúng bản đồ" (Embed map).
+   - Google sẽ hiển thị một đoạn mã <iframe> sẵn.
+4) Nhấn "Sao chép HTML" (Copy HTML).
+5) Dán đoạn mã đó vào file HTML của bạn (trong phần <body>).
+
+Ví dụ đoạn mã Google Maps cung cấp (đã rút gọn):
+
+<iframe
+  src="https://www.google.com/maps/embed?pb=!1m18!1m12!... (rất dài) ..."
+  width="600"
+  height="450"
+  style="border:0;"
+  allowfullscreen=""
+  loading="lazy"
+  referrerpolicy="no-referrer-when-downgrade">
+</iframe>
+
+Lưu ý:
+- Chuỗi sau `pb=` trong URL rất dài, bạn cứ giữ nguyên, không cần sửa.
+- Bạn chỉ cần chỉnh width, height, style cho phù hợp giao diện.
+
+--------------------------------------------------
+3. VÍ DỤ ĐẦY ĐỦ MỘT TRANG HTML CÓ IFRAME MAP
+--------------------------------------------------
+Dưới đây là ví dụ một file HTML hoàn chỉnh có nhúng Google Maps bằng iframe.
+
+Tạo file: map.html
+Nội dung:
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Ví dụ nhúng Google Maps bằng iframe</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .map-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .map-title {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        iframe {
+            width: 100%;   /* Cho bản đồ tự co theo chiều rộng container */
+            height: 450px; /* Chiều cao cố định, có thể sửa */
+            border: 0;     /* Ẩn viền */
+        }
+    </style>
+</head>
+<body>
+    <div class="map-container">
+        <div class="map-title">Vị trí cửa hàng của chúng tôi</div>
+
+        <!-- DÁN IFRAME MAP VÀO ĐÂY -->
+        <iframe
+          src="https://www.google.com/maps/embed?pb=!1m18!1m12!...(URL EMBED THẬT CỦA BẠN)..."
+          allowfullscreen=""
+          loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade">
+        </iframe>
+    </div>
+</body>
+</html>
+
+Giải thích:
+- File HTML này chỉ là ví dụ đơn giản để bạn hiểu cấu trúc.
+- Phần quan trọng nhất là thẻ <iframe> với thuộc tính src là URL Google Maps embed.
+- CSS dùng để cho iframe full chiều ngang của khung chứa (.map-container).
+
+--------------------------------------------------
+4. TÍCH HỢP VÀO DỰ ÁN WEB HIỆN TẠI
+--------------------------------------------------
+Tùy dự án của bạn đang dùng công nghệ gì (HTML thuần, EJS, Pug, React, v.v.), cách làm chung đều là:
+1) Xác định file giao diện (template) nơi bạn muốn hiện map.
+2) Thêm đoạn iframe vào vị trí cần hiển thị bản đồ.
+
+Ví dụ 4.1: Nếu bạn dùng HTML tĩnh
+- Chỉ cần mở file .html, dán code iframe vào trong <body> tại vị trí mong muốn.
+
+Ví dụ 4.2: Nếu bạn dùng EJS / Pug trong Node.js (Express)
+- Với EJS, bạn có thể dán nguyên đoạn iframe (y như HTML) vào file .ejs.
+- Ví dụ trong views/contact.ejs:
+
+<div class="contact-map">
+    <h2>Bản đồ</h2>
+    <iframe
+      src="https://www.google.com/maps/embed?pb=!1m18!1m12!...(URL EMBED THẬT CỦA BẠN)..."
+      allowfullscreen=""
+      loading="lazy"
+      referrerpolicy="no-referrer-when-downgrade">
+    </iframe>
+</div>
+
+Lưu ý: Với React hoặc các framework SPA, bạn vẫn có thể dùng iframe như một thẻ HTML bình thường trong JSX:
+
+<iframe
+  src="https://www.google.com/maps/embed?pb=!1m18!1m12!...(URL EMBED THẬT CỦA BẠN)..."
+  style={{ width: "100%", height: "450px", border: 0 }}
+  allowFullScreen
+  loading="lazy"
+/>
+
+--------------------------------------------------
+5. CÁCH KIỂM TRA MAP ĐÃ HIỂN THỊ
+--------------------------------------------------
+1) Sau khi dán code iframe vào file giao diện, lưu file.
+2) Nếu là HTML tĩnh:
+   - Mở file đó bằng trình duyệt (Chrome, Edge, v.v.).
+3) Nếu là dự án Node.js (Express):
+   - Chạy server (ví dụ: npm start hoặc node app.js).
+   - Mở trình duyệt và truy cập đúng URL trang chứa map (ví dụ: http://localhost:3000/contact).
+4) Nếu nhìn thấy đúng bản đồ hiển thị là thành công.
+
+--------------------------------------------------
+6. CÁC LỖI THƯỜNG GẶP
+--------------------------------------------------
+- Map không hiện, chỉ thấy khung xám / trắng:
+  + Kiểm tra lại thuộc tính src: có bị thiếu dấu " hoặc copy không đủ không.
+  + Kiểm tra xem có đang offline (không có mạng) không, vì map cần internet.
+  + Kiểm tra trong Console (F12) xem có lỗi nào liên quan đến iframe / Google Maps không.
+
+- Iframe bị quá nhỏ / quá to:
+  + Chỉnh lại width, height (hoặc CSS) cho phù hợp.
+
+- Muốn map full màn hình:
+  + Trong CSS, cho iframe width: 100%; height: 100vh; (tùy layout).
+
+--------------------------------------------------
+7. TÓM TẮT NGẮN GỌN
+--------------------------------------------------
+1) Lên Google Maps, tìm địa điểm.
+2) Chọn "Chia sẻ" → "Nhúng bản đồ" → Sao chép HTML.
+3) Dán đoạn <iframe> vào file giao diện (HTML/EJS/React).
+4) Chạy trang web và mở đúng URL để kiểm tra.
+
+Chỉ cần đúng URL embed trong thuộc tính src của iframe là map sẽ hiển thị trên web.
+

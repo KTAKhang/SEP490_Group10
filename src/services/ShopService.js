@@ -23,6 +23,7 @@ const getShopInfo = async () => {
         logo: "",
         description: "",
         workingHours: "",
+        mapEmbedUrl: "",
         images: [],
         imagePublicIds: [],
       });
@@ -47,7 +48,7 @@ const getShopInfo = async () => {
  */
 const updateShopBasicInfo = async (payload = {}) => {
   try {
-    const { shopName, address, email, phone, logo } = payload;
+    const { shopName, address, email, phone, logo, mapEmbedUrl } = payload;
 
     // BR-06: Shop name is required
     if (!shopName || !shopName.toString().trim()) {
@@ -77,6 +78,15 @@ const updateShopBasicInfo = async (payload = {}) => {
       }
     }
 
+    // Map embed URL validation (if provided)
+    if (mapEmbedUrl && mapEmbedUrl.toString().trim()) {
+      const urlRegex = /^https?:\/\/.+/;
+      const trimmedUrl = mapEmbedUrl.toString().trim();
+      if (!urlRegex.test(trimmedUrl)) {
+        return { status: "ERR", message: "URL bản đồ không hợp lệ. Vui lòng sử dụng URL embed từ Google Maps." };
+      }
+    }
+
     // Get existing shop or create default
     let shop = await ShopModel.findOne();
     if (!shop) {
@@ -87,6 +97,7 @@ const updateShopBasicInfo = async (payload = {}) => {
         email: email ? email.toString().trim().toLowerCase() : "",
         phone: phone ? phone.toString().trim() : "",
         logo: logo ? logo.toString().trim() : "",
+        mapEmbedUrl: mapEmbedUrl ? mapEmbedUrl.toString().trim() : "",
         description: "",
         workingHours: "",
         images: [],
@@ -99,6 +110,7 @@ const updateShopBasicInfo = async (payload = {}) => {
       shop.email = email ? email.toString().trim().toLowerCase() : "";
       shop.phone = phone ? phone.toString().trim() : "";
       shop.logo = logo ? logo.toString().trim() : "";
+      shop.mapEmbedUrl = mapEmbedUrl ? mapEmbedUrl.toString().trim() : "";
       // BR-11: Timestamp will be updated automatically by mongoose timestamps
     }
 
@@ -159,6 +171,7 @@ const updateShopDescription = async (payload = {}) => {
         logo: "",
         description: "",
         workingHours: "",
+        mapEmbedUrl: "",
         images: [],
         imagePublicIds: [],
       });
@@ -206,6 +219,7 @@ const updateWorkingHours = async (payload = {}) => {
         logo: "",
         description: "",
         workingHours: workingHours.toString().trim(),
+        mapEmbedUrl: "",
         images: [],
         imagePublicIds: [],
       });
@@ -264,6 +278,7 @@ const updateShopImages = async (images = [], imagePublicIds = []) => {
         logo: "",
         description: "",
         workingHours: "",
+        mapEmbedUrl: "",
         images: validImages,
         imagePublicIds: validImagePublicIds,
       });

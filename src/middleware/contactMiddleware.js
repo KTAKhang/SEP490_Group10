@@ -72,12 +72,14 @@ const contactAuthMiddleware = async (req, res, next) => {
         }
 
         // Bước 5: Gán thông tin user đã chuẩn hóa vào req để route handler dùng
+        const roleName = user.role_id?.name || "customer";
         req.user = {
             _id: user._id,
             user_name: user.user_name,
             email: user.email,
-            role: user.role_id?.name || "customer",
-            isAdmin: user.role_id?.name === "admin",
+            role: roleName,
+            isAdmin: roleName === "admin",
+            isAdminOrFeedbackedStaff: roleName === "admin" || roleName === "feedbacked-staff",
         };
 
         next();
@@ -156,6 +158,85 @@ const contactAdminMiddleware = async (req, res, next) => {
             email: user.email,
             role: roleName,
             isAdmin: true,
+            isAdminOrFeedbackedStaff: true,
+        };
+
+        next();
+    } catch (error) {
+        if (error.name === "TokenExpiredError") {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Token đã hết hạn",
+            });
+        }
+        if (error.name === "JsonWebTokenError") {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Token không hợp lệ",
+            });
+        }
+        return res.status(500).json({
+            status: "ERR",
+            message: error.message,
+        });
+    }
+};
+
+/**
+ * =============================================================================
+ * contactAdminOrFeedbackedStaffMiddleware - Cho phép Admin hoặc feedbacked-staff
+ * =============================================================================
+ * GIẢI THUẬT:
+ * Giống contactAuthMiddleware đến bước kiểm tra status, sau đó:
+ * 6. Lấy roleName từ user.role_id?.name (mặc định "customer" nếu không có).
+ * 7. Nếu roleName !== "admin" và roleName !== "feedbacked-staff" → trả 403.
+ * 8. Chỉ khi là admin hoặc feedbacked-staff mới gán req.user và gọi next().
+ * Dùng cho các route quản lý Contact dành cho Admin và Customer Support.
+ */
+const contactAdminOrFeedbackedStaffMiddleware = async (req, res, next) => {
+    try {
+        const token = req.headers.authorization?.split(" ")[1] || req.headers.authorization;
+
+        if (!token) {
+            return res.status(401).json({
+                status: "ERR",
+                message: "Token không được cung cấp",
+            });
+        }
+
+        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        const user = await UserModel.findById(decoded._id).populate("role_id", "name");
+
+        if (!user) {
+            return res.status(404).json({
+                status: "ERR",
+                message: "Người dùng không tồn tại",
+            });
+        }
+
+        if (user.status === false) {
+            return res.status(403).json({
+                status: "ERR",
+                message: "Tài khoản bị khóa",
+            });
+        }
+
+        // Kiểm tra quyền: chỉ role "admin" hoặc "feedbacked-staff" mới được đi tiếp
+        const roleName = user.role_id?.name || "customer";
+        if (roleName !== "admin" && roleName !== "feedbacked-staff") {
+            return res.status(403).json({
+                status: "ERR",
+                message: "Chỉ Admin hoặc Customer Support mới có quyền truy cập",
+            });
+        }
+
+        req.user = {
+            _id: user._id,
+            user_name: user.user_name,
+            email: user.email,
+            role: roleName,
+            isAdmin: roleName === "admin",
+            isAdminOrFeedbackedStaff: true,
         };
 
         next();
@@ -259,5 +340,6 @@ const contactUserMiddleware = async (req, res, next) => {
 module.exports = {
     contactAuthMiddleware,
     contactAdminMiddleware,
+    contactAdminOrFeedbackedStaffMiddleware,
     contactUserMiddleware,
 };

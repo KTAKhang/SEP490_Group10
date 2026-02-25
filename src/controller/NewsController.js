@@ -60,8 +60,9 @@ const getNewsById = async (req, res) => {
 const updateNews = async (req, res) => {
   try {
     const userId = req.user._id;
-    const isAdmin = req.user.role_name === "admin";
-    const response = await NewsService.updateNews(req.params.id, req.body, userId, isAdmin);
+    const roleName = req.user.role_name;
+    const isAdminOrSalesStaff = roleName === "admin" || roleName === "sales-staff";
+    const response = await NewsService.updateNews(req.params.id, req.body, userId, isAdminOrSalesStaff);
     if (response.status === "ERR") return res.status(400).json(response);
     return res.status(200).json(response);
   } catch (error) {
@@ -72,8 +73,9 @@ const updateNews = async (req, res) => {
 const deleteNews = async (req, res) => {
   try {
     const userId = req.user._id;
-    const isAdmin = req.user.role_name === "admin";
-    const response = await NewsService.deleteNews(req.params.id, userId, isAdmin);
+    const roleName = req.user.role_name;
+    const isAdminOrSalesStaff = roleName === "admin" || roleName === "sales-staff";
+    const response = await NewsService.deleteNews(req.params.id, userId, isAdminOrSalesStaff);
     if (response.status === "ERR") return res.status(400).json(response);
     return res.status(200).json(response);
   } catch (error) {

@@ -38,6 +38,11 @@ const shopSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    mapEmbedUrl: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     images: [{ type: String, trim: true }],
     imagePublicIds: [{ type: String, trim: true }],
   },

@@ -494,7 +494,7 @@ const getNewsById = async (id, userId = null, ipAddress = null) => {
       return { status: "ERR", message: "Bài viết không tồn tại" };
     }
 
-    // BR-NEWS-04: Track view (if not author/admin and has IP)
+    // BR-NEWS-04: Track view (if not author/admin/sales-staff and has IP)
     // Convert both to string for proper comparison
     const authorIdStr = news.author_id._id ? news.author_id._id.toString() : news.author_id.toString();
     const userIdStr = userId ? userId.toString() : null;
@@ -502,17 +502,18 @@ const getNewsById = async (id, userId = null, ipAddress = null) => {
     // Only track view if:
     // 1. Has IP address
     // 2. User is not the author (userId !== authorId)
-    // 3. User is not admin
+    // 3. User is not admin or sales-staff
     if (ipAddress && userIdStr !== authorIdStr) {
-      // Check if user is admin
-      let isAdmin = false;
+      // Check if user is admin or sales-staff
+      let isAdminOrSalesStaff = false;
       if (userIdStr) {
         const user = await UserModel.findById(userIdStr).populate("role_id", "name");
-        isAdmin = user?.role_id?.name === "admin";
+        const roleName = user?.role_id?.name;
+        isAdminOrSalesStaff = roleName === "admin" || roleName === "sales-staff";
       }
 
-      // Only track view if not admin
-      if (!isAdmin) {
+      // Only track view if not admin or sales-staff
+      if (!isAdminOrSalesStaff) {
         // Check if this IP already viewed this news in last 24 hours
         const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
         const existingView = await NewsViewsModel.findOne({
@@ -594,10 +595,10 @@ const getNewsById = async (id, userId = null, ipAddress = null) => {
  * @param {string} id - ID của bài viết
  * @param {object} payload - Các field cần update: { title?, content?, excerpt?, thumbnail_url?, thumbnailPublicId?, status?, is_featured? }
  * @param {string} userId - ID của user đang update
- * @param {boolean} isAdmin - User có phải admin không
+ * @param {boolean} isAdminOrSalesStaff - User có phải admin hoặc sales-staff không
  * @returns {Promise<object>} - { status: "OK"|"ERR", message: string, data?: NewsModel }
  */
-const updateNews = async (id, payload = {}, userId = null, isAdmin = false) => {
+const updateNews = async (id, payload = {}, userId = null, isAdminOrSalesStaff = false) => {
   try {
     const news = await NewsModel.findById(id);
     if (!news) {
@@ -608,7 +609,7 @@ const updateNews = async (id, payload = {}, userId = null, isAdmin = false) => {
     }
 
     // BR-NEWS-02: Check permission
-    if (!isAdmin && news.author_id.toString() !== userId) {
+    if (!isAdminOrSalesStaff && news.author_id.toString() !== userId) {
       return { status: "ERR", message: "Bạn không có quyền chỉnh sửa bài viết này" };
     }
 
@@ -728,10 +729,10 @@ const updateNews = async (id, payload = {}, userId = null, isAdmin = false) => {
  * 
  * @param {string} id - ID của bài viết
  * @param {string} userId - ID của user đang xóa
- * @param {boolean} isAdmin - User có phải admin không
+ * @param {boolean} isAdminOrSalesStaff - User có phải admin hoặc sales-staff không
  * @returns {Promise<object>} - { status: "OK"|"ERR", message: string }
  */
-const deleteNews = async (id, userId = null, isAdmin = false) => {
+const deleteNews = async (id, userId = null, isAdminOrSalesStaff = false) => {
   try {
     const news = await NewsModel.findById(id);
     if (!news) {
@@ -739,7 +740,7 @@ const deleteNews = async (id, userId = null, isAdmin = false) => {
     }
 
     // BR-NEWS-02: Check permission
-    if (!isAdmin && news.author_id.toString() !== userId) {
+    if (!isAdminOrSalesStaff && news.author_id.toString() !== userId) {
       return { status: "ERR", message: "Bạn không có quyền xóa bài viết này" };
     }
 

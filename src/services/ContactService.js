@@ -87,17 +87,17 @@ const createContact = async (userId, { subject, message, category }) => {
 };
 
 /**
- * BR-C-05: User chỉ được xem và thao tác trên Contact của chính mình, Admin xem tất cả.
+ * BR-C-05: User chỉ được xem và thao tác trên Contact của chính mình, Admin và Customer Support xem tất cả.
  */
-const getContacts = async (userId, isAdmin, filters = {}) => {
+const getContacts = async (userId, isAdminOrFeedbackedStaff, filters = {}) => {
     try {
         const { status, category, page = 1, limit = 10 } = filters;
         const skip = (page - 1) * limit;
 
         let query = {};
 
-        // BR-C-05: User chỉ xem Contact của mình, Admin xem tất cả
-        if (!isAdmin) {
+        // BR-C-05: User chỉ xem Contact của mình, Admin và Customer Support xem tất cả
+        if (!isAdminOrFeedbackedStaff) {
             query.user_id = userId;
         }
 
@@ -138,9 +138,9 @@ const getContacts = async (userId, isAdmin, filters = {}) => {
 };
 
 /**
- * BR-C-05: User chỉ được xem Contact của chính mình, Admin xem tất cả.
+ * BR-C-05: User chỉ được xem Contact của chính mình, Admin và Customer Support xem tất cả.
  */
-const getContactById = async (contactId, userId, isAdmin) => {
+const getContactById = async (contactId, userId, isAdminOrFeedbackedStaff) => {
     try {
         const contact = await ContactModel.findById(contactId)
             .populate("user_id", "user_name email")
@@ -153,8 +153,8 @@ const getContactById = async (contactId, userId, isAdmin) => {
             };
         }
 
-        // BR-C-05: User chỉ xem Contact của mình, Admin xem tất cả
-        if (!isAdmin) {
+        // BR-C-05: User chỉ xem Contact của mình, Admin và Customer Support xem tất cả
+        if (!isAdminOrFeedbackedStaff) {
             // Kiểm tra nếu user_id được populate hoặc là ObjectId trực tiếp
             const contactUserId = contact.user_id?._id?.toString() || contact.user_id?.toString();
             if (contactUserId !== userId.toString()) {
@@ -178,14 +178,14 @@ const getContactById = async (contactId, userId, isAdmin) => {
         let canReply = true;
         let waitingForAdminReply = false;
 
-        if (!isAdmin) {
-            // User không phải Admin
+        if (!isAdminOrFeedbackedStaff) {
+            // User không phải Admin hoặc Customer Support
             if (contact.status === "CLOSED" || contact.status === "RESOLVED") {
                 canReply = false;
             }
             // OPEN và IN_PROGRESS: User có thể reply bình thường
         } else {
-            // Admin luôn có thể reply (trừ khi CLOSED hoặc RESOLVED)
+            // Admin và Customer Support luôn có thể reply (trừ khi CLOSED hoặc RESOLVED)
             if (contact.status === "CLOSED" || contact.status === "RESOLVED") {
                 canReply = false;
             }
@@ -211,18 +211,18 @@ const getContactById = async (contactId, userId, isAdmin) => {
 };
 
 /**
- * BR-AUTH-01: Admin có quyền thay đổi trạng thái Contact (RESOLVED, CLOSED).
+ * BR-AUTH-01: Admin và Customer Support có quyền thay đổi trạng thái Contact (RESOLVED, CLOSED).
  * BR-AUTH-02: User không được thay đổi trạng thái Contact.
- * BR-AUTH-03: Admin có thể được gán xử lý Contact thông qua assigned_admin_id.
+ * BR-AUTH-03: Admin và Customer Support có thể được gán xử lý Contact thông qua assigned_admin_id.
  * BR-C-04: Contact có vòng đời trạng thái rõ ràng: OPEN → IN_PROGRESS → RESOLVED → CLOSED.
  */
-const updateContactStatus = async (contactId, userId, isAdmin, { status, assigned_admin_id }) => {
+const updateContactStatus = async (contactId, userId, isAdminOrFeedbackedStaff, { status, assigned_admin_id }) => {
     try {
-        // BR-AUTH-02: Chỉ Admin mới được thay đổi status
-        if (!isAdmin) {
+        // BR-AUTH-02: Chỉ Admin hoặc Customer Support mới được thay đổi status
+        if (!isAdminOrFeedbackedStaff) {
             return {
                 status: "ERR",
-                message: "Chỉ Admin mới có quyền thay đổi trạng thái Contact",
+                message: "Chỉ Admin hoặc Customer Support mới có quyền thay đổi trạng thái Contact",
             };
         }
 
@@ -276,6 +276,35 @@ const updateContactStatus = async (contactId, userId, isAdmin, { status, assigne
             .populate("user_id", "user_name email")
             .populate("assigned_admin_id", "user_name email");
 
+        // Gửi thông báo cho customer khi trạng thái contact được cập nhật
+        if (status) {
+            const customerId = (updatedContact.user_id?._id || updatedContact.user_id)?.toString();
+            const contactIdStr = contactId.toString();
+            const statusMessages = {
+                IN_PROGRESS: "Yêu cầu liên hệ của bạn đang được xử lý.",
+                RESOLVED: "Yêu cầu liên hệ của bạn đã được giải quyết.",
+                CLOSED: "Yêu cầu liên hệ của bạn đã được đóng.",
+                OPEN: "Trạng thái liên hệ của bạn đã được cập nhật.",
+            };
+            const body = statusMessages[status] || "Trạng thái liên hệ của bạn đã được cập nhật.";
+            if (customerId) {
+                try {
+                    await NotificationService.sendToUser(customerId, {
+                        title: "Trạng thái liên hệ đã được cập nhật",
+                        body,
+                        type: "contact",
+                        data: {
+                            type: "contact",
+                            action: "view_contact",
+                            contactId: contactIdStr,
+                        },
+                    });
+                } catch (notifErr) {
+                    console.error("Failed to send contact status update notification to customer:", notifErr);
+                }
+            }
+        }
+
         return {
             status: "OK",
             message: "Cập nhật Contact thành công",
@@ -296,7 +325,7 @@ const updateContactStatus = async (contactId, userId, isAdmin, { status, assigne
  * BR-R-04: Khi có Reply mới, hệ thống phải cập nhật updated_at của Contact.
  * BR-C-06: Contact không được reply khi ở trạng thái CLOSED.
  */
-const createReply = async (contactId, userId, isAdmin, { message }) => {
+const createReply = async (contactId, userId, isAdminOrFeedbackedStaff, { message }) => {
     try {
         // BR-R-01: Kiểm tra Contact tồn tại
         const contact = await ContactModel.findById(contactId);
@@ -317,8 +346,8 @@ const createReply = async (contactId, userId, isAdmin, { message }) => {
         }
 
 
-        // BR-R-03: Xác định sender_type
-        const senderType = isAdmin ? "ADMIN" : "USER";
+        // BR-R-03: Xác định sender_type (Admin hoặc Customer Support đều là ADMIN)
+        const senderType = isAdminOrFeedbackedStaff ? "ADMIN" : "USER";
 
         // BR-R-02: Validate sender_id
         const sender = await UserModel.findById(userId);
@@ -350,13 +379,13 @@ const createReply = async (contactId, userId, isAdmin, { message }) => {
         // BR-R-04: Cập nhật updatedAt của Contact
         await ContactModel.findByIdAndUpdate(contactId, { updatedAt: new Date() });
 
-        // Nếu Contact đang ở trạng thái OPEN và Admin reply, tự động chuyển sang IN_PROGRESS
-        if (contact.status === "OPEN" && isAdmin) {
+        // Nếu Contact đang ở trạng thái OPEN và Admin/Customer Support reply, tự động chuyển sang IN_PROGRESS
+        if (contact.status === "OPEN" && isAdminOrFeedbackedStaff) {
             await ContactModel.findByIdAndUpdate(contactId, { status: "IN_PROGRESS" });
         }
 
-        // Thông báo cho customer khi admin reply (chỉ gửi cho owner của contact)
-        if (isAdmin) {
+        // Thông báo cho customer khi admin/customer support reply (chỉ gửi cho owner của contact)
+        if (isAdminOrFeedbackedStaff) {
             try {
                 const customerId = contact.user_id.toString();
                 const contactIdStr = contactId.toString();
@@ -394,7 +423,7 @@ const createReply = async (contactId, userId, isAdmin, { message }) => {
 /**
  * Lấy danh sách Reply của một Contact
  */
-const getReplies = async (contactId, userId, isAdmin) => {
+const getReplies = async (contactId, userId, isAdminOrFeedbackedStaff) => {
     try {
         const contact = await ContactModel.findById(contactId);
         if (!contact) {
@@ -404,8 +433,8 @@ const getReplies = async (contactId, userId, isAdmin) => {
             };
         }
 
-        // BR-C-05: User chỉ xem Contact của mình, Admin xem tất cả
-        if (!isAdmin) {
+        // BR-C-05: User chỉ xem Contact của mình, Admin và Customer Support xem tất cả
+        if (!isAdminOrFeedbackedStaff) {
             const contactUserId = contact.user_id?._id?.toString() || contact.user_id?.toString();
             if (contactUserId !== userId.toString()) {
                 return {
@@ -433,16 +462,16 @@ const getReplies = async (contactId, userId, isAdmin) => {
 };
 
 /**
- * Cập nhật Reply (chỉ Admin, chỉ reply của chính mình)
+ * Cập nhật Reply (chỉ Admin hoặc Customer Support, chỉ reply của chính mình)
  * PUT /contacts/:contactId/replies/:replyId
  */
-const updateReply = async (contactId, replyId, userId, isAdmin, { message }) => {
+const updateReply = async (contactId, replyId, userId, isAdminOrFeedbackedStaff, { message }) => {
     try {
-        // Chỉ Admin mới được update reply
-        if (!isAdmin) {
+        // Chỉ Admin hoặc Customer Support mới được update reply
+        if (!isAdminOrFeedbackedStaff) {
             return {
                 status: "ERR",
-                message: "Chỉ Admin mới có quyền chỉnh sửa Reply",
+                message: "Chỉ Admin hoặc Customer Support mới có quyền chỉnh sửa Reply",
             };
         }
 
@@ -520,16 +549,16 @@ const updateReply = async (contactId, replyId, userId, isAdmin, { message }) => 
 };
 
 /**
- * Xóa Reply (chỉ Admin, chỉ reply của chính mình)
+ * Xóa Reply (chỉ Admin hoặc Customer Support, chỉ reply của chính mình)
  * DELETE /contacts/:contactId/replies/:replyId
  */
-const deleteReply = async (contactId, replyId, userId, isAdmin) => {
+const deleteReply = async (contactId, replyId, userId, isAdminOrFeedbackedStaff) => {
     try {
-        // Chỉ Admin mới được xóa reply
-        if (!isAdmin) {
+        // Chỉ Admin hoặc Customer Support mới được xóa reply
+        if (!isAdminOrFeedbackedStaff) {
             return {
                 status: "ERR",
-                message: "Chỉ Admin mới có quyền xóa Reply",
+                message: "Chỉ Admin hoặc Customer Support mới có quyền xóa Reply",
             };
         }
 
@@ -599,7 +628,7 @@ const deleteReply = async (contactId, replyId, userId, isAdmin) => {
  * BR-A-03: Dung lượng và số lượng file upload cho mỗi Contact phải bị giới hạn.
  * BR-A-04: Attachment không được chỉnh sửa nội dung sau khi upload.
  */
-const uploadAttachment = async (contactId, userId, isAdmin, file) => {
+const uploadAttachment = async (contactId, userId, isAdminOrFeedbackedStaff, file) => {
     try {
         // BR-A-01: Kiểm tra Contact tồn tại
         const contact = await ContactModel.findById(contactId);
@@ -610,8 +639,8 @@ const uploadAttachment = async (contactId, userId, isAdmin, file) => {
             };
         }
 
-        // BR-C-05: User chỉ upload cho Contact của mình, Admin upload cho tất cả
-        if (!isAdmin) {
+        // BR-C-05: User chỉ upload cho Contact của mình, Admin và Customer Support upload cho tất cả
+        if (!isAdminOrFeedbackedStaff) {
             const contactUserId = contact.user_id?._id?.toString() || contact.user_id?.toString();
             if (contactUserId !== userId.toString()) {
                 return {
@@ -711,7 +740,7 @@ const uploadAttachment = async (contactId, userId, isAdmin, file) => {
 /**
  * Lấy danh sách Attachment của một Contact
  */
-const getAttachments = async (contactId, userId, isAdmin) => {
+const getAttachments = async (contactId, userId, isAdminOrFeedbackedStaff) => {
     try {
         const contact = await ContactModel.findById(contactId);
         if (!contact) {
@@ -721,8 +750,8 @@ const getAttachments = async (contactId, userId, isAdmin) => {
             };
         }
 
-        // BR-C-05: User chỉ xem Contact của mình, Admin xem tất cả
-        if (!isAdmin) {
+        // BR-C-05: User chỉ xem Contact của mình, Admin và Customer Support xem tất cả
+        if (!isAdminOrFeedbackedStaff) {
             const contactUserId = contact.user_id?._id?.toString() || contact.user_id?.toString();
             if (contactUserId !== userId.toString()) {
                 return {
@@ -749,9 +778,9 @@ const getAttachments = async (contactId, userId, isAdmin) => {
 };
 
 /**
- * Xóa Attachment (chỉ Admin hoặc User sở hữu Contact)
+ * Xóa Attachment (chỉ Admin, Customer Support hoặc User sở hữu Contact)
  */
-const deleteAttachment = async (attachmentId, userId, isAdmin) => {
+const deleteAttachment = async (attachmentId, userId, isAdminOrFeedbackedStaff) => {
     try {
         const attachment = await ContactAttachmentModel.findById(attachmentId);
         if (!attachment) {
@@ -769,8 +798,8 @@ const deleteAttachment = async (attachmentId, userId, isAdmin) => {
             };
         }
 
-        // BR-C-05: User chỉ xóa Attachment của Contact của mình, Admin xóa tất cả
-        if (!isAdmin) {
+        // BR-C-05: User chỉ xóa Attachment của Contact của mình, Admin và Customer Support xóa tất cả
+        if (!isAdminOrFeedbackedStaff) {
             const contactUserId = contact.user_id?._id?.toString() || contact.user_id?.toString();
             if (contactUserId !== userId.toString()) {
                 return {
