@@ -4,7 +4,7 @@ const CategoryModel = require("../models/CategoryModel");
 const InventoryTransactionModel = require("../models/InventoryTransactionModel");
 const { getEffectivePrice } = require("../utils/productPrice");
 
-// Lấy 6 sản phẩm nổi bật (bán được nhiều nhất)
+// Lấy tối đa 6 sản phẩm bán chạy nhất (chỉ từ ISSUE, không bổ sung sản phẩm khác)
 const getFeaturedProducts = async () => {
   try {
     // Aggregate từ InventoryTransaction để tính tổng số lượng ISSUE (xuất kho/bán) của mỗi sản phẩm
@@ -24,68 +24,37 @@ const getFeaturedProducts = async () => {
         $sort: { totalSold: -1 }, // Sắp xếp theo số lượng bán giảm dần
       },
       {
-        $limit: 6, // Lấy top 6
+        $limit: 6, // Lấy tối đa top 6
       },
     ]);
 
-    // Lấy danh sách product IDs
     const productIds = topSoldProducts.map((item) => item._id);
-
-    // Nếu không đủ 6 sản phẩm có transaction ISSUE, lấy thêm sản phẩm khác
-    let products = [];
-    if (productIds.length > 0) {
-      products = await ProductModel.find({
-        _id: { $in: productIds },
-        status: true, // Chỉ lấy sản phẩm đang hoạt động
-      })
-        .populate({
-          path: "category",
-          select: "name status",
-          match: { status: true }, // Chỉ lấy category đang hoạt động
-        })
-        .lean();
-
-      // Lọc bỏ các sản phẩm có category null (category đã bị ẩn)
-      products = products.filter((p) => p.category !== null);
+    if (productIds.length === 0) {
+      return {
+        status: "OK",
+        message: "Fetched featured products successfully",
+        data: [],
+      };
     }
 
-    // Nếu chưa đủ 6 sản phẩm, lấy thêm sản phẩm mới nhất
-    if (products.length < 6) {
-      const remaining = 6 - products.length;
-      const existingIds = products.map((p) => p._id);
-      const additionalProducts = await ProductModel.find({
-        _id: { $nin: existingIds },
-        status: true,
+    const products = await ProductModel.find({
+      _id: { $in: productIds },
+      status: true,
+    })
+      .populate({
+        path: "category",
+        select: "name status",
+        match: { status: true },
       })
-        .populate({
-          path: "category",
-          select: "name status",
-          match: { status: true },
-        })
-        .sort({ createdAt: -1 })
-        .limit(remaining)
-        .lean();
+      .lean();
 
-      // Lọc bỏ các sản phẩm có category null
-      const validAdditional = additionalProducts.filter((p) => p.category !== null);
-      products = [...products, ...validAdditional];
-    }
-
-    // Sắp xếp lại theo thứ tự ban đầu (top sold trước)
+    // Chỉ giữ sản phẩm có category đang hoạt động, giữ đúng thứ tự bán chạy
     const productMap = new Map(products.map((p) => [p._id.toString(), p]));
-    const sortedProducts = productIds
+    const finalProducts = productIds
       .map((id) => productMap.get(id.toString()))
-      .filter((p) => p !== undefined);
+      .filter((p) => p != null && p.category != null);
 
-    // Thêm các sản phẩm bổ sung vào cuối
-    const additionalIds = products.map((p) => p._id.toString());
-    const additional = products.filter((p) => !productIds.some((id) => id.toString() === p._id.toString()));
-    sortedProducts.push(...additional);
-
-    // Chỉ lấy 6 sản phẩm đầu tiên
-    const finalProducts = sortedProducts.slice(0, 6);
-
-    // Format: Chỉ lấy ảnh đầu tiên + giá hiệu lực (sắp hết hạn giảm 50%)
+    // Format: ảnh đầu tiên + giá hiệu lực (sắp hết hạn giảm 50%)
     const formattedProducts = finalProducts.map((product) => {
       const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
       const formatted = { ...product, price: effectivePrice, effectivePrice, isNearExpiry, originalPrice };

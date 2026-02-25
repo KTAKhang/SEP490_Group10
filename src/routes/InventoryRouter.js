@@ -2,6 +2,7 @@ const express = require("express");
 const InventoryTransactionController = require("../controller/InventoryTransactionController");
 const PreOrderStockController = require("../controller/PreOrderStockController");
 const PreOrderHarvestBatchController = require("../controller/PreOrderHarvestBatchController");
+const WarehouseStaffStatsController = require("../controller/WarehouseStaffStatsController");
 const {
   inventoryWarehouseMiddleware,
   inventoryAdminOrWarehouseMiddleware,
@@ -11,6 +12,9 @@ const {
 } = require("../middleware/inventoryMiddleware");
 
 const InventoryRouter = express.Router();
+
+// ----- Thống kê warehouse staff (cá nhân + chung kho) -----
+InventoryRouter.get("/stats/warehouse", inventoryWarehouseMiddleware, WarehouseStaffStatsController.getWarehouseStats);
 
 // ----- Lô nhập hàng trả đơn (Admin + Sales-staff tạo lô; Admin + Warehouse + Sales-staff xem) -----
 InventoryRouter.post(
