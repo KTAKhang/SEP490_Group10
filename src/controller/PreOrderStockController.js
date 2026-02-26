@@ -100,12 +100,14 @@ const createReceiveByBatch = async (req, res) => {
 
 const listReceives = async (req, res) => {
   try {
-    const { fruitTypeId, preOrderHarvestBatchId, page, limit } = req.query;
+    const { fruitTypeId, preOrderHarvestBatchId, page, limit, receivedBy } = req.query;
+    const receivedByFilter = receivedBy === "me" ? req.user._id?.toString() : receivedBy || null;
     const response = await PreOrderStockService.listReceives(
       fruitTypeId,
       page,
       limit,
-      preOrderHarvestBatchId
+      preOrderHarvestBatchId,
+      receivedByFilter
     );
     return res.status(200).json(response);
   } catch (err) {

@@ -333,24 +333,23 @@ async function createReceiveByBatch({ preOrderHarvestBatchId, quantityKg, receiv
 }
 
 /**
- * List pre-order receive history with optional filter by fruitTypeId or preOrderHarvestBatchId, pagination.
- *
- * Flow:
- * 1. Build filter from fruitTypeId, preOrderHarvestBatchId (if valid ObjectId)
- * 2. Find PreOrderReceive with populate (fruitTypeId, preOrderHarvestBatchId, receivedBy); sort by createdAt desc; skip/limit
- * 3. Return list and pagination metadata
+ * List pre-order receive history with optional filter by fruitTypeId, preOrderHarvestBatchId, receivedBy; pagination.
  *
  * @param {string} [fruitTypeId] - Optional fruit type ID to filter by
  * @param {number} [page=1] - Page number
  * @param {number} [limit=20] - Items per page
  * @param {string} [preOrderHarvestBatchId=null] - Optional batch ID to filter by
+ * @param {string} [receivedBy=null] - Optional user ID to filter by (chỉ phiếu do người này nhập). Truyền "me" tại controller = current user.
  * @returns {Promise<{ status: string, data: Array, pagination: Object }>}
  */
-async function listReceives(fruitTypeId, page = 1, limit = 20, preOrderHarvestBatchId = null) {
+async function listReceives(fruitTypeId, page = 1, limit = 20, preOrderHarvestBatchId = null, receivedBy = null) {
   const filter = {};
   if (fruitTypeId) filter.fruitTypeId = fruitTypeId;
   if (preOrderHarvestBatchId && mongoose.isValidObjectId(preOrderHarvestBatchId)) {
     filter.preOrderHarvestBatchId = preOrderHarvestBatchId;
+  }
+  if (receivedBy && mongoose.isValidObjectId(receivedBy)) {
+    filter.receivedBy = new mongoose.Types.ObjectId(receivedBy);
   }
   const skip = (Math.max(1, page) - 1) * Math.max(1, Math.min(100, limit));
   const [list, total] = await Promise.all([
