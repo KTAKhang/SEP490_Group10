@@ -374,10 +374,16 @@ const confirmCheckoutAndCreateOrder = async ({
         }
       }
       const orderId = order._id.toString();
+      let redirect_url_cod;
+      if (isMobile) {
+          redirect_url_cod = "myshopapps://create-order-success";
+        } else {
+          redirect_url_cod = "http://localhost:5173/customer/order-success";
+        }
       const response = {
         success: true,
         type: "COD",
-        redirect_url: "myshopapps://payment-success",
+        redirect_url: redirect_url_cod,
         order_id: orderId,
       };
       setImmediate(async () => {
@@ -801,7 +807,7 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
   }
 };
 
-const retryVnpayPayment = async ({ order_id, user_id,isMobile=false, ip }) => {
+const retryVnpayPayment = async ({ order_id, user_id, ip, isMobile }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -811,9 +817,16 @@ const retryVnpayPayment = async ({ order_id, user_id,isMobile=false, ip }) => {
     ======================= */
     const order = await OrderModel.findById(order_id).session(session);
     if (!order) throw new Error("Order not found");
+
     if (order.user_id.toString() !== user_id.toString()) {
       throw new Error("You do not have permission to pay for this order");
     }
+
+    /* ===== UPDATE MOBILE FLAG ===== */
+    if (typeof isMobile === "boolean") {
+      order.is_mobile = isMobile;
+    }
+
     /* =======================
        2️⃣ CHECK ORDER STATUS
     ======================= */
@@ -826,39 +839,54 @@ const retryVnpayPayment = async ({ order_id, user_id,isMobile=false, ip }) => {
     if (!order.order_status_id.equals(failedStatus._id)) {
       throw new Error("The order status is not eligible for payment retry");
     }
+
     const payment = await PaymentModel.findOne({
       order_id,
       method: "VNPAY",
       type: "PAYMENT",
     }).session(session);
+
     if (!payment) {
       throw new Error("Payment information not found");
     }
+
     if (!["FAILED"].includes(payment.status)) {
       throw new Error("Invalid payment status for retry");
     }
+
     /* ===== CHECK RETRY PER PAYMENT STATUS ===== */
     if (!order.allow_retry) {
       throw new Error("The order does not allow refunds");
     }
+
     if (!order.retry_expired_at || order.retry_expired_at < new Date()) {
       throw new Error("The order is overdue for payment");
     }
+
     order.allow_retry = false;
     order.auto_delete = false;
+
     await order.save({ session });
+
     /* =======================
        4️⃣ RESET PAYMENT
     ======================= */
     payment.status = "PENDING";
     payment.provider_txn_id = null;
     payment.provider_response = null;
+
     await payment.save({ session });
 
     /* =======================
        5️⃣ CREATE NEW VNPAY URL
     ======================= */
-    const paymentUrl = createVnpayUrl(order._id, payment.amount, isMobile, ip);
+
+    const paymentUrl = createVnpayUrl(
+      order._id,
+      payment.amount,
+      ip,
+      order.is_mobile // 👈 truyền xuống đây nếu bạn muốn xử lý return URL theo mobile/web
+    );
 
     await session.commitTransaction();
 
