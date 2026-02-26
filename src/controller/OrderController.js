@@ -1,5 +1,5 @@
 const OrderService = require("../services/OrderService");
-
+const OrderModel = require("../models/OrderModel");
 
 /* =====================================================
    CREATE ORDER (PENDING)
@@ -191,7 +191,7 @@ const cancelOrder = async (req, res) => {
 const retryVnpayPayment = async (req, res) => {
   try {
     const user_id = req.user._id;
-    const { order_id } = req.body;
+    const { order_id,isMobile } = req.body;
     if (!order_id) {
       return res.status(400).json({
         success: false,
@@ -202,7 +202,9 @@ const retryVnpayPayment = async (req, res) => {
       user_id,
       order_id,
       ip: req.ip,
+      isMobile
     });
+    
     if (!result.success) {
       return res.status(400).json(result);
     }

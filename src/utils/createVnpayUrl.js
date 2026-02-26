@@ -20,8 +20,8 @@ const createDate = () => {
 const createVnpayUrl = (
   orderId,
   amount,
-  isMobile = false,
   ipAddr = "127.0.0.1",
+  isMobile = false,
 ) => {
   const dt = new Date();
   const yyyyMMddHHmmss =
@@ -35,10 +35,11 @@ const createVnpayUrl = (
   let returnUrl;
 
   if (isMobile) {
-    returnUrl = "myshopapps://payment-success";
+    returnUrl = "http://10.0.2.2:3001/payment/vnpay/return";
   } else {
-    returnUrl = vnpConfig.returnUrl;
+    returnUrl =  vnpConfig.returnUrl;
   }
+
   const baseParams = {
     vnp_Version: "2.1.0",
     vnp_Command: "pay",

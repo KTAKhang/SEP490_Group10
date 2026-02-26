@@ -1032,3 +1032,41 @@ const uploadHomepageAssetImage = (req, res, next) => {
 };
 
 module.exports.uploadHomepageAssetImage = uploadHomepageAssetImage;
+
+const uploadChatImages = (req, res, next) => {
+  const handler = upload.array("images", 3); // max 3
+
+  handler(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({
+        status: "ERR",
+        message: err.message,
+      });
+    }
+
+    try {
+      if (req.files && req.files.length > 0) {
+        const uploads = req.files.map((file) =>
+          uploadToCloudinary(file.buffer, "chat")
+        );
+
+        const results = await Promise.all(uploads);
+
+        req.body.images = results.map((r) => r.secure_url);
+        req.body.imagePublicIds = results.map((r) => r.public_id);
+      } else {
+        req.body.images = [];
+        req.body.imagePublicIds = [];
+      }
+
+      next();
+    } catch (error) {
+      return res.status(500).json({
+        status: "ERR",
+        message: error.message,
+      });
+    }
+  });
+};
+
+module.exports.uploadChatImages = uploadChatImages;

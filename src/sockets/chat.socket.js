@@ -9,10 +9,9 @@ const { staffOnline, staffOffline, getOnlineStaffs } = require("./staffPool");
 module.exports = (io) => {
   io.on("connection", (socket) => {
     console.log("🔌 Socket connected:", socket.id);
-     socket.on("get_online_staffs", () => {
-  socket.emit("online_staffs", getOnlineStaffs());
-});
-
+    socket.on("get_online_staffs", () => {
+      socket.emit("online_staffs", getOnlineStaffs());
+    });
 
     /* ======================
        STAFF ONLINE
@@ -34,7 +33,7 @@ module.exports = (io) => {
       socket.join(roomId);
     });
 
-      /* ======================
+    /* ======================
        LEAVE ROOM
     ====================== */
     socket.on("leave_room", (roomId) => {
@@ -45,20 +44,12 @@ module.exports = (io) => {
     /* ======================
        SEND MESSAGE
     ====================== */
-    socket.on("send_message", async (data) => {
+    socket.on("send_message", ({ roomId, message }) => {
       try {
-        const { roomId, senderId, senderRole, content } = data;
-
-        const message = await ChatService.sendMessage({
-          roomId,
-          senderId,
-          senderRole,
-          content,
-        });
+        if (!roomId) return;
 
         io.to(roomId).emit("receive_message", message);
-
-        io.emit("room_updated", {
+         io.emit("room_updated", {
           _id: message.room._id,
           user: message.room.user,
           staff: message.room.staff,
@@ -71,15 +62,17 @@ module.exports = (io) => {
       }
     });
 
+ 
+
     /* ======================
        DISCONNECT
     ====================== */
-   socket.on("disconnect", () => {
-  const isStaff = staffOffline(socket.id);
+    socket.on("disconnect", () => {
+      const isStaff = staffOffline(socket.id);
 
-  if (isStaff) {
-    io.emit("online_staffs", getOnlineStaffs());
-  }
-});
+      if (isStaff) {
+        io.emit("online_staffs", getOnlineStaffs());
+      }
+    });
   });
 };
