@@ -40,6 +40,8 @@ const loginWithGoogle = async (idToken) => {
     });
 
     const payload = ticket.getPayload();
+    console.log("TOKEN AUD:", payload.aud);
+console.log("EXPECTED:", CLIENT_IDS);
     const { sub: googleId, email, name, picture } = payload;
     let user = await UserModel.findOne({
       $or: [{ googleId }, { email }],

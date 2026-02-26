@@ -801,7 +801,7 @@ const cancelOrderByCustomer = async (order_id, user_id) => {
   }
 };
 
-const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
+const retryVnpayPayment = async ({ order_id, user_id,isMobile=false, ip }) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -858,7 +858,7 @@ const retryVnpayPayment = async ({ order_id, user_id, ip }) => {
     /* =======================
        5️⃣ CREATE NEW VNPAY URL
     ======================= */
-    const paymentUrl = createVnpayUrl(order._id, payment.amount, ip);
+    const paymentUrl = createVnpayUrl(order._id, payment.amount, isMobile, ip);
 
     await session.commitTransaction();
 

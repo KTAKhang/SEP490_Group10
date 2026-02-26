@@ -191,7 +191,7 @@ const cancelOrder = async (req, res) => {
 const retryVnpayPayment = async (req, res) => {
   try {
     const user_id = req.user._id;
-    const { order_id } = req.body;
+    const { order_id,isMobile } = req.body;
     if (!order_id) {
       return res.status(400).json({
         success: false,
@@ -201,6 +201,7 @@ const retryVnpayPayment = async (req, res) => {
     const result = await OrderService.retryVnpayPayment({
       user_id,
       order_id,
+      isMobile,
       ip: req.ip,
     });
     if (!result.success) {

@@ -60,7 +60,17 @@ const getOrCreateRoom = async (userId, staffId) => {
 /**
  * Send message
  */
-const sendMessage = async ({ roomId, senderId, senderRole, content }) => {
+const sendMessage = async ({
+  roomId,
+  senderId,
+  senderRole,
+  content,
+  images = [],
+  imagePublicIds = [],
+}) => {
+  /* ======================
+     VALIDATION
+  ====================== */
   if (
     !mongoose.Types.ObjectId.isValid(roomId) ||
     !mongoose.Types.ObjectId.isValid(senderId)
@@ -72,11 +82,28 @@ const sendMessage = async ({ roomId, senderId, senderRole, content }) => {
     throw new Error("Invalid senderRole");
   }
 
+  if (!content && images.length === 0) {
+    throw new Error("Message must have content or images");
+  }
+
+  if (images.length > 3) {
+    throw new Error("Maximum 3 images allowed");
+  }
+
   const room = await ChatRoom.findById(roomId).populate(
     "user",
     "user_name avatar"
   );
+
   if (!room) throw new Error("Room not found");
+
+  /* ======================
+     DETERMINE TYPE
+  ====================== */
+  let type = "text";
+
+  if (images.length > 0 && content) type = "mixed";
+  else if (images.length > 0) type = "image";
 
   /* ======================
      1️⃣ CREATE MESSAGE
@@ -86,13 +113,25 @@ const sendMessage = async ({ roomId, senderId, senderRole, content }) => {
     sender: senderId,
     senderRole,
     content,
+    images,
+    imagePublicIds,
+    type,
   });
 
   /* ======================
      2️⃣ UPDATE ROOM
   ====================== */
+
+  // Nếu có text thì lấy text làm lastMessage
+  // Nếu chỉ có ảnh thì hiển thị "[Image]"
+  let lastMessageText = content;
+
+  if (!content && images.length > 0) {
+    lastMessageText = "📷 Image";
+  }
+
   const update = {
-    lastMessage: content,
+    lastMessage: lastMessageText,
     updatedAt: new Date(),
   };
 
@@ -117,15 +156,6 @@ const sendMessage = async ({ roomId, senderId, senderRole, content }) => {
       ],
     },
   ]);
-
-  // await NotificationService.sendToUser(senderId.toString(), {
-  //         title: "New message",
-  //         body: "You have new massage, Please check your box chat",
-  //         data: {
-  //           type: "chat",
-  //           action: "chat_message",
-  //         },
-  //       });
 
   return message;
 };
@@ -200,10 +230,20 @@ const getRoomsByStaff = async (staffId) => {
     .sort({ updatedAt: -1 });
 };
 
+/**
+ * Get staff rooms
+ */
+const getRoomsByUser = async (userId) => {
+  return ChatRoom.find({ user: userId })
+    .populate("user", "user_name avatar email")
+    .populate("staff", "user_name avatar email")
+    .sort({ updatedAt: -1 });
+};
 module.exports = {
   getOrCreateRoom,
   sendMessage,
   getMessagesByRoom,
   getRoomsByStaff,
   markAsRead,
+  getRoomsByUser
 };

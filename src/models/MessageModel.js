@@ -13,6 +13,14 @@ const messageSchema = new mongoose.Schema(
       ref: "users",
       required: true,
     },
+     images: {
+      type: [String],
+      default: [],
+    },
+    imagePublicIds: {
+      type: [String],
+      default: [],
+    },
     senderRole: {
       type: String,
       enum: ["customer", "feedbacked-staff", "admin"],
@@ -20,7 +28,6 @@ const messageSchema = new mongoose.Schema(
     },
     content: {
       type: String,
-      required: true,
     },
     isRead: {
       type: Boolean,
