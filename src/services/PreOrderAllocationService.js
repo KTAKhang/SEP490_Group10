@@ -18,6 +18,7 @@ const PreOrderModel = require("../models/PreOrderModel");
 const PreOrderAllocationModel = require("../models/PreOrderAllocationModel");
 const PreOrderStockModel = require("../models/PreOrderStockModel");
 const FruitTypeModel = require("../models/FruitTypeModel");
+const PreOrderHarvestBatchModel = require("../models/PreOrderHarvestBatchModel");
 const { triggerReadyAndNotifyForFruitType, notifyPreOrderDelayed } = require("./preorderFulfillmentLogic");
 
 /** Statuses that count toward demand (still needing stock or waiting for remaining payment). */
@@ -72,6 +73,15 @@ const getDemandByFruitType = async (query = {}) => {
   );
   const fruitMap = Object.fromEntries(fruitTypes.map((f) => [f._id.toString(), f]));
 
+  const pendingBatches = await PreOrderHarvestBatchModel.find({
+    fruitTypeId: { $in: fruitTypeIds },
+    rejectedAt: null,
+    $expr: { $lt: ["$receivedKg", "$quantityKg"] },
+  })
+    .select("fruitTypeId")
+    .lean();
+  const hasPendingReceiveBatchSet = new Set(pendingBatches.map((b) => (b.fruitTypeId?._id || b.fruitTypeId).toString()));
+
   let result = fruitTypeIds.map((id) => {
     const fid = id.toString();
     const ft = fruitMap[fid];
@@ -91,6 +101,7 @@ const getDemandByFruitType = async (query = {}) => {
       remainingKg: remaining,
       receivedKgFromPreOrderStock: receivedKg,
       fullyReceived,
+      hasPendingReceiveBatch: hasPendingReceiveBatchSet.has(fid),
     };
   });
 

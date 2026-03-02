@@ -280,7 +280,18 @@ const getOrderStatusStatsAdmin = async (req, res) => {
   try {
     const response = await OrderService.getOrderStatusCounts();
     if (response.status === "ERR") return res.status(400).json(response);
-    return res.status(200).json(response);
+
+    const groupBy = req.query.groupBy || "month";
+    const year = req.query.year != null ? req.query.year : new Date().getFullYear();
+    const revenueRefund = await OrderService.getOrderRevenueRefundStats({ groupBy, year });
+
+    return res.status(200).json({
+      ...response,
+      data: {
+        ...response.data,
+        revenueRefund,
+      },
+    });
   } catch (error) {
     return res.status(500).json({
       status: "ERR",

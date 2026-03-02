@@ -160,37 +160,43 @@ const vnpayReturn = async (req, res) => {
     const preOrderIntent =
       await PreOrderPaymentIntentModel.findById(orderIdStr).session(session);
     if (preOrderIntent) {
+      const isMobile = preOrderIntent.is_mobile === true;
+      const depositSuccessRedirect = isMobile
+        ? "myshopapps://preorder-payment-success?status=success&type=preorder_deposit"
+        : "http://localhost:5173/customer/preorder-payment-result?status=success";
+      const depositFailRedirect = isMobile
+        ? "myshopapps://preorder-payment-fail?status=failed&type=preorder_deposit"
+        : "http://localhost:5173/customer/preorder-payment-result?status=failed";
       if (responseCode === "00") {
         await PreOrderService.fulfillPaymentIntent(orderIdStr, session);
         await session.commitTransaction();
-        return res.redirect(
-          "http://localhost:5173/customer/preorder-payment-result?status=success",
-        );
+        return res.redirect(depositSuccessRedirect);
       }
       preOrderIntent.status = "FAILED";
       await preOrderIntent.save({ session });
       await session.commitTransaction();
-      return res.redirect(
-        "http://localhost:5173/customer/preorder-payment-result?status=failed",
-      );
+      return res.redirect(depositFailRedirect);
     }
 
     const remainingIntent =
       await PreOrderRemainingPaymentModel.findById(orderIdStr).session(session);
     if (remainingIntent) {
+      const isMobile = remainingIntent.is_mobile === true;
+      const remainingSuccessRedirect = isMobile
+        ? "myshopapps://preorder-payment-success?status=success&remaining=success"
+        : "http://localhost:5173/customer/my-pre-orders?remaining=success";
+      const remainingFailRedirect = isMobile
+        ? "myshopapps://preorder-payment-fail?status=failed&remaining=failed"
+        : "http://localhost:5173/customer/my-pre-orders?remaining=failed";
       if (responseCode === "00") {
         await PreOrderService.fulfillRemainingPayment(orderIdStr, session);
         await session.commitTransaction();
-        return res.redirect(
-          "http://localhost:5173/customer/my-pre-orders?remaining=success",
-        );
+        return res.redirect(remainingSuccessRedirect);
       }
       remainingIntent.status = "FAILED";
       await remainingIntent.save({ session });
       await session.commitTransaction();
-      return res.redirect(
-        "http://localhost:5173/customer/my-pre-orders?remaining=failed",
-      );
+      return res.redirect(remainingFailRedirect);
     }
 
     const orderId = new mongoose.Types.ObjectId(orderIdStr);

@@ -88,9 +88,9 @@ const createVnpayUrl = (
 
 /**
  * Pre-order VNPay URL. Uses intentId as vnp_TxnRef.
- * Same return URL; backend return handler distinguishes by PreOrderPaymentIntent lookup.
+ * When isMobile true, use same return URL as order (10.0.2.2:3001 for emulator) so callback hits backend.
  */
-const createPreOrderVnpayUrl = (intentId, amount, ipAddr = "127.0.0.1") => {
+const createPreOrderVnpayUrl = (intentId, amount, ipAddr = "127.0.0.1", isMobile = false) => {
   const dt = new Date();
   const yyyyMMddHHmmss =
     `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}` +
@@ -99,6 +99,10 @@ const createPreOrderVnpayUrl = (intentId, amount, ipAddr = "127.0.0.1") => {
   const normalizedIp = (ipAddr || "127.0.0.1").includes("::")
     ? "127.0.0.1"
     : ipAddr;
+
+  const returnUrl = isMobile
+    ? "http://10.0.2.2:3001/payment/vnpay/return"
+    : vnpConfig.returnUrl;
 
   const baseParams = {
     vnp_Version: "2.1.0",
@@ -110,7 +114,7 @@ const createPreOrderVnpayUrl = (intentId, amount, ipAddr = "127.0.0.1") => {
     vnp_OrderInfo: `Pre-order ${intentId}`,
     vnp_OrderType: "billpayment",
     vnp_Amount: amount * 100,
-    vnp_ReturnUrl: vnpConfig.returnUrl,
+    vnp_ReturnUrl: returnUrl,
     vnp_IpAddr: normalizedIp,
     vnp_CreateDate: yyyyMMddHHmmss,
   };

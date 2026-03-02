@@ -196,6 +196,13 @@ async function listBatches(filters = {}) {
     .lean();
 
   let data = list.map((b) => {
+    if (b.rejectedAt) {
+      return {
+        ...b,
+        remainingKg: Math.max(0, (b.quantityKg ?? 0) - (b.receivedKg ?? 0)),
+        status: "REJECTED",
+      };
+    }
     const receivedKg = b.receivedKg ?? 0;
     const quantityKg = b.quantityKg ?? 0;
     let s = "NOT_RECEIVED";
@@ -259,6 +266,16 @@ async function getBatchById(id) {
     .populate("harvestBatchId", "batchCode batchNumber harvestDate supplier")
     .lean();
   if (!b) return { status: "ERR", message: "Batch not found" };
+  if (b.rejectedAt) {
+    return {
+      status: "OK",
+      data: {
+        ...b,
+        remainingKg: Math.max(0, (b.quantityKg ?? 0) - (b.receivedKg ?? 0)),
+        status: "REJECTED",
+      },
+    };
+  }
   const receivedKg = b.receivedKg ?? 0;
   const quantityKg = b.quantityKg ?? 0;
   let status = "NOT_RECEIVED";
@@ -274,8 +291,46 @@ async function getBatchById(id) {
   };
 }
 
+/**
+ * Warehouse: reject a pre-order receive batch (e.g. fruit damaged, not acceptable).
+ * Sets rejectedAt = now; sets linked HarvestBatch.visibleInReceipt = false so batch is hidden from create receive batch dropdown.
+ *
+ * @param {string} id - PreOrderHarvestBatch document ID
+ * @returns {Promise<{ status: string, data: Object }>}
+ */
+async function rejectBatch(id) {
+  if (!mongoose.isValidObjectId(id)) {
+    throw new Error("Invalid batch ID");
+  }
+  const batch = await PreOrderHarvestBatchModel.findById(id).lean();
+  if (!batch) throw new Error("Pre-order receive batch not found");
+  if (batch.rejectedAt) {
+    throw new Error("This batch was already rejected.");
+  }
+  await PreOrderHarvestBatchModel.findByIdAndUpdate(id, { $set: { rejectedAt: new Date() } });
+  if (batch.harvestBatchId && mongoose.isValidObjectId(batch.harvestBatchId)) {
+    await HarvestBatchModel.findByIdAndUpdate(batch.harvestBatchId, { $set: { visibleInReceipt: false } });
+  }
+  const updated = await PreOrderHarvestBatchModel.findById(id)
+    .populate("fruitTypeId", "name")
+    .populate("supplierId", "name")
+    .populate("harvestBatchId", "batchCode batchNumber harvestDate")
+    .lean();
+  const receivedKg = updated.receivedKg ?? 0;
+  const quantityKg = updated.quantityKg ?? 0;
+  return {
+    status: "OK",
+    data: {
+      ...updated,
+      remainingKg: Math.max(0, quantityKg - receivedKg),
+      status: "REJECTED",
+    },
+  };
+}
+
 module.exports = {
   createBatch,
   listBatches,
   getBatchById,
+  rejectBatch,
 };

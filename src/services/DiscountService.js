@@ -540,7 +540,230 @@ const DiscountService = {
     },
 
     /**
-     * Get discount list with pagination and filters
+     * Get discount usage statistics for Sales Staff (excludes birthday vouchers).
+     *
+     * @param {Object} params - { startDate, endDate } ISO date strings
+     * @returns {Object} { status, data: { summary, usageByDate, topDiscounts, expiringSoon, neverUsed, byType } }
+     */
+    async getDiscountStats({ startDate, endDate }) {
+        try {
+            const start = startDate ? new Date(startDate) : new Date();
+            const end = endDate ? new Date(endDate) : new Date();
+            start.setHours(0, 0, 0, 0);
+            end.setHours(23, 59, 59, 999);
+
+            const discountFilter = { isBirthdayDiscount: { $ne: true } };
+
+            // Total discounts (non-birthday) and by status
+            const [totalDiscounts, activeCount, inactiveCount, pendingCount, expiredCount] = await Promise.all([
+                DiscountModel.countDocuments(discountFilter),
+                DiscountModel.countDocuments({ ...discountFilter, status: "APPROVED", isActive: true }),
+                DiscountModel.countDocuments({
+                    ...discountFilter,
+                    $or: [{ status: "APPROVED", isActive: false }, { status: "REJECTED" }],
+                }),
+                DiscountModel.countDocuments({ ...discountFilter, status: "PENDING" }),
+                DiscountModel.countDocuments({ ...discountFilter, status: "EXPIRED" }),
+            ]);
+
+            const byStatus = {
+                active: activeCount,
+                inactive: inactiveCount,
+                pending: pendingCount,
+                expired: expiredCount,
+            };
+
+            // Usage in date range: only for non-birthday discounts
+            const usageMatch = {
+                usedAt: { $gte: start, $lte: end },
+            };
+            const usagePipeline = [
+                { $match: usageMatch },
+                {
+                    $lookup: {
+                        from: "discounts",
+                        localField: "discountId",
+                        foreignField: "_id",
+                        as: "discount",
+                    },
+                },
+                { $unwind: "$discount" },
+                { $match: { "discount.isBirthdayDiscount": { $ne: true } } },
+            ];
+
+            const usageAgg = await DiscountUsageModel.aggregate([
+                ...usagePipeline,
+                {
+                    $group: {
+                        _id: null,
+                        totalUsed: { $sum: 1 },
+                        totalDiscountAmount: { $sum: "$discountAmount" },
+                        sumOrderValue: { $sum: "$orderValue" },
+                    },
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        totalUsed: 1,
+                        totalDiscountAmount: 1,
+                        averageOrderValue: {
+                            $cond: [
+                                { $eq: ["$totalUsed", 0] },
+                                0,
+                                { $divide: ["$sumOrderValue", "$totalUsed"] },
+                            ],
+                        },
+                    },
+                },
+            ]);
+
+            const usageResult = usageAgg[0] || {
+                totalUsed: 0,
+                totalDiscountAmount: 0,
+                averageOrderValue: 0,
+            };
+
+            // usageByDate: group by date
+            const usageByDateAgg = await DiscountUsageModel.aggregate([
+                ...usagePipeline,
+                {
+                    $group: {
+                        _id: { $dateToString: { format: "%Y-%m-%d", date: "$usedAt" } },
+                        usageCount: { $sum: 1 },
+                        discountAmount: { $sum: "$discountAmount" },
+                    },
+                },
+                { $sort: { _id: 1 } },
+                { $project: { date: "$_id", usageCount: 1, discountAmount: 1, _id: 0 } },
+            ]);
+
+            const usageByDate = usageByDateAgg.map((r) => ({
+                date: r.date,
+                usageCount: r.usageCount,
+                discountAmount: r.discountAmount,
+            }));
+
+            // topDiscounts: per discount usage in range, then sort by usageCount
+            const topPerDiscount = await DiscountUsageModel.aggregate([
+                ...usagePipeline,
+                {
+                    $group: {
+                        _id: "$discountId",
+                        usageCount: { $sum: 1 },
+                        totalDiscountAmount: { $sum: "$discountAmount" },
+                        sumOrderValue: { $sum: "$orderValue" },
+                    },
+                },
+                {
+                    $lookup: {
+                        from: "discounts",
+                        localField: "_id",
+                        foreignField: "_id",
+                        as: "discount",
+                    },
+                },
+                { $unwind: "$discount" },
+                {
+                    $project: {
+                        code: "$discount.code",
+                        name: "$discount.description",
+                        type: "percentage",
+                        usageCount: 1,
+                        totalDiscountAmount: 1,
+                        averageOrderValue: {
+                            $cond: [
+                                { $eq: ["$usageCount", 0] },
+                                0,
+                                { $divide: ["$sumOrderValue", "$usageCount"] },
+                            ],
+                        },
+                        status: "$discount.status",
+                        expiredAt: "$discount.endDate",
+                    },
+                },
+                { $sort: { usageCount: -1 } },
+                { $limit: 50 },
+            ]);
+
+            const topDiscounts = topPerDiscount.map((d) => ({
+                code: d.code || "",
+                name: d.name || "",
+                type: d.type || "percentage",
+                usageCount: d.usageCount || 0,
+                totalDiscountAmount: d.totalDiscountAmount || 0,
+                averageOrderValue: d.averageOrderValue || 0,
+                status: d.status || "",
+                expiredAt: d.expiredAt,
+            }));
+
+            // expiringSoon: endDate in next 30 days, non-birthday
+            const now = new Date();
+            const in30Days = new Date(now);
+            in30Days.setDate(in30Days.getDate() + 30);
+            const expiringSoonList = await DiscountModel.find({
+                ...discountFilter,
+                endDate: { $gte: now, $lte: in30Days },
+            })
+                .select("code description endDate usedCount")
+                .lean();
+
+            const expiringSoon = await Promise.all(
+                expiringSoonList.map(async (d) => {
+                    const usageCount = await DiscountUsageModel.countDocuments({ discountId: d._id });
+                    return {
+                        code: d.code || "",
+                        name: d.description || "",
+                        expiredAt: d.endDate,
+                        usageCount,
+                    };
+                })
+            );
+
+            // neverUsed: usedCount === 0, non-birthday
+            const neverUsedList = await DiscountModel.find({
+                ...discountFilter,
+                usedCount: 0,
+            })
+                .select("code description createdAt endDate")
+                .sort({ createdAt: -1 })
+                .limit(100)
+                .lean();
+
+            const neverUsed = neverUsedList.map((d) => ({
+                code: d.code || "",
+                name: d.description || "",
+                createdAt: d.createdAt,
+                expiredAt: d.endDate,
+            }));
+
+            // byType: schema only has percentage
+            const percentageCount = await DiscountModel.countDocuments(discountFilter);
+            const byType = { percentage: percentageCount, fixed: 0 };
+
+            const summary = {
+                totalDiscounts,
+                byStatus,
+                totalUsed: usageResult.totalUsed,
+                totalDiscountAmount: usageResult.totalDiscountAmount,
+                averageOrderValue: usageResult.averageOrderValue,
+            };
+
+            const data = {
+                summary,
+                usageByDate,
+                topDiscounts,
+                expiringSoon,
+                neverUsed,
+                byType,
+            };
+
+            return { status: "OK", data };
+        } catch (error) {
+            return { status: "ERR", message: error.message };
+        }
+    },
+
+    /**
      *
      * @param {Object} query
      * @returns {Object}

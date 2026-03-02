@@ -58,7 +58,7 @@ const CANCEL_WINDOW_HOURS = 24;
  * @param {Object} [params.receiverInfo] - Optional receiver_name, receiver_phone, receiver_address
  * @returns {Promise<{ success: boolean, paymentIntentId: string, payUrl: string, expiresAt: Date }>}
  */
-async function createPaymentIntentAndGetPayUrl({ userId, fruitTypeId, quantityKg, ip, receiverInfo }) {
+async function createPaymentIntentAndGetPayUrl({ userId, fruitTypeId, quantityKg, ip, receiverInfo, returnUrl, platform }) {
   const fruitType = await FruitTypeModel.findById(fruitTypeId).lean();
   if (!fruitType) throw new Error("Fruit type not found");
   if (!fruitType.allowPreOrder || fruitType.status !== "ACTIVE") {
@@ -74,6 +74,7 @@ async function createPaymentIntentAndGetPayUrl({ userId, fruitTypeId, quantityKg
   const depositPct = 50;
   const amount = Math.round((depositPct / 100) * fruitType.estimatedPrice * qty);
   const expiresAt = new Date(Date.now() + INTENT_EXPIRE_MINUTES * 60 * 1000);
+  const isMobile = platform === "app";
   const intentPayload = {
     userId,
     fruitTypeId,
@@ -81,6 +82,7 @@ async function createPaymentIntentAndGetPayUrl({ userId, fruitTypeId, quantityKg
     amount,
     status: "PENDING",
     expiresAt,
+    is_mobile: isMobile,
   };
   if (receiverInfo) {
     intentPayload.receiver_name = receiverInfo.receiver_name ? String(receiverInfo.receiver_name).trim() : "";
@@ -88,7 +90,7 @@ async function createPaymentIntentAndGetPayUrl({ userId, fruitTypeId, quantityKg
     intentPayload.receiver_address = receiverInfo.receiver_address ? String(receiverInfo.receiver_address).trim() : "";
   }
   const intent = await PreOrderPaymentIntentModel.create(intentPayload);
-  const payUrl = createPreOrderVnpayUrl(intent._id.toString(), amount, ip);
+  const payUrl = createPreOrderVnpayUrl(intent._id.toString(), amount, ip, isMobile);
   return { success: true, paymentIntentId: intent._id.toString(), payUrl, expiresAt: intent.expiresAt };
 }
 
@@ -244,7 +246,7 @@ const REMAINING_INTENT_EXPIRE_MINUTES = 15;
  * @param {string} ip - Client IP for VNPay
  * @returns {Promise<{ success: boolean, payUrl: string, expiresAt: Date }>}
  */
-async function createRemainingPaymentIntent(preOrderId, userId, ip) {
+async function createRemainingPaymentIntent(preOrderId, userId, ip, returnUrl, platform) {
   const po = await PreOrderModel.findOne({ _id: preOrderId, userId }).lean();
   if (!po) throw new Error("Pre-order not found");
   if (po.status !== "ALLOCATED_WAITING_PAYMENT") {
@@ -256,14 +258,16 @@ async function createRemainingPaymentIntent(preOrderId, userId, ip) {
   const remaining = Math.round(totalAmount - depositPaid);
   if (remaining <= 0) throw new Error("No remaining amount to pay");
 
+  const isMobile = platform === "app";
   const expiresAt = new Date(Date.now() + REMAINING_INTENT_EXPIRE_MINUTES * 60 * 1000);
   const doc = await PreOrderRemainingPaymentModel.create({
     preOrderId: po._id,
     amount: remaining,
     status: "PENDING",
     expiresAt,
+    is_mobile: isMobile,
   });
-  const payUrl = createPreOrderVnpayUrl(doc._id.toString(), remaining, ip);
+  const payUrl = createPreOrderVnpayUrl(doc._id.toString(), remaining, ip, isMobile);
   return { success: true, payUrl, expiresAt };
 }
 
@@ -526,6 +530,142 @@ async function simulatePreOrderImport(fruitTypeId, supplierAvailableQuantity) {
   };
 }
 
+const PREORDER_STATS_STATUSES = [
+  "WAITING_FOR_ALLOCATION",
+  "WAITING_FOR_NEXT_BATCH",
+  "ALLOCATED_WAITING_PAYMENT",
+  "READY_FOR_FULFILLMENT",
+  "COMPLETED",
+  "CANCELLED",
+  "REFUND",
+  "WAITING_FOR_PRODUCT",
+];
+
+/**
+ * Admin/Sales: get pre-order statistics for a date range.
+ * - summary: total, byStatus, totalDepositCollected, totalRemainingCollected, totalRevenue, averageOrderValue, totalQuantityKg
+ * - byDate: { date, count, revenue } per day
+ * - byFruitType: { fruitTypeId, fruitTypeName, count, totalQuantityKg, totalRevenue }
+ * - pendingPayment: { count, totalAmount } for ALLOCATED_WAITING_PAYMENT in range
+ * - cancellationRate: (CANCELLED + REFUND) / total * 100
+ *
+ * @param {{ startDate: Date, endDate: Date }} params
+ * @returns {Promise<Object>}
+ */
+async function getPreOrderStats({ startDate, endDate }) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new Error("Invalid startDate or endDate");
+  }
+
+  const matchRange = { createdAt: { $gte: start, $lte: end } };
+
+  const [orders, remainingPayments, byDateAgg, byFruitAgg] = await Promise.all([
+    PreOrderModel.find(matchRange).select("status depositPaid totalAmount quantityKg remainingPaidAt createdAt fruitTypeId").lean(),
+    PreOrderRemainingPaymentModel.find({
+      status: "SUCCESS",
+      createdAt: { $gte: start, $lte: end },
+    })
+      .select("amount createdAt")
+      .lean(),
+    PreOrderModel.aggregate([
+      { $match: matchRange },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          count: { $sum: 1 },
+          revenue: { $sum: "$depositPaid" },
+        },
+      },
+      { $sort: { _id: 1 } },
+      { $project: { date: "$_id", count: 1, revenue: 1, _id: 0 } },
+    ]),
+    PreOrderModel.aggregate([
+      { $match: matchRange },
+      {
+        $group: {
+          _id: "$fruitTypeId",
+          count: { $sum: 1 },
+          totalQuantityKg: { $sum: "$quantityKg" },
+          totalRevenue: {
+            $sum: {
+              $cond: [
+                { $ne: ["$remainingPaidAt", null] },
+                "$totalAmount",
+                "$depositPaid",
+              ],
+            },
+          },
+        },
+      },
+      { $sort: { count: -1 } },
+    ]),
+  ]);
+
+  const totalRemainingCollected = remainingPayments.reduce((s, p) => s + (p.amount || 0), 0);
+  const totalDepositCollected = orders.reduce((s, o) => s + (o.depositPaid || 0), 0);
+  const total = orders.length;
+  const byStatus = {};
+  PREORDER_STATS_STATUSES.forEach((st) => {
+    byStatus[st] = orders.filter((o) => o.status === st).length;
+  });
+  const totalRevenue = totalDepositCollected + totalRemainingCollected;
+  const totalQuantityKg = orders.reduce((s, o) => s + (o.quantityKg || 0), 0);
+  const cancelledOrRefund = (byStatus.CANCELLED || 0) + (byStatus.REFUND || 0);
+  const cancellationRate = total > 0 ? (cancelledOrRefund / total) * 100 : 0;
+
+  const pendingOrders = orders.filter((o) => o.status === "ALLOCATED_WAITING_PAYMENT");
+  const pendingPayment = {
+    count: pendingOrders.length,
+    totalAmount: pendingOrders.reduce((s, o) => s + Math.max(0, (o.totalAmount || 0) - (o.depositPaid || 0)), 0),
+  };
+
+  const revenueByDate = {};
+  remainingPayments.forEach((p) => {
+    const d = p.createdAt ? new Date(p.createdAt).toISOString().slice(0, 10) : null;
+    if (d) {
+      revenueByDate[d] = (revenueByDate[d] || 0) + (p.amount || 0);
+    }
+  });
+  const byDate = byDateAgg.map((row) => ({
+    date: row.date,
+    count: row.count,
+    revenue: (row.revenue || 0) + (revenueByDate[row.date] || 0),
+  }));
+
+  const fruitTypeIds = [...new Set(byFruitAgg.map((r) => r._id && r._id.toString()).filter(Boolean))];
+  const fruitTypes = fruitTypeIds.length
+    ? await FruitTypeModel.find({ _id: { $in: fruitTypeIds } }).select("_id name").lean()
+    : [];
+  const nameMap = Object.fromEntries(fruitTypes.map((ft) => [ft._id.toString(), ft.name || ""]));
+
+  const byFruitType = byFruitAgg.map((r) => ({
+    fruitTypeId: r._id ? r._id.toString() : "",
+    fruitTypeName: nameMap[r._id && r._id.toString()] || "",
+    count: r.count || 0,
+    totalQuantityKg: r.totalQuantityKg || 0,
+    totalRevenue: r.totalRevenue || 0,
+  }));
+
+  return {
+    summary: {
+      total,
+      byStatus,
+      totalDepositCollected,
+      totalRemainingCollected,
+      totalRevenue,
+      averageOrderValue: total > 0 ? totalRevenue / total : 0,
+      totalQuantityKg,
+      cancellationRate,
+    },
+    byDate,
+    byFruitType,
+    pendingPayment,
+    cancellationRate,
+  };
+}
+
 module.exports = {
   createPaymentIntentAndGetPayUrl,
   getMyPreOrders,
@@ -539,5 +679,6 @@ module.exports = {
   markPreOrderRefunded,
   markPreOrderCancelled,
   simulatePreOrderImport,
+  getPreOrderStats,
   CANCEL_WINDOW_HOURS,
 };

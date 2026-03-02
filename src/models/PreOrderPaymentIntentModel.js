@@ -42,6 +42,8 @@ const preOrderPaymentIntentSchema = new mongoose.Schema(
     receiver_name: { type: String, trim: true },
     receiver_phone: { type: String, trim: true },
     receiver_address: { type: String, trim: true },
+    /** True when payment was initiated from mobile app; used at VNPay return to redirect to app deep link. */
+    is_mobile: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

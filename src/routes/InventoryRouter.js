@@ -27,6 +27,11 @@ InventoryRouter.get(
   inventoryAdminOrWarehouseOrSalesStaffMiddleware,
   PreOrderHarvestBatchController.listBatches
 );
+InventoryRouter.post(
+  "/preorder-batches/:id/reject",
+  inventoryWarehouseMiddleware,
+  PreOrderHarvestBatchController.rejectBatch
+);
 InventoryRouter.get(
   "/preorder-batches/:id",
   inventoryAdminOrWarehouseOrSalesStaffMiddleware,
