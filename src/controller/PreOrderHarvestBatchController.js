@@ -60,8 +60,20 @@ const getBatchById = async (req, res) => {
   }
 };
 
+/** Warehouse: reject batch (e.g. fruit damaged). Sets rejectedAt and HarvestBatch.visibleInReceipt = false. */
+const rejectBatch = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const response = await PreOrderHarvestBatchService.rejectBatch(id);
+    return res.status(200).json(response);
+  } catch (err) {
+    return res.status(400).json({ status: "ERR", message: err.message });
+  }
+};
+
 module.exports = {
   createBatch,
   listBatches,
   getBatchById,
+  rejectBatch,
 };

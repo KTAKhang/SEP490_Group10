@@ -7,6 +7,7 @@ const { authAdminOrSalesStaffForOrderMiddleware } = require("../middleware/authM
 const { uploadFruitTypeImages } = require("../middleware/uploadMiddleware");
 
 // Admin + Sales-staff: quản lý pre-order (deposit orders, demand, fruit types, allocations)
+router.get("/stats", authAdminOrSalesStaffForOrderMiddleware, AdminPreOrderController.getPreOrderStats);
 router.get("/pre-orders", authAdminOrSalesStaffForOrderMiddleware, AdminPreOrderController.listPreOrders);
 router.get("/pre-orders/:id", authAdminOrSalesStaffForOrderMiddleware, AdminPreOrderController.getPreOrderDetail);
 router.put("/pre-orders/:id/complete", authAdminOrSalesStaffForOrderMiddleware, AdminPreOrderController.markCompleted);

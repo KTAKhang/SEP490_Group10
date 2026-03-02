@@ -31,6 +31,7 @@ const PaymentRouter = require("./PaymentRouter");
 const PreOrderRouter = require("./PreOrderRouter");
 const AdminPreOrderRouter = require("./AdminPreOrderRouter");
 const AdminReviewRouter = require("./AdminReviewRouter");
+const ExportRouter = require("./ExportRouter");
 const FeedbackedStaffDashboardRouter = require("./FeedbackedStaffDashboardRouter");
 const ChatRouter = require("./ChatRouter");
 const ShippingRouter = require("./ShippingRouter");
@@ -71,6 +72,7 @@ const routes = (app) => {
     // Note: /for-brand trong SupplierRouter dùng authAdminMiddleware (Admin only)    
     app.use("/admin/shop", ShopRouter);
     app.use("/admin/preorder", AdminPreOrderRouter);
+    app.use("/admin/export", ExportRouter);
     // Homepage Assets - Admin routes
     app.use("/api/admin/homepage-assets", (req, res, next) => {
       console.log(`🔗 HomepageAssetRouter matched: ${req.method} ${req.path}`);

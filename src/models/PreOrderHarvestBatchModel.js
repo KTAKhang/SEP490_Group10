@@ -58,6 +58,12 @@ const preOrderHarvestBatchSchema = new mongoose.Schema(
       maxlength: [500, "Ghi chú không được vượt quá 500 ký tự"],
       default: "",
     },
+    /** Warehouse từ chối nhập (trái hư, không đồng ý nhập). Set = now khi reject; null = chưa reject. */
+    rejectedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
   },
   { timestamps: true }
 );
@@ -67,6 +73,7 @@ preOrderHarvestBatchSchema.virtual("remainingKg").get(function () {
 });
 
 preOrderHarvestBatchSchema.virtual("status").get(function () {
+  if (this.rejectedAt) return "REJECTED";
   const r = this.receivedKg ?? 0;
   const q = this.quantityKg ?? 0;
   if (r <= 0) return "NOT_RECEIVED";

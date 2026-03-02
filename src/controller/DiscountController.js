@@ -133,6 +133,24 @@ const updateDiscountByAdminController = async (req, res) => {
 };
 
 /**
+ * Get discount usage statistics (SALES-STAFF). Excludes birthday vouchers.
+ * GET /api/discounts/stats?startDate=...&endDate=...
+ */
+const getDiscountStatsController = async (req, res) => {
+    try {
+        const { startDate, endDate } = req.query;
+        const response = await DiscountService.getDiscountStats({ startDate, endDate });
+        const code = response?.status === "OK" ? 200 : 400;
+        return res.status(code).json(response);
+    } catch (error) {
+        return res.status(500).json({
+            status: "ERR",
+            message: error.message,
+        });
+    }
+};
+
+/**
  * Get discount list (STAFF/ADMIN)
  * GET /api/discounts
  */
@@ -285,6 +303,7 @@ module.exports = {
     deactivateDiscountController,
     activateDiscountController,
     updateDiscountByAdminController,
+    getDiscountStatsController,
     getDiscountsController,
     getDiscountByIdController,
     getValidDiscountsForCustomerController,

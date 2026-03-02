@@ -15,6 +15,20 @@
 const PreOrderService = require("../services/PreOrderService");
 
 /**
+ * Get pre-order statistics for date range (admin/sales).
+ * Query: startDate, endDate (ISO string).
+ */
+const getPreOrderStats = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const data = await PreOrderService.getPreOrderStats({ startDate, endDate });
+    return res.status(200).json(data);
+  } catch (err) {
+    return res.status(500).json({ status: "ERR", message: err.message });
+  }
+};
+
+/**
  * List pre-orders with optional status, keyword, sort and pagination.
  * @param {Object} req - Express request (query: status, page, limit, keyword, sortBy, sortOrder)
  * @param {Object} res - Express response
@@ -84,4 +98,4 @@ const markCancel = async (req, res) => {
   }
 };
 
-module.exports = { listPreOrders, getPreOrderDetail, markCompleted, markRefund, markCancel };
+module.exports = { listPreOrders, getPreOrderDetail, getPreOrderStats, markCompleted, markRefund, markCancel };

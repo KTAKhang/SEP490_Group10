@@ -1300,6 +1300,176 @@ const getOrderStatusCounts = async () => {
     return { status: "ERR", message: error.message };
   }
 };
+
+/**
+ * Revenue/Refund/NetRevenue stats for dashboard (sales-staff).
+ * - Revenue: orders with status COMPLETED; date = status_history.changed_at when to_status = COMPLETED; amount = total_price - discount_amount + shipping_fee.
+ * - Refund: orders with status REFUND; date = status_history.changed_at when to_status = REFUND; amount = total_price - discount_amount + shipping_fee.
+ * - Supports groupBy: month (in year), quarter (Q1-Q4), year.
+ * @param {Object} options - { groupBy: 'month'|'quarter'|'year', year: number }
+ * @returns {Object} { revenue: [{label, value}], refund: [...], netRevenue: [...], totalCompletedOrders, totalRefundOrders, refundRate }
+ *   refundRate = totalRefund / (totalCompleted + totalRefund) * 100, always 0–100%
+ */
+const getOrderRevenueRefundStats = async (options = {}) => {
+  const groupBy = options.groupBy || "month";
+  const yearFilter = options.year != null ? Number(options.year) : new Date().getFullYear();
+
+  try {
+    const statuses = await OrderStatusModel.find({
+      name: { $in: [/^COMPLETED$/i, /^REFUND$/i] },
+    }).lean();
+    const completedStatus = statuses.find((s) => /^COMPLETED$/i.test(s.name));
+    const refundStatus = statuses.find((s) => /^REFUND$/i.test(s.name));
+    const completedId = completedStatus ? completedStatus._id : null;
+    const refundId = refundStatus ? refundStatus._id : null;
+
+    const buildAmountField = () => ({
+      $subtract: [
+        { $add: [{ $ifNull: ["$total_price", 0] }, { $ifNull: ["$shipping_fee", 0] }] },
+        { $ifNull: ["$discount_amount", 0] },
+      ],
+    });
+
+    const buildDateFromHistory = (statusId) => ({
+      $let: {
+        vars: {
+          filtered: {
+            $filter: {
+              input: { $ifNull: ["$status_history", []] },
+              as: "e",
+              cond: { $eq: ["$$e.to_status", statusId] },
+            },
+          },
+        },
+        in: {
+          $reduce: {
+            input: "$$filtered",
+            initialValue: null,
+            in: "$$this.changed_at",
+          },
+        },
+      },
+    });
+
+    const groupById = (dateField) => {
+      if (groupBy === "year") {
+        return { year: { $year: dateField } };
+      }
+      if (groupBy === "quarter") {
+        return {
+          year: { $year: dateField },
+          quarter: { $ceil: { $divide: [{ $month: dateField }, 3] } },
+        };
+      }
+      return {
+        year: { $year: dateField },
+        month: { $month: dateField },
+      };
+    };
+
+    const yearMatch = (dateField) =>
+      groupBy === "year"
+        ? {}
+        : { $expr: { $eq: [{ $year: `$${dateField}` }, yearFilter] } };
+
+    const toLabel = (doc) => {
+      const y = doc._id.year;
+      if (groupBy === "year") return String(y);
+      if (groupBy === "quarter") return `Q${doc._id.quarter}/${y}`;
+      return `${y}-${String(doc._id.month).padStart(2, "0")}`;
+    };
+
+    const emptyResult = () => ({
+      revenue: [],
+      refund: [],
+      netRevenue: [],
+      totalCompletedOrders: 0,
+      totalRefundOrders: 0,
+      refundRate: 0,
+    });
+
+    if (!completedId || !refundId) {
+      return emptyResult();
+    }
+
+    const revenuePipeline = [
+      { $match: { order_status_id: completedId } },
+      {
+        $addFields: {
+          completedAt: buildDateFromHistory(completedId),
+          amount: buildAmountField(),
+        },
+      },
+      { $match: { completedAt: { $ne: null } } },
+      ...(Object.keys(yearMatch("completedAt")).length
+        ? [{ $match: yearMatch("completedAt") }]
+        : []),
+      { $group: { _id: groupById("$completedAt"), revenue: { $sum: "$amount" }, count: { $sum: 1 } } },
+      { $sort: { "_id.year": 1, "_id.quarter": 1, "_id.month": 1 } },
+      { $project: { label: { $literal: null }, value: "$revenue", _id: 1 } },
+    ];
+
+    const refundPipeline = [
+      { $match: { order_status_id: refundId } },
+      {
+        $addFields: {
+          refundedAt: buildDateFromHistory(refundId),
+          amount: buildAmountField(),
+        },
+      },
+      { $match: { refundedAt: { $ne: null } } },
+      ...(Object.keys(yearMatch("refundedAt")).length
+        ? [{ $match: yearMatch("refundedAt") }]
+        : []),
+      { $group: { _id: groupById("$refundedAt"), refund: { $sum: "$amount" }, count: { $sum: 1 } } },
+      { $sort: { "_id.year": 1, "_id.quarter": 1, "_id.month": 1 } },
+      { $project: { label: { $literal: null }, value: "$refund", _id: 1 } },
+    ];
+
+    const [revenueDocs, refundDocs, totalCompleted, totalRefund] = await Promise.all([
+      OrderModel.aggregate(revenuePipeline),
+      OrderModel.aggregate(refundPipeline),
+      OrderModel.countDocuments({ order_status_id: completedId }),
+      OrderModel.countDocuments({ order_status_id: refundId }),
+    ]);
+
+    const revenue = revenueDocs.map((d) => ({ label: toLabel(d), value: d.value || 0 }));
+    const refund = refundDocs.map((d) => ({ label: toLabel(d), value: d.value || 0 }));
+
+    const labelSet = new Set([...revenue.map((r) => r.label), ...refund.map((r) => r.label)]);
+    const labels = Array.from(labelSet).sort();
+    const revenueByLabel = new Map(revenue.map((r) => [r.label, r.value]));
+    const refundByLabel = new Map(refund.map((r) => [r.label, r.value]));
+    const netRevenue = labels.map((label) => ({
+      label,
+      value: (revenueByLabel.get(label) || 0) - (refundByLabel.get(label) || 0),
+    }));
+
+    const refundRate =
+      totalCompleted + totalRefund > 0
+        ? Math.round((totalRefund / (totalCompleted + totalRefund)) * 10000) / 100
+        : 0;
+
+    return {
+      revenue,
+      refund,
+      netRevenue,
+      totalCompletedOrders: totalCompleted,
+      totalRefundOrders: totalRefund,
+      refundRate,
+    };
+  } catch (err) {
+    return {
+      revenue: [],
+      refund: [],
+      netRevenue: [],
+      totalCompletedOrders: 0,
+      totalRefundOrders: 0,
+      refundRate: 0,
+    };
+  }
+};
+
 /**
  * Lấy danh sách log thay đổi trạng thái đơn hàng từ order.status_history (filter, search, sort, pagination).
  * Dùng cho admin/sales-staff xem "nhân viên nào đã cập nhật đơn".
@@ -1461,5 +1631,6 @@ module.exports = {
   getOrdersForAdmin,
   getOrderDetailForAdmin,
   getOrderStatusCounts,
+  getOrderRevenueRefundStats,
   getOrderStatusLogs,
 };

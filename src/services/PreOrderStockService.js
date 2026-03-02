@@ -252,6 +252,9 @@ async function createReceiveByBatch({ preOrderHarvestBatchId, quantityKg, receiv
   }
   const batch = await PreOrderHarvestBatchModel.findById(preOrderHarvestBatchId).lean();
   if (!batch) throw new Error("Pre-order receive batch not found");
+  if (batch.rejectedAt) {
+    throw new Error("This batch was rejected by warehouse and cannot be received.");
+  }
   const fruitTypeId = batch.fruitTypeId?._id || batch.fruitTypeId;
   const fruitTypeIdStr = fruitTypeId.toString();
 

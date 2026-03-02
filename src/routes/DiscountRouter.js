@@ -24,6 +24,7 @@ const {
     updateDiscountByAdminController,
     getDiscountsController,
     getDiscountByIdController,
+    getDiscountStatsController,
     getValidDiscountsForCustomerController,
     validateDiscountCodeController,
     applyDiscountCodeController,
@@ -34,6 +35,9 @@ const {
 // ===== SALES-STAFF ROUTES =====
 // Create discount code 
 router.post("/", authSalesStaffMiddleware, createDiscountController);
+
+// Get discount stats (sales-staff only). Must be before /:discountId
+router.get("/stats", authSalesStaffMiddleware, getDiscountStatsController);
 
 // Update discount code 
 router.put("/:discountId", authSalesStaffMiddleware, updateDiscountController);
