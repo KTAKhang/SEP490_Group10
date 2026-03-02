@@ -376,9 +376,9 @@ const confirmCheckoutAndCreateOrder = async ({
       const orderId = order._id.toString();
       let redirect_url_cod;
       if (isMobile) {
-          redirect_url_cod = "myshopapps://create-order-success";
+          redirect_url_cod = `myshopapps://create-order-success?orderId=${orderId}`;
         } else {
-          redirect_url_cod = "http://localhost:5173/customer/order-success";
+          redirect_url_cod = `http://localhost:5173/customer/order-success?orderId=${orderId}`;
         }
       const response = {
         success: true,
