@@ -522,7 +522,7 @@ const getReceiptHistory = async (filters = {}) => {
   try {
     const {
       page = 1,
-      limit = 20,
+      limit = 4,
       productId,
       createdBy,
       startDate,
@@ -534,7 +534,7 @@ const getReceiptHistory = async (filters = {}) => {
 
 
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 4));
     const skip = (pageNum - 1) * limitNum;
 
 
@@ -642,7 +642,7 @@ const getTransactionHistory = async (filters = {}) => {
   try {
     const {
       page = 1,
-      limit = 20,
+      limit = 4,
       type, // "RECEIPT" | "ISSUE" | "RESERVE" | "RELEASE" | "ADJUST"
       productId,
       createdBy,
@@ -655,7 +655,7 @@ const getTransactionHistory = async (filters = {}) => {
 
 
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 4));
     const skip = (pageNum - 1) * limitNum;
 
 

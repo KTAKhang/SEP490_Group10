@@ -5,6 +5,20 @@ const SupplierModel = require("../models/SupplierModel");
 const cloudinary = require("../config/cloudinaryConfig");
 const { getTodayInVietnam, formatDateVN, calculateDaysBetween } = require("../utils/dateVN");
 const { getEffectivePrice } = require("../utils/productPrice");
+
+/** Giá bán: > 0 và phải là bội của 1000. Giá nhập: >= 0 (không bắt buộc bội 1000). */
+function validatePriceStep(value, isSellingPrice) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return { valid: false, message: isSellingPrice ? "Giá bán không hợp lệ" : "Giá nhập không hợp lệ" };
+  if (isSellingPrice) {
+    if (num <= 0) return { valid: false, message: "Giá bán phải lớn hơn 0" };
+    if (num % 1000 !== 0) return { valid: false, message: "Giá bán phải là bội của 1000 (ví dụ: 1000, 20000, 21000)" };
+  } else {
+    if (num < 0) return { valid: false, message: "Giá nhập phải lớn hơn hoặc bằng 0" };
+  }
+  return { valid: true };
+}
+
 const createProduct = async (payload = {}) => {
   try {
     const { name, short_desc, price, plannedQuantity, category, images, imagePublicIds, brand, detail_desc, status } =
@@ -12,9 +26,8 @@ const createProduct = async (payload = {}) => {
     if (!name || !name.toString().trim()) return { status: "ERR", message: "Product name is required" };
     const nameStr = name.toString().trim();
     if (nameStr.length > 200) return { status: "ERR", message: "Product name must be at most 200 characters" };
-    if (price === undefined || price === null || Number.isNaN(Number(price)) || Number(price) < 0) {
-      return { status: "ERR", message: "Invalid product price" };
-    }
+    const priceCheck = validatePriceStep(price, true);
+    if (!priceCheck.valid) return { status: "ERR", message: priceCheck.message };
     const plannedNum = Number(plannedQuantity);
     if (plannedQuantity === undefined || plannedQuantity === null || Number.isNaN(plannedNum) || plannedNum < 0) {
       return { status: "ERR", message: "Invalid plannedQuantity value" };
@@ -26,9 +39,11 @@ const createProduct = async (payload = {}) => {
     if (!mongoose.Types.ObjectId.isValid(category)) {
       return { status: "ERR", message: "Invalid category ID" };
     }
-    const shortDescStr = (short_desc ?? "").toString();
+    const shortDescStr = (short_desc ?? "").toString().trim();
+    if (!shortDescStr) return { status: "ERR", message: "Short description is required and cannot be empty" };
     if (shortDescStr.length > 200) return { status: "ERR", message: "Short description (short_desc) must be at most 200 characters" };
-    const detailDescStr = (detail_desc ?? "").toString();
+    const detailDescStr = (detail_desc ?? "").toString().trim();
+    if (!detailDescStr) return { status: "ERR", message: "Detailed description is required and cannot be empty" };
     if (detailDescStr.length > 1000) return { status: "ERR", message: "Detail description (detail_desc) must be at most 1000 characters" };
     // ✅ Validate brand: bắt buộc phải có (không cho phép null/empty)
     if (!brand || !brand.toString().trim()) {
@@ -64,9 +79,8 @@ const createProduct = async (payload = {}) => {
     let purchasePrice = 0;
     if (payload.purchasePrice !== undefined) {
       purchasePrice = Number(payload.purchasePrice) || 0;
-      if (purchasePrice < 0) {
-        return { status: "ERR", message: "Purchase price must be greater than or equal to 0" };
-      }
+      const purchaseCheck = validatePriceStep(purchasePrice, false);
+      if (!purchaseCheck.valid) return { status: "ERR", message: purchaseCheck.message };
     } else {
       // Nếu không có trong payload, thử lấy từ Supplier.purchaseCosts (sẽ được set sau khi tạo product)
       // Hoặc có thể để mặc định 0, QC Staff sẽ update sau
@@ -87,10 +101,13 @@ const createProduct = async (payload = {}) => {
     }
 
 
-    // ✅ Validate ảnh: max 10 và length khớp (giống updateProductAdmin)
+    // ✅ Validate ảnh: ít nhất 1 hình, tối đa 10 và length khớp (giống updateProductAdmin)
     const newImages = Array.isArray(images) ? images : [];
     const newImagePublicIds = Array.isArray(imagePublicIds) ? imagePublicIds : [];
-   
+
+    if (newImages.length < 1) {
+      return { status: "ERR", message: "Product must have at least 1 image" };
+    }
     if (newImages.length > 10) {
       return { status: "ERR", message: "Number of images must not exceed 10" };
     }
@@ -104,7 +121,7 @@ const createProduct = async (payload = {}) => {
 
     const product = new ProductModel({
       name: nameStr,
-      short_desc: (short_desc ?? "").toString(),
+      short_desc: shortDescStr,
       price: Number(price),
       purchasePrice: purchasePrice, // ✅ Giá nhập hàng
       plannedQuantity: Number(plannedQuantity),
@@ -113,7 +130,7 @@ const createProduct = async (payload = {}) => {
       imagePublicIds: newImagePublicIds,
       brand: normalizedBrand,
       supplier: supplierDoc._id, // ✅ Liên kết đến Supplier
-      detail_desc: (detail_desc ?? "").toString(),
+      detail_desc: detailDescStr,
       status: status ?? true,
     });
 
@@ -153,7 +170,7 @@ const getProducts = async (filters = {}) => {
   try {
     const {
       page = 1,
-      limit = 20,
+      limit = 4,
       search = "",
       category,
       status,
@@ -165,7 +182,7 @@ const getProducts = async (filters = {}) => {
 
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 4));
     if (pageNum > 10000) return { status: "ERR", message: "Invalid page (max 10000)" };
     const skip = (pageNum - 1) * limitNum;
 
@@ -307,13 +324,15 @@ const updateProductAdmin = async (id, payload = {}) => {
 
 
     if (payload.short_desc !== undefined) {
-      const shortDesc = (payload.short_desc ?? "").toString();
+      const shortDesc = (payload.short_desc ?? "").toString().trim();
+      if (!shortDesc) return { status: "ERR", message: "Short description is required and cannot be empty" };
       if (shortDesc.length > 200) return { status: "ERR", message: "Short description (short_desc) must be at most 200 characters" };
       product.short_desc = shortDesc;
     }
     if (payload.price !== undefined) {
       const p = Number(payload.price);
-      if (Number.isNaN(p) || p < 0) return { status: "ERR", message: "Invalid product price" };
+      const priceCheck = validatePriceStep(p, true);
+      if (!priceCheck.valid) return { status: "ERR", message: priceCheck.message };
       product.price = p;
     }
 
@@ -321,9 +340,8 @@ const updateProductAdmin = async (id, payload = {}) => {
     // ✅ Xử lý purchasePrice
     if (payload.purchasePrice !== undefined) {
       const purchasePrice = Number(payload.purchasePrice);
-      if (Number.isNaN(purchasePrice) || purchasePrice < 0) {
-        return { status: "ERR", message: "Purchase price must be greater than or equal to 0" };
-      }
+      const purchaseCheck = validatePriceStep(purchasePrice, false);
+      if (!purchaseCheck.valid) return { status: "ERR", message: purchaseCheck.message };
       product.purchasePrice = purchasePrice;
 
 
@@ -433,7 +451,11 @@ const updateProductAdmin = async (id, payload = {}) => {
     if (payload.images !== undefined || payload.imagePublicIds !== undefined) {
       const newImages = Array.isArray(payload.images) ? payload.images : [];
       const newImagePublicIds = Array.isArray(payload.imagePublicIds) ? payload.imagePublicIds : [];
-     
+
+      // ✅ Không cho phép để trống ảnh: nếu đã xóa ảnh trước đó thì phải thêm ảnh mới
+      if (newImages.length < 1) {
+        return { status: "ERR", message: "Product must have at least 1 image. If you removed images, please add new ones." };
+      }
       // ✅ Validate max 10 ảnh và length khớp trước khi set vào product
       if (newImages.length > 10) {
         return { status: "ERR", message: "Number of images must not exceed 10" };
@@ -444,7 +466,7 @@ const updateProductAdmin = async (id, payload = {}) => {
       if (newImages.length !== newImagePublicIds.length) {
         return { status: "ERR", message: "The number of images and imagePublicIds must match" };
       }
-     
+
       const oldImagePublicIds = Array.isArray(product.imagePublicIds) ? product.imagePublicIds : [];
      
       // Tìm ảnh cũ cần xóa (không còn trong danh sách mới) - lưu lại để xóa sau
@@ -456,7 +478,8 @@ const updateProductAdmin = async (id, payload = {}) => {
     }
    
     if (payload.detail_desc !== undefined) {
-      const detailDesc = (payload.detail_desc ?? "").toString();
+      const detailDesc = (payload.detail_desc ?? "").toString().trim();
+      if (!detailDesc) return { status: "ERR", message: "Detailed description is required and cannot be empty" };
       if (detailDesc.length > 1000) return { status: "ERR", message: "Detail description (detail_desc) must be at most 1000 characters" };
       product.detail_desc = detailDesc;
     }
@@ -490,6 +513,22 @@ const updateProductAdmin = async (id, payload = {}) => {
       if (duplicate) {
         return { status: "ERR", message: "Product name with this brand already exists" };
       }
+    }
+
+    // ✅ Bắt buộc có ít nhất 1 ảnh trước khi lưu (kể cả khi client không gửi trường images trong request)
+    const finalImages = Array.isArray(product.images) ? product.images : [];
+    if (finalImages.length < 1) {
+      return { status: "ERR", message: "Product must have at least 1 image. If you removed images, please add new ones." };
+    }
+
+    // ✅ Bắt buộc Short description và Detailed description không được trống
+    const finalShortDesc = (product.short_desc != null && product.short_desc !== undefined) ? String(product.short_desc).trim() : "";
+    const finalDetailDesc = (product.detail_desc != null && product.detail_desc !== undefined) ? String(product.detail_desc).trim() : "";
+    if (!finalShortDesc) {
+      return { status: "ERR", message: "Short description is required and cannot be empty." };
+    }
+    if (!finalDetailDesc) {
+      return { status: "ERR", message: "Detailed description is required and cannot be empty." };
     }
 
     // ✅ Save product trước

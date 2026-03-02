@@ -190,13 +190,6 @@ const updateHarvestBatch = async (harvestBatchId, payload = {}) => {
     }
 
 
-    // Không cho sửa nếu đã nhập kho (receivedQuantity > 0)
-    if (harvestBatch.receivedQuantity > 0) {
-      return {
-        status: "ERR",
-        message: "Cannot edit a harvest batch that has already been received (receivedQuantity > 0)",
-      };
-    }
 
 
     // Whitelist fields có thể sửa
@@ -357,7 +350,7 @@ const getHarvestBatches = async (filters = {}) => {
   try {
     const {
       page = 1,
-      limit = 20,
+      limit = 4,
       search = "",
       supplierId,
       productId,
@@ -380,7 +373,7 @@ const getHarvestBatches = async (filters = {}) => {
 
 
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 4));
     const skip = (pageNum - 1) * limitNum;
 
 

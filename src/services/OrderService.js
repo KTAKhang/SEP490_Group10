@@ -931,7 +931,7 @@ const getOrdersByUser = async (user_id, filters = {}) => {
 
     const {
       page = 1,
-      limit = 10,
+      limit = 4,
       search = "",
       status_name,
       status_names,
@@ -940,7 +940,7 @@ const getOrdersByUser = async (user_id, filters = {}) => {
     } = filters;
 
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 10));
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 4));
     const skip = (pageNum - 1) * limitNum;
 
     const query = { user_id: new mongoose.Types.ObjectId(user_id) };
@@ -1104,7 +1104,7 @@ const getOrdersForAdmin = async (filters = {}) => {
   try {
     const {
       page = 1,
-      limit = 5,
+      limit = 4,
       search = "",
       status_names,
       payment_method,
@@ -1114,7 +1114,7 @@ const getOrdersForAdmin = async (filters = {}) => {
     } = filters;
 
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 4));
     const skip = (pageNum - 1) * limitNum;
 
     const query = {};
@@ -1320,10 +1320,10 @@ const getOrderStatusLogs = async (filters = {}) => {
       sortBy = "changed_at",
       sortOrder = "desc",
       page = 1,
-      limit = 20,
+      limit = 4,
     } = filters;
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 4));
     const skip = (pageNum - 1) * limitNum;
 
     const matchStage = {};

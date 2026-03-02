@@ -11,6 +11,9 @@ function validatePhone(phoneStr) {
     return { valid: true };
   }
   const s = phoneStr.toString().trim();
+  if (s.charAt(0) !== "0") {
+    return { valid: false, message: "Phone numbers must begin with the number 0." };
+  }
   if (!/^[0-9+\-\s()]+$/.test(s)) {
     return { valid: false, message: "Phone number can only contain digits, spaces, and + - ( )" };
   }
@@ -360,7 +363,7 @@ const getSuppliers = async (filters = {}) => {
   try {
     const {
       page = 1,
-      limit = 20,
+      limit = 4,
       search = "",
       type,
       cooperationStatus,
@@ -382,7 +385,7 @@ const getSuppliers = async (filters = {}) => {
 
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 4));
     if (pageNum > 10000) {
       return { status: "ERR", message: "Invalid page (max 10000)" };
     }
