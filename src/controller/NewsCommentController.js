@@ -25,7 +25,7 @@ const getComments = async (req, res) => {
   try {
     const { newsId } = req.params;
     const { parent_id } = req.query; // null để lấy comment gốc, hoặc ID để lấy reply
-    const isAdmin = req.user?.role_name === "admin";
+    const isAdmin = req.user?.role_name === "admin" || req.user?.role_name === "feedbacked-staff";
     const userId = req.user?._id || null;
 
     // Xử lý parent_id: "null" string hoặc null → null, còn lại → giữ nguyên
@@ -50,7 +50,7 @@ const updateComment = async (req, res) => {
     const { id } = req.params;
     const { content } = req.body;
     const userId = req.user._id;
-    const isAdmin = req.user.role_name === "admin";
+    const isAdmin = req.user.role_name === "admin" || req.user.role_name === "feedbacked-staff";
 
     if (!content) {
       return res.status(400).json({
@@ -74,7 +74,7 @@ const deleteComment = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user._id;
-    const isAdmin = req.user.role_name === "admin";
+    const isAdmin = req.user.role_name === "admin" || req.user.role_name === "feedbacked-staff";
 
     const response = await NewsCommentService.deleteComment(id, userId, isAdmin);
     if (response.status === "ERR") return res.status(400).json(response);

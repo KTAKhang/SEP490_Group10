@@ -4,7 +4,6 @@ const { Readable } = require("stream");
 const sharp = require("sharp");
 const CategoryModel = require("../models/CategoryModel");
 const ProductModel = require("../models/ProductModel");
-const FruitBasketModel = require("../models/FruitBasketModel");
 const FruitTypeModel = require("../models/FruitTypeModel");
 const ReviewModel = require("../models/ReviewModel");
 
@@ -192,22 +191,22 @@ const uploadProductImages = (req, res, next) => {
                 }
             }
             
-            // Lấy danh sách ảnh cũ từ body (nếu frontend gửi - ưu tiên hơn DB)
+            // Lấy danh sách ảnh cũ từ body (nếu frontend gửi - ưu tiên hơn DB). Gửi [] = "không giữ ảnh cũ".
             let existingImages = [];
             let existingImagePublicIds = [];
             
             // Parse existingImages và existingImagePublicIds từ body (có thể là JSON string hoặc array)
-            if (req.body.existingImages) {
+            if (req.body.existingImages !== undefined) {
                 try {
-                    existingImages = typeof req.body.existingImages === 'string' 
-                        ? JSON.parse(req.body.existingImages) 
+                    existingImages = typeof req.body.existingImages === 'string'
+                        ? JSON.parse(req.body.existingImages)
                         : req.body.existingImages;
                 } catch (e) {
                     existingImages = Array.isArray(req.body.existingImages) ? req.body.existingImages : [];
                 }
+                existingImages = Array.isArray(existingImages) ? existingImages : [];
             }
-            
-            if (req.body.existingImagePublicIds) {
+            if (req.body.existingImagePublicIds !== undefined) {
                 try {
                     existingImagePublicIds = typeof req.body.existingImagePublicIds === 'string'
                         ? JSON.parse(req.body.existingImagePublicIds)
@@ -215,14 +214,14 @@ const uploadProductImages = (req, res, next) => {
                 } catch (e) {
                     existingImagePublicIds = Array.isArray(req.body.existingImagePublicIds) ? req.body.existingImagePublicIds : [];
                 }
+                existingImagePublicIds = Array.isArray(existingImagePublicIds) ? existingImagePublicIds : [];
             }
-            
-            // Nếu frontend không gửi, dùng ảnh cũ từ database
-            if (existingImages.length === 0 && oldImagesFromDB.length > 0) {
-                existingImages = oldImagesFromDB;
-            }
-            if (existingImagePublicIds.length === 0 && oldImagePublicIdsFromDB.length > 0) {
-                existingImagePublicIds = oldImagePublicIdsFromDB;
+            // Chỉ dùng ảnh cũ từ DB khi frontend KHÔNG gửi existingImages/existingImagePublicIds (tương thích ngược).
+            // Nếu frontend gửi rõ (kể cả mảng rỗng [] = "xóa hết ảnh cũ, chỉ giữ ảnh mới") thì không ghi đè bằng DB.
+            const didSendExisting = req.body.existingImages !== undefined || req.body.existingImagePublicIds !== undefined;
+            if (!didSendExisting && req.params && req.params.id) {
+                if (oldImagesFromDB.length > 0) existingImages = oldImagesFromDB;
+                if (oldImagePublicIdsFromDB.length > 0) existingImagePublicIds = oldImagePublicIdsFromDB;
             }
             
             // ✅ Validate: only allow image files (reject doc, pdf, etc.) — single 400 response, clear message
@@ -300,136 +299,6 @@ const uploadProductImages = (req, res, next) => {
 };
 
 module.exports.uploadProductImages = uploadProductImages;
-
-// Middleware: Upload nhiều ảnh giỏ trái cây lên Cloudinary
-const uploadFruitBasketImages = (req, res, next) => {
-    const handler = upload.array("images", 10);
-    handler(req, res, async (err) => {
-        if (err) {
-            console.error(`❌ Multer error:`, err);
-            return res.status(400).json({ status: "ERR", message: err.message });
-        }
-        try {
-            let oldImagesFromDB = [];
-            let oldImagePublicIdsFromDB = [];
-
-            if (req.params && req.params.id) {
-                try {
-                    const basket = await FruitBasketModel.findById(req.params.id).select("images imagePublicIds");
-                    if (basket) {
-                        oldImagesFromDB = Array.isArray(basket.images) ? basket.images : [];
-                        oldImagePublicIdsFromDB = Array.isArray(basket.imagePublicIds) ? basket.imagePublicIds : [];
-                    }
-                } catch (err) {
-                    console.warn("Không thể lấy ảnh cũ từ database:", err.message);
-                }
-            }
-
-            let existingImages = [];
-            let existingImagePublicIds = [];
-
-            if (req.body.existingImages) {
-                try {
-                    existingImages = typeof req.body.existingImages === "string"
-                        ? JSON.parse(req.body.existingImages)
-                        : req.body.existingImages;
-                } catch (e) {
-                    existingImages = Array.isArray(req.body.existingImages) ? req.body.existingImages : [];
-                }
-            }
-
-            if (req.body.existingImagePublicIds) {
-                try {
-                    existingImagePublicIds = typeof req.body.existingImagePublicIds === "string"
-                        ? JSON.parse(req.body.existingImagePublicIds)
-                        : req.body.existingImagePublicIds;
-                } catch (e) {
-                    existingImagePublicIds = Array.isArray(req.body.existingImagePublicIds) ? req.body.existingImagePublicIds : [];
-                }
-            }
-
-            if (existingImages.length === 0 && oldImagesFromDB.length > 0) {
-                existingImages = oldImagesFromDB;
-            }
-            if (existingImagePublicIds.length === 0 && oldImagePublicIdsFromDB.length > 0) {
-                existingImagePublicIds = oldImagePublicIdsFromDB;
-            }
-
-            if (Array.isArray(req.files) && req.files.length > 0) {
-                const uploads = req.files.map((file) =>
-                    uploadToCloudinary(file.buffer, "fruit-baskets")
-                );
-
-                const results = await Promise.all(uploads);
-                const newImages = results.map((r) => r.secure_url);
-                const newImagePublicIds = results.map((r) => r.public_id);
-
-                const finalImages = [...existingImages, ...newImages];
-                const finalImagePublicIds = [...existingImagePublicIds, ...newImagePublicIds];
-
-                const allOldImagePublicIds = oldImagePublicIdsFromDB.length > 0
-                    ? oldImagePublicIdsFromDB
-                    : existingImagePublicIds;
-
-                if (allOldImagePublicIds.length > 0) {
-                    const imagesToDelete = allOldImagePublicIds.filter(
-                        oldId => !finalImagePublicIds.includes(oldId)
-                    );
-
-                    if (imagesToDelete.length > 0) {
-                        Promise.all(
-                            imagesToDelete.map(publicId =>
-                                cloudinary.uploader.destroy(publicId).catch(err => {
-                                    console.warn(`Không thể xóa ảnh ${publicId} trên Cloudinary:`, err.message);
-                                })
-                            )
-                        ).catch(err => {
-                            console.warn("Lỗi khi xóa ảnh cũ:", err.message);
-                        });
-                    }
-                }
-
-                req.body.images = finalImages;
-                req.body.imagePublicIds = finalImagePublicIds;
-            } else {
-                if (req.body.images !== undefined || req.body.imagePublicIds !== undefined) {
-                    let imagesArray = req.body.images;
-                    let imagePublicIdsArray = req.body.imagePublicIds;
-
-                    if (typeof imagesArray === "string") {
-                        try {
-                            imagesArray = JSON.parse(imagesArray);
-                        } catch (e) {
-                            imagesArray = [];
-                        }
-                    }
-
-                    if (typeof imagePublicIdsArray === "string") {
-                        try {
-                            imagePublicIdsArray = JSON.parse(imagePublicIdsArray);
-                        } catch (e) {
-                            imagePublicIdsArray = [];
-                        }
-                    }
-
-                    req.body.images = Array.isArray(imagesArray) ? imagesArray : [];
-                    req.body.imagePublicIds = Array.isArray(imagePublicIdsArray) ? imagePublicIdsArray : [];
-                } else {
-                    req.body.images = existingImages;
-                    req.body.imagePublicIds = existingImagePublicIds;
-                }
-            }
-
-            return next();
-        } catch (error) {
-            console.error(`❌ Upload middleware error:`, error);
-            console.error(`❌ Error stack:`, error.stack);
-            return res.status(500).json({ status: "ERR", message: error.message });
-        }
-    });
-};
-
-module.exports.uploadFruitBasketImages = uploadFruitBasketImages;
 
 // Middleware: Upload nhiều ảnh review lên Cloudinary
 const uploadReviewImages = (req, res, next) => {

@@ -47,10 +47,10 @@ const createCategory = async ({ name, description, image, imagePublicId, status 
 };
 
 
-const getCategories = async ({ page = 1, limit = 20, search = "", status, sortBy = "createdAt", sortOrder = "desc" } = {}) => {
+const getCategories = async ({ page = 1, limit = 4, search = "", status, sortBy = "createdAt", sortOrder = "desc" } = {}) => {
   try {
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 4));
     if (pageNum > 10000) return { status: "ERR", message: "Invalid page (max 10000)" };
     const skip = (pageNum - 1) * limitNum;
 

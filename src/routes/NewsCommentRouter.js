@@ -1,12 +1,12 @@
 const express = require("express");
 const NewsCommentController = require("../controller/NewsCommentController");
 const { newsAuthMiddleware, newsOptionalAuthMiddleware } = require("../middleware/newsMiddleware");
-const { authAdminMiddleware } = require("../middleware/authMiddleware");
+const { authAdminOrFeedbackedStaffMiddleware } = require("../middleware/authMiddleware");
 
 const NewsCommentRouter = express.Router();
 
-// Admin endpoints (chỉ admin) - Phải đặt TRƯỚC route /:id để tránh conflict
-NewsCommentRouter.put("/:id/moderate", authAdminMiddleware, NewsCommentController.moderateComment);
+// Admin + feedbacked-staff: moderation comment - Phải đặt TRƯỚC route /:id để tránh conflict
+NewsCommentRouter.put("/:id/moderate", authAdminOrFeedbackedStaffMiddleware, NewsCommentController.moderateComment);
 
 // Public endpoints (có thể xem comment mà không cần đăng nhập)
 NewsCommentRouter.get("/:newsId", newsOptionalAuthMiddleware, NewsCommentController.getComments);
