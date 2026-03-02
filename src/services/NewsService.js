@@ -508,7 +508,8 @@ const getNewsById = async (id, userId = null, ipAddress = null) => {
       let isAdmin = false;
       if (userIdStr) {
         const user = await UserModel.findById(userIdStr).populate("role_id", "name");
-        isAdmin = user?.role_id?.name === "admin";
+        const roleName = user?.role_id?.name;
+        isAdmin = roleName === "admin" || roleName === "feedbacked-staff";
       }
 
       // Only track view if not admin

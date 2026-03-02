@@ -266,7 +266,7 @@ const getProductReviews = async (productId, filters = {}) => {
 
     const {
       page = 1,
-      limit = 5,
+      limit = 4,
       search = "",
       sortBy = "createdAt",
       sortOrder = "desc",
@@ -274,7 +274,7 @@ const getProductReviews = async (productId, filters = {}) => {
 
 
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 10));
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 4));
     const skip = (pageNum - 1) * limitNum;
 
 
@@ -376,7 +376,7 @@ const getReviewsForAdmin = async (filters = {}) => {
   try {
     const {
       page = 1,
-      limit = 5,
+      limit = 4,
       search = "",
       productId,
       userId,
@@ -388,7 +388,7 @@ const getReviewsForAdmin = async (filters = {}) => {
 
 
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 4));
     const skip = (pageNum - 1) * limitNum;
 
 
