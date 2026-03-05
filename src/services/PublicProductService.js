@@ -1,30 +1,48 @@
 const mongoose = require("mongoose");
 const ProductModel = require("../models/ProductModel");
 const CategoryModel = require("../models/CategoryModel");
-const InventoryTransactionModel = require("../models/InventoryTransactionModel");
+const OrderDetailModel = require("../models/OrderDetailModel");
 const { getEffectivePrice } = require("../utils/productPrice");
 
-// Lấy tối đa 6 sản phẩm bán chạy nhất (chỉ từ ISSUE, không bổ sung sản phẩm khác)
+// Lấy tối đa 6 sản phẩm bán chạy nhất từ đơn hàng COMPLETED
 const getFeaturedProducts = async () => {
   try {
-    // Aggregate từ InventoryTransaction để tính tổng số lượng ISSUE (xuất kho/bán) của mỗi sản phẩm
-    const topSoldProducts = await InventoryTransactionModel.aggregate([
+    // Aggregate từ OrderDetail + OrderStatus(COMPLETED) để tính tổng số lượng bán mỗi sản phẩm
+    const topSoldProducts = await OrderDetailModel.aggregate([
+      {
+        $lookup: {
+          from: "orders",
+          localField: "order_id",
+          foreignField: "_id",
+          as: "order",
+        },
+      },
+      { $unwind: "$order" },
+      {
+        $lookup: {
+          from: "order_statuses",
+          localField: "order.order_status_id",
+          foreignField: "_id",
+          as: "status",
+        },
+      },
+      { $unwind: { path: "$status", preserveNullAndEmptyArrays: true } },
       {
         $match: {
-          type: "ISSUE", // Chỉ tính các transaction xuất kho (bán hàng)
+          "status.name": { $regex: /^COMPLETED$/i },
         },
       },
       {
         $group: {
-          _id: "$product",
+          _id: "$product_id",
           totalSold: { $sum: "$quantity" },
         },
       },
       {
-        $sort: { totalSold: -1 }, // Sắp xếp theo số lượng bán giảm dần
+        $sort: { totalSold: -1 },
       },
       {
-        $limit: 6, // Lấy tối đa top 6
+        $limit: 6,
       },
     ]);
 
