@@ -343,24 +343,6 @@ const confirmCheckoutAndCreateOrder = async ({
         session,
       });
       await session.commitTransaction();
-      // ✅ Chốt lô ngay sau khi commit (sản phẩm về 0 đã được ghi DB)
-      const ProductBatchService = require("./ProductBatchService");
-      for (const item of cartItems) {
-        try {
-          const product = await ProductModel.findById(item.product_id)
-            .select("onHandQuantity warehouseEntryDate warehouseEntryDateStr")
-            .lean();
-          if (
-            product &&
-            product.onHandQuantity === 0 &&
-            (product.warehouseEntryDate || product.warehouseEntryDateStr)
-          ) {
-            await ProductBatchService.autoResetSoldOutProduct(item.product_id.toString());
-          }
-        } catch (e) {
-          console.error("Auto-reset sold out product failed:", item.product_id, e);
-        }
-      }
        if (discount_id && discountCode) {
         try {
           await DiscountService.applyDiscountCode(
@@ -444,24 +426,6 @@ const confirmCheckoutAndCreateOrder = async ({
         session,
       });
       await session.commitTransaction();
-      // ✅ Chốt lô ngay sau khi commit (VNPay: trừ kho đã xong lúc đặt đơn, sản phẩm về 0 thì chốt lô)
-      const ProductBatchService = require("./ProductBatchService");
-      for (const item of cartItems) {
-        try {
-          const product = await ProductModel.findById(item.product_id)
-            .select("onHandQuantity warehouseEntryDate warehouseEntryDateStr")
-            .lean();
-          if (
-            product &&
-            product.onHandQuantity === 0 &&
-            (product.warehouseEntryDate || product.warehouseEntryDateStr)
-          ) {
-            await ProductBatchService.autoResetSoldOutProduct(item.product_id.toString());
-          }
-        } catch (e) {
-          console.error("Auto-reset sold out product failed:", item.product_id, e);
-        }
-      }
       if (discount_id && discountCode) {
         try {
           await DiscountService.applyDiscountCode(
@@ -535,16 +499,47 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     );
     const nextStatusName = normalizeStatusName(newStatus.name);
     const paymentMethod = normalizeToken(order.payment_method);
+    const normalizedRole = (role || "").toString().trim().toLowerCase();
+    const isShippingToCancelled =
+      currentStatusName === "SHIPPING" && nextStatusName === "CANCELLED";
+    const autoShippingCancelNote =
+      "Customer refused to receive, restocked inventory";
+    const statusHistoryNote = isShippingToCancelled
+      ? [note?.toString?.().trim?.(), autoShippingCancelNote]
+          .filter(Boolean)
+          .join(" | ")
+      : note;
 
     if (isRefundStatus(nextStatusName)) {
       const allowedRolesForRefund = ["admin", "sales-staff"];
-      if (!allowedRolesForRefund.includes(role)) {
+      if (!allowedRolesForRefund.includes(normalizedRole)) {
         throw new Error(
           "Only admin or sales-staff can move an order to the refund status",
         );
       }
       if (currentStatusName !== "COMPLETED") {
         throw new Error("Only COMPLETED orders can be moved to the refund workflow");
+      }
+      // Chỉ cho phép REFUND khi tổng số lượng sản phẩm trong đơn < 50
+      const orderDetails = await OrderDetailModel.find({ order_id: order._id })
+        .select("quantity")
+        .session(session)
+        .lean();
+      const totalOrderQuantity = orderDetails.reduce(
+        (sum, item) => sum + (Number(item.quantity) || 0),
+        0
+      );
+      if (totalOrderQuantity >= 50) {
+        throw new Error(
+          "Refund is only allowed for orders with total product quantity below 50"
+        );
+      }
+    } else if (isShippingToCancelled) {
+      const allowedRolesForShippingCancel = ["admin", "sales-staff"];
+      if (!allowedRolesForShippingCancel.includes(normalizedRole)) {
+        throw new Error(
+          "Only admin or sales-staff can cancel orders from SHIPPING status",
+        );
       }
     } else if (
       !isValidStatusTransition(paymentMethod, currentStatusName, nextStatusName)
@@ -564,7 +559,7 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
       toStatus: newStatus._id,
       userId,
       role,
-      note,
+      note: statusHistoryNote,
       session,
     });
 
@@ -648,7 +643,60 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
       }
     }
 
+    // SHIPPING -> CANCELLED: hoàn kho lại cho các sản phẩm trong đơn
+    if (isShippingToCancelled) {
+      const details = await OrderDetailModel.find({ order_id: order._id })
+        .select("product_id quantity")
+        .session(session);
+      if (details.length > 0) {
+        const bulkOps = details
+          .filter((d) => d?.product_id && (d.quantity || 0) > 0)
+          .map((d) => ({
+            updateOne: {
+              filter: { _id: d.product_id },
+              update: { $inc: { onHandQuantity: Number(d.quantity) || 0 } },
+            },
+          }));
+        if (bulkOps.length > 0) {
+          await ProductModel.bulkWrite(bulkOps, { session });
+        }
+      }
+    }
+
     await session.commitTransaction();
+    // ✅ Chỉ chốt lô khi đơn đã chuyển COMPLETED
+    if (nextStatusName === "COMPLETED") {
+      try {
+        const details = await OrderDetailModel.find({ order_id: order._id }).select("product_id").lean();
+        const productIds = [...new Set(details.map((d) => d.product_id?.toString()).filter(Boolean))];
+        if (productIds.length > 0) {
+          // Bước an toàn: chỉ auto-reset khi sản phẩm đã thực sự hết hàng và có kỳ lô đang mở.
+          const products = await ProductModel.find({
+            _id: { $in: productIds.map((id) => new mongoose.Types.ObjectId(id)) },
+          })
+            .select("onHandQuantity warehouseEntryDate warehouseEntryDateStr")
+            .lean();
+          const eligibleProductIds = products
+            .filter(
+              (p) =>
+                (p.onHandQuantity ?? 0) === 0 &&
+                (p.warehouseEntryDate || p.warehouseEntryDateStr)
+            )
+            .map((p) => p._id.toString());
+
+          const ProductBatchService = require("./ProductBatchService");
+          for (const pid of eligibleProductIds) {
+            try {
+              await ProductBatchService.autoResetSoldOutProduct(pid);
+            } catch (e) {
+              console.error("Auto-reset sold out product after COMPLETED failed:", pid, e);
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Load order details for batch auto-reset failed:", order._id?.toString?.(), e);
+      }
+    }
     // ✅ Thông báo cho khách hàng khi admin cập nhật trạng thái đơn
     const customerId = order.user_id?.toString?.() || order.user_id;
     if (customerId) {

@@ -66,9 +66,9 @@ const runSoldOutCatchUpOnce = async () => {
  * - Hàng ngày lúc 00:00 (Asia/Ho_Chi_Minh): chạy lại
  */
 const startProductBatchJob = () => {
-  // ✅ Khi chạy code lên: check sản phẩm hết hạn + bắt lại sản phẩm bán hết chưa chốt lô
+  // ✅ Khi chạy code lên: chỉ check sản phẩm hết hạn.
+  // Không chạy sold-out catch-up ở startup để tránh chốt lô trước khi đơn hàng chuyển COMPLETED.
   runExpiredCheckOnce();
-  runSoldOutCatchUpOnce();
   // Chạy mỗi ngày lúc 00:00 (theo timezone Asia/Ho_Chi_Minh)
   cron.schedule("0 0 * * *", async () => {
     console.log(`[${formatDateTimeVN()}] Starting auto-reset expired products job...`);  

@@ -14,6 +14,11 @@ const productBatchHistorySchema = new mongoose.Schema(
     productNameSnapshot: { type: String, trim: true, default: "" },
     productCategoryNameSnapshot: { type: String, trim: true, default: "" },
     productBrandSnapshot: { type: String, trim: true, default: "" },
+    // Toàn bộ dữ liệu sản phẩm tại thời điểm chốt lô (bản sao độc lập, không tham chiếu Product)
+    productSnapshot: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
 
     // ✅ Liên kết với Harvest Batch (nếu có)
     harvestBatch: {
