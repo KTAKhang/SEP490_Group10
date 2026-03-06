@@ -24,6 +24,12 @@ const jwt = require("jsonwebtoken");
 const UserModel = require("../models/UserModel");
 require("dotenv").config();
 
+// Các role được coi là "admin" trong module Contact (có thể xem & xử lý mọi Contact)
+const isContactAdminRole = (roleName) => {
+    const normalized = (roleName || "").toLowerCase();
+    return ["admin", "feedbacked-staff"].includes(normalized);
+};
+
 /**
  * =============================================================================
  * contactAuthMiddleware - Xác thực người dùng (User hoặc Admin)
@@ -72,12 +78,13 @@ const contactAuthMiddleware = async (req, res, next) => {
         }
 
         // Bước 5: Gán thông tin user đã chuẩn hóa vào req để route handler dùng
+        const roleName = user.role_id?.name || "customer";
         req.user = {
             _id: user._id,
             user_name: user.user_name,
             email: user.email,
-            role: user.role_id?.name || "customer",
-            isAdmin: user.role_id?.name === "admin",
+            role: roleName,
+            isAdmin: isContactAdminRole(roleName),
         };
 
         next();
@@ -141,9 +148,9 @@ const contactAdminMiddleware = async (req, res, next) => {
             });
         }
 
-        // Kiểm tra quyền: chỉ role "admin" mới được đi tiếp
+        // Kiểm tra quyền: chỉ các role admin trong module Contact mới được đi tiếp
         const roleName = user.role_id?.name || "customer";
-        if (roleName !== "admin") {
+        if (!isContactAdminRole(roleName)) {
             return res.status(403).json({
                 status: "ERR",
                 message: "Chỉ Admin mới có quyền truy cập",
