@@ -41,7 +41,7 @@ const loginWithGoogle = async (idToken) => {
 
     const payload = ticket.getPayload();
     console.log("TOKEN AUD:", payload.aud);
-console.log("EXPECTED:", CLIENT_IDS);
+    console.log("EXPECTED:", CLIENT_IDS);
     const { sub: googleId, email, name, picture } = payload;
     let user = await UserModel.findOne({
       $or: [{ googleId }, { email }],
@@ -65,7 +65,9 @@ console.log("EXPECTED:", CLIENT_IDS);
     }
 
     if (user.status === false) {
-      const err = new Error("Tài khoản bị chặn");
+      const err = new Error(
+        "Your account is locked, please contact us for support.",
+      );
       err.status = "ERR";
       throw err;
     }
@@ -91,10 +93,11 @@ console.log("EXPECTED:", CLIENT_IDS);
     });
 
     user.refreshToken = refreshToken;
+    user.currentAccessToken = accessToken;
     await user.save();
     return {
       status: "OK",
-      message: "Đăng nhập Google thành công",
+      message: "Login by Google Successfully",
       data: {
         _id: populatedUser._id,
         user_name: populatedUser.user_name,
@@ -121,14 +124,36 @@ const loginUser = async ({ email, password }) => {
     const user = await UserModel.findOne({
       email: { $regex: new RegExp(`^${email}$`, "i") },
     });
-    if (!user) throw { status: "ERR", message: "Tài khoản không tồn tại" };
-
+    if (!user) throw { status: "ERR", message: "Incorrect email or password." };
+    const MAX_LOGIN_ATTEMPTS = 5;
+    const LOCK_TIME = 15 * 60 * 1000;
     if (user.status === false)
-      throw { status: "ERR", message: "Tài khoản bị chặn" };
+      throw {
+        status: "ERR",
+        message: "Your account is locked, please contact us for support.",
+      };
+
+    if (user.lockUntil && user.lockUntil > Date.now()) {
+      throw {
+        status: "ERR",
+        message: "Your account has been locked for 15 minutes due to too many incorrect login attempts.",
+      };
+    }
 
     const passwordMatch = bcrypt.compareSync(password, user.password);
 
-    if (!passwordMatch) throw { status: "ERR", message: "Mật khẩu không đúng" };
+    if (!passwordMatch) {
+      user.loginAttempts += 1;
+
+      if (user.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+        user.lockUntil = Date.now() + LOCK_TIME;
+        user.loginAttempts = 0;
+      }
+
+      await user.save();
+
+      throw { status: "ERR", message: "Incorrect email or password." };
+    }
 
     const populatedUser = await UserModel.findById(user._id).populate(
       "role_id",
@@ -145,11 +170,14 @@ const loginUser = async ({ email, password }) => {
       isAdmin: roleName === "admin",
       role: roleName,
     });
+    user.loginAttempts = 0;
+    user.lockUntil = null;
     user.refreshToken = refreshToken;
+    user.currentAccessToken = accessToken;
     await user.save();
     return {
       status: "OK",
-      message: "Đăng nhập thành công",
+      message: "Login Successfully",
       data: {
         _id: populatedUser._id,
         user_name: populatedUser.user_name,
@@ -180,26 +208,31 @@ const refreshAccessToken = async (refreshToken) => {
     const user = await UserModel.findById(payload._id);
 
     if (!user || user.refreshToken !== refreshToken)
-      throw { status: "ERR", message: "refresh token không hợp lệ" };
+      throw { status: "ERR", message: "Invalid refresh token" };
 
     const newAccessToken = jwtService.generalAccessToken({
       _id: user._id,
       isAdmin: payload.isAdmin,
       role: payload.role,
     });
+    // ❗ update accessToken mới
+    user.currentAccessToken = newAccessToken;
+    await user.save();
 
     return { access_token: newAccessToken };
   } catch (err) {
     if (err.name === "TokenExpiredError") {
-      throw { status: "ERR", message: "Refresh token đã hết hạn" };
+      throw { status: "ERR", message: "The refresh token has expired." };
     }
-    throw { status: "ERR", message: "Refresh token không hợp lệ" };
+    throw { status: "ERR", message: "Invalid refresh token" };
   }
 };
 
 const logoutUser = async (userId) => {
-  // Xoá refresh token trong DB
-  await UserModel.findByIdAndUpdate(userId, { $unset: { refreshToken: 1 } });
+  await UserModel.findByIdAndUpdate(userId, {
+    refreshToken: null,
+    currentAccessToken: null,
+  });
   return { status: "OK", message: "Đăng xuất thành công", userId };
 };
 
@@ -207,6 +240,7 @@ const sendRegisterOTP = async (
   user_name,
   email,
   password,
+  fullName,
   phone,
   address,
   birthday,
@@ -231,6 +265,7 @@ const sendRegisterOTP = async (
       expiresAt: Date.now() + 10 * 60 * 1000,
       user_name,
       password,
+      fullName,
       phone,
       address,
       birthday,
@@ -295,6 +330,7 @@ const confirmRegisterOTP = async (email, otp) => {
     email,
     password: hashedPassword,
     role_id: customerRole._id,
+    fullName: tempRecord.fullName,
     phone: tempRecord.phone,
     address: tempRecord.address,
     birthday: tempRecord.birthday,

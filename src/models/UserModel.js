@@ -48,7 +48,20 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    loginAttempts: {
+      type: Number,
+      default: 0,
+    },
 
+    lockUntil: {
+      type: Date,
+      default: null,
+    },
+
+    currentAccessToken: {
+      type: String,
+      default: null,
+    },
     googleId: {
       type: String,
       default: undefined,
@@ -59,7 +72,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-
+    fullName: {
+      type: String,
+      default: null,
+    },
     phone: {
       type: String,
       default: null,
