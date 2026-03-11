@@ -3,7 +3,7 @@ const ChatService = require("../services/ChatService");
 
 const createOrGetRoom = async (req, res) => {
   try {
-    const userId = req.user._id; // ❗ lấy từ token
+    const userId = req.user._id;
     const { staffId } = req.body;
 
     const room = await ChatService.getOrCreateRoom(userId, staffId);
@@ -20,7 +20,7 @@ const sendMessage = async (req, res) => {
 
     const { roomId, content, images, imagePublicIds } = req.body;
     if (!content && (!images || images.length === 0)) {
-      throw new Error("Message must have content or at least one image");
+      throw new Error("Message cannot be empty.");
     }
     const message = await ChatService.sendMessage({
       roomId,
@@ -40,7 +40,7 @@ const sendMessage = async (req, res) => {
 const getMessages = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const { limit = 6, before } = req.query; // before: messageId để load tin nhắn cũ hơn
+    const { limit = 6, before } = req.query; 
 
     const result = await ChatService.getMessagesByRoom(
       roomId,
@@ -89,6 +89,44 @@ const getUserRooms = async (req, res) => {
   }
 };
 
+const getChatRoomsAdmin = async (req, res) => {
+  try {
+    const response = await ChatService.getChatRoomsForAdmin(req.query);
+
+    if (response.status === "ERR") {
+      return res.status(400).json(response);
+    }
+
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message || "Lấy danh sách phòng chat thất bại",
+    });
+  }
+};
+const getRoomDetailAdmin = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+
+    const response = await ChatService.getRoomDetailForAdmin(
+      roomId,
+      req.query
+    );
+
+    if (response.status === "ERR") {
+      return res.status(400).json(response);
+    }
+
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message || "Lấy chi tiết phòng chat thất bại",
+    });
+  }
+};
+
 module.exports = {
   createOrGetRoom,
   sendMessage,
@@ -96,4 +134,6 @@ module.exports = {
   getStaffRooms,
   markAsRead,
   getUserRooms,
+  getChatRoomsAdmin,
+  getRoomDetailAdmin
 };

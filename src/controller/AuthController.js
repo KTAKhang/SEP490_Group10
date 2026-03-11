@@ -80,11 +80,19 @@ const loginUser = async (req, res) => {
 
 const refreshTokenController = async (req, res) => {
   try {
-    const refreshToken = req.cookies.refreshToken;
+    // 1️⃣ Ưu tiên cookie (Web)
+    let refreshToken = req.cookies?.refreshToken;
+
+    // 2️⃣ Nếu không có cookie thì lấy từ body (Mobile)
     if (!refreshToken) {
-      return res
-        .status(401)
-        .json({ status: "ERR", message: "No refresh token" });
+      refreshToken = req.body?.refresh_token;
+    }
+
+    if (!refreshToken) {
+      return res.status(401).json({
+        status: "ERR",
+        message: "No refresh token provided",
+      });
     }
 
     const newToken = await AuthService.refreshAccessToken(refreshToken);
@@ -150,13 +158,14 @@ const logoutController = async (req, res) => {
 
 const sendRegisterOTP = async (req, res) => {
   try {
-    const { user_name, email, password, phone, address, birthday, gender } =
+    const { user_name, email, password,fullName, phone, address, birthday, gender } =
       req.body;
 
     if (
       !user_name ||
       !email ||
       !password ||
+      !fullName ||
       !phone ||
       !address ||
       !birthday ||
@@ -177,6 +186,14 @@ const sendRegisterOTP = async (req, res) => {
         status: "ERR",
         message:
           "Usernames must be between 3 and 30 characters long and can only include letters, numbers, spaces, or underscores.",
+      });
+    }
+
+    if (!isStrictUserName(fullName)) {
+      return res.status(400).json({
+        status: "ERR",
+        message:
+          "Fullname must be between 3 and 30 characters long and can only include letters, numbers, spaces, or underscores.",
       });
     }
 
@@ -253,6 +270,7 @@ const sendRegisterOTP = async (req, res) => {
       user_name,
       email,
       password,
+      fullName,
       phone,
       address,
       birthday,
@@ -282,6 +300,7 @@ const confirmRegisterOTP = async (req, res) => {
         message: "Email and OTP are required.",
       });
     }
+    
 
     const response = await AuthService.confirmRegisterOTP(email, otp);
 
@@ -307,6 +326,14 @@ const forgotPassword = async (req, res) => {
         status: "ERR",
         message: "Email is required",
       });
+    }
+    // Validate email
+    const isStrictEmail = (email) => {
+      const strictRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+      return strictRegex.test(email);
+    };
+    if (!isStrictEmail(email)) {
+      return res.status(400).json({ status: "ERR", message: "Email Invalid" });
     }
 
     const response = await AuthService.sendResetPasswordOTP(email);

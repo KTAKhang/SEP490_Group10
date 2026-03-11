@@ -4,7 +4,7 @@ const cloudinary = require("../config/cloudinaryConfig");
 const bcrypt = require("bcrypt");
 
 
-const updateProfile = async (id, { user_name, phone, address, birthday, gender }, file) => {
+const updateProfile = async (id, { user_name,fullName, phone, address, birthday, gender }, file) => {
     try {
         const user = await UserModel.findById(id);
         if (!user) {
@@ -24,6 +24,7 @@ const updateProfile = async (id, { user_name, phone, address, birthday, gender }
 
         const updateFields = {
             user_name: user_name || user.user_name,
+            fullName: fullName|| user.fullName,
             phone: phone || user.phone,
             address: address || user.address,
             birthday: birthday || user.birthday,
@@ -112,6 +113,7 @@ const getUserById = (id) => {
                 email: dataUser.email,
                 role_name: dataUser.role_id.name,
                 address: dataUser.address,
+                fullName: dataUser.fullName,
                 phone: dataUser.phone,
                 avatar: dataUser.avatar,
                 status: dataUser.status,
@@ -148,6 +150,12 @@ const changePassword = async (userID, old_password, new_password) => {
         const checkPassword = bcrypt.compareSync(old_password, checkUser.password);
         if (!checkPassword) {
             return { status: "ERR", message: "Incorrect current password!" };
+        }
+        if (old_password === new_password) {
+            return {
+                status: "ERR",
+                message: "New password must be different from the current password!",
+            };
         }
         const hash = bcrypt.hashSync(new_password, 10);
         const updateData = await UserModel.findByIdAndUpdate(
