@@ -23,7 +23,7 @@ const messageSchema = new mongoose.Schema(
     },
     senderRole: {
       type: String,
-      enum: ["customer", "feedbacked-staff", "admin"],
+      enum: ["customer", "feedbacked-staff"],
       required: true,
     },
     content: {

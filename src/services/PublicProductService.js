@@ -2,7 +2,9 @@ const mongoose = require("mongoose");
 const ProductModel = require("../models/ProductModel");
 const CategoryModel = require("../models/CategoryModel");
 const OrderDetailModel = require("../models/OrderDetailModel");
+
 const { getEffectivePrice, isProductExpired } = require("../utils/productPrice");
+
 
 // Lấy tối đa 6 sản phẩm bán chạy nhất từ đơn hàng COMPLETED
 const getFeaturedProducts = async () => {

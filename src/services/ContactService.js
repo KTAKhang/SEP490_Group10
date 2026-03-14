@@ -6,6 +6,12 @@ const NotificationService = require("./NotificationService");
 const cloudinary = require("../config/cloudinaryConfig");
 const { Readable } = require("stream");
 
+// Các role được coi là "admin" trong module Contact (phải đồng bộ với contactMiddleware)
+const isContactAdminRole = (roleName) => {
+    const normalized = (roleName || "").toLowerCase();
+    return ["admin", "feedbacked-staff"].includes(normalized);
+};
+
 // Constants cho file upload
 const ALLOWED_FILE_TYPES = [
     "image/jpeg",
@@ -258,11 +264,11 @@ const updateContactStatus = async (contactId, userId, isAdmin, { status, assigne
                     message: "Admin không tồn tại",
                 };
             }
-            // Kiểm tra admin có phải là admin không
-            if (admin.role_id?.name !== "admin") {
+            // Kiểm tra admin có phải là role admin trong module Contact không (admin hoặc customer support)
+            if (!isContactAdminRole(admin.role_id?.name)) {
                 return {
                     status: "ERR",
-                    message: "User được gán không phải là Admin",
+                    message: "User được gán không phải là Admin/Customer Support",
                 };
             }
             updateData.assigned_admin_id = assigned_admin_id;
