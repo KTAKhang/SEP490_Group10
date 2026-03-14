@@ -2,7 +2,7 @@ const CartModel = require("../models/CartsModel");
 const CartDetailModel = require("../models/CartDetailsModel");
 const ProductModel = require("../models/ProductModel");
 const { default: mongoose } = require("mongoose");
-const { getEffectivePrice } = require("../utils/productPrice");
+const { getEffectivePrice, isProductExpired } = require("../utils/productPrice");
 const addItemToCart = async (user_id, product_id, quantity) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -29,6 +29,9 @@ const addItemToCart = async (user_id, product_id, quantity) => {
       throw new Error("The product does not exist or has been discontinued.");
     }
 
+    if (isProductExpired(product)) {
+      throw new Error(`Sản phẩm "${product.name}" đã hết hạn sử dụng. Không thể thêm vào giỏ hàng.`);
+    }
 
     /* =======================
        3️⃣ LOAD / CREATE CART
@@ -134,6 +137,9 @@ const updateItemInCart = async (user_id, product_id, newQuantity) => {
       throw new Error("The product does not exist or has been discontinued.");
     }
 
+    if (isProductExpired(product)) {
+      throw new Error(`Sản phẩm "${product.name}" đã hết hạn sử dụng. Vui lòng xóa khỏi giỏ hàng.`);
+    }
 
     if (newQuantity > product.onHandQuantity) {
       throw new Error(`Only one left ${product.onHandQuantity} products in stock`);
@@ -285,6 +291,7 @@ const getCartItems = async (user_id) => {
   const formattedItems = items.map((item) => {
     const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(item.product_id);
     const priceToUse = effectivePrice;
+    const expired = isProductExpired(item.product_id);
     return {
       product_id: item.product_id._id,
       name: item.product_id.name,
@@ -292,10 +299,15 @@ const getCartItems = async (user_id) => {
       price: priceToUse,
       originalPrice: isNearExpiry ? originalPrice : null,
       isNearExpiry,
+      isExpired: expired,
+      expiryDateStr: item.product_id.expiryDateStr ?? null,
+      expiryDate: item.product_id.expiryDate ?? null,
       quantity: item.quantity,
       in_stock: item.product_id.onHandQuantity,
       status: item.product_id.status,
-      warning: !item.product_id.status
+      warning: expired
+        ? "Sản phẩm đã hết hạn sử dụng. Vui lòng xóa khỏi giỏ hàng."
+        : !item.product_id.status
         ? "The product has been discontinued"
         : item.product_id.onHandQuantity <= 0
         ? "The product is temporarily out of stock"

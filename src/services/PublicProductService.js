@@ -2,7 +2,9 @@ const mongoose = require("mongoose");
 const ProductModel = require("../models/ProductModel");
 const CategoryModel = require("../models/CategoryModel");
 const OrderDetailModel = require("../models/OrderDetailModel");
-const { getEffectivePrice } = require("../utils/productPrice");
+
+const { getEffectivePrice, isProductExpired } = require("../utils/productPrice");
+
 
 // Lấy tối đa 6 sản phẩm bán chạy nhất từ đơn hàng COMPLETED
 const getFeaturedProducts = async () => {
@@ -72,10 +74,17 @@ const getFeaturedProducts = async () => {
       .map((id) => productMap.get(id.toString()))
       .filter((p) => p != null && p.category != null);
 
-    // Format: ảnh đầu tiên + giá hiệu lực (sắp hết hạn giảm 50%)
+    // Format: ảnh đầu tiên + giá hiệu lực (sắp hết hạn giảm 50%) + isExpired cho frontend
     const formattedProducts = finalProducts.map((product) => {
       const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
-      const formatted = { ...product, price: effectivePrice, effectivePrice, isNearExpiry, originalPrice };
+      const formatted = {
+        ...product,
+        price: effectivePrice,
+        effectivePrice,
+        isNearExpiry,
+        originalPrice,
+        isExpired: isProductExpired(product),
+      };
       if (Array.isArray(product.images) && product.images.length > 0) {
         formatted.featuredImage = product.images[0];
       } else {
@@ -212,7 +221,7 @@ const getProducts = async ({ page = 1, limit = 12, search = "", category, sortBy
     const data = result[0]?.data || [];
     const total = result[0]?.total[0]?.count || 0;
 
-    // Format category info, giá hiệu lực (sắp hết hạn giảm 50%), và chỉ lấy ảnh đầu tiên cho list view
+    // Format category info, giá hiệu lực (sắp hết hạn giảm 50%), isExpired, và chỉ lấy ảnh đầu tiên cho list view
     const formattedProducts = data.map((product) => {
       const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
       const formatted = {
@@ -221,6 +230,7 @@ const getProducts = async ({ page = 1, limit = 12, search = "", category, sortBy
         effectivePrice,
         isNearExpiry,
         originalPrice,
+        isExpired: isProductExpired(product),
         category: {
           _id: product.categoryInfo._id,
           name: product.categoryInfo.name,
@@ -293,7 +303,14 @@ const getProductById = async (id) => {
     }
 
     const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
-    const data = { ...product, price: effectivePrice, effectivePrice, isNearExpiry, originalPrice };
+    const data = {
+      ...product,
+      price: effectivePrice,
+      effectivePrice,
+      isNearExpiry,
+      originalPrice,
+      isExpired: isProductExpired(product),
+    };
 
     return {
       status: "OK",

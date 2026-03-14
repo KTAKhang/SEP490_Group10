@@ -3,7 +3,7 @@ const StockLockModel = require("../models/StockLockModel");
 const CartDetailModel = require("../models/CartDetailsModel");
 const CartModel = require("../models/CartsModel");
 const ProductModel = require("../models/ProductModel");
-const { getEffectivePrice } = require("../utils/productPrice");
+const { getEffectivePrice, isProductExpired } = require("../utils/productPrice");
 const HOLD_MINUTES = 15;
 const COOLDOWN_MINUTES = 30;
 const MAX_HOLD_PERCENT = 1;
@@ -45,6 +45,8 @@ const checkoutHold = async (
 
       if (!product || !product.status)
         throw new Error(`Product ${product?.name || ""} is not available`);
+      if (isProductExpired(product))
+        throw new Error(`Sản phẩm "${product.name}" đã hết hạn sử dụng. Không thể thanh toán.`);
       /* =======================
          1️⃣ CHECK KHO THỰC TẾ
       ======================= */
