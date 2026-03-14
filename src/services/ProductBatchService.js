@@ -6,6 +6,60 @@ const HarvestBatchModel = require("../models/HarvestBatchModel");
 const OrderDetailModel = require("../models/OrderDetailModel");
 const { getTodayInVietnam, formatDateVN, compareDates } = require("../utils/dateVN");
 
+/** Trạng thái đơn hàng "kết thúc" — không còn thay đổi số lượng kho (COMPLETED, CANCELLED, REFUND) */
+const ORDER_TERMINAL_STATUSES = [/^COMPLETED$/i, /^CANCELLED$/i, /^REFUND$/i];
+
+/**
+ * Kiểm tra lô hàng đã hoàn tất nhập kho (có thể chốt lô khi bán hết).
+ * true khi: (1) received >= planned HOẶC (2) đã qua ngày nhập (today > warehouseEntryDate).
+ * Tránh chốt lô sớm khi cùng ngày mới nhập 700/1000, còn chờ 300 đến.
+ * @param {Object} product - Document product (plannedQuantity, receivedQuantity, warehouseEntryDate, warehouseEntryDateStr)
+ * @returns {boolean}
+ */
+const isBatchReceivingComplete = (product) => {
+  const planned = Number(product?.plannedQuantity) ?? 0;
+  const received = Number(product?.receivedQuantity) ?? 0;
+  if (received >= planned) return true;
+  const today = getTodayInVietnam();
+  const todayStr = formatDateVN(today);
+  const entryStr = product?.warehouseEntryDateStr ?? (product?.warehouseEntryDate ? formatDateVN(product.warehouseEntryDate) : null);
+  if (!entryStr) return true;
+  return todayStr > entryStr;
+};
+
+/**
+ * Kiểm tra sản phẩm có đơn hàng đang ở trạng thái chưa kết thúc (PENDING, PAID, READY-TO-SHIP, SHIPPING).
+ * Chỉ chốt lô khi TẤT CẢ đơn chứa sản phẩm đều ở trạng thái kết thúc (COMPLETED, CANCELLED, REFUND).
+ * @param {String} productId - Product ID
+ * @param {String} [excludeOrderId] - Order ID để loại trừ (vd: đơn vừa chuyển COMPLETED, tránh replication lag)
+ * @returns {Promise<boolean>} true nếu có đơn PENDING/PAID/READY-TO-SHIP/SHIPPING
+ */
+const hasOrdersInTransitionForProduct = async (productId, excludeOrderId = null) => {
+  try {
+    const matchStage = { product_id: new mongoose.Types.ObjectId(productId) };
+    if (excludeOrderId && mongoose.isValidObjectId(excludeOrderId)) {
+      matchStage.order_id = { $ne: new mongoose.Types.ObjectId(excludeOrderId) };
+    }
+    const result = await OrderDetailModel.aggregate([
+      { $match: matchStage },
+      { $lookup: { from: "orders", localField: "order_id", foreignField: "_id", as: "order" } },
+      { $unwind: "$order" },
+      { $lookup: { from: "order_statuses", localField: "order.order_status_id", foreignField: "_id", as: "orderStatus" } },
+      { $unwind: { path: "$orderStatus", preserveNullAndEmptyArrays: true } },
+      {
+        $match: {
+          $nor: ORDER_TERMINAL_STATUSES.map((regex) => ({ "orderStatus.name": { $regex: regex } })),
+        },
+      },
+      { $limit: 1 },
+      { $count: "count" },
+    ]);
+    return result.length > 0 && result[0].count > 0;
+  } catch (error) {
+    return true; // Khi lỗi, coi như có đơn đang chuyển → không chốt (an toàn)
+  }
+};
+
 
 /**
  * Lấy ngày bắt đầu lô hiện tại từ phiếu RECEIPT (không phụ thuộc product.warehouseEntryDate).
@@ -39,7 +93,6 @@ const getCurrentBatchWindowFromReceipts = async (productId) => {
     const warehouseEntryDateStr = formatDateVN(warehouseEntryDate);
     return { warehouseEntryDate, warehouseEntryDateStr };
   } catch (error) {
-    console.error("Error getCurrentBatchWindowFromReceipts:", error);
     return null;
   }
 };
@@ -92,7 +145,6 @@ const calculateSoldQuantity = async (productId, warehouseEntryDate, completedDat
 
     return result.length > 0 ? result[0].totalSold : 0;
   } catch (error) {
-    console.error("Error calculating soldQuantity:", error);
     return 0;
   }
 };
@@ -130,40 +182,48 @@ const aggregateOrderRevenueByBatch = async (productId, warehouseEntryDate, compl
       : null;
     const expiryStart = expiryStr ? new Date(expiryStr + "T00:00:00+07:00") : null;
     const expiryEnd = expiryStr ? new Date(expiryStr + "T23:59:59.999+07:00") : null;
-    console.log("[ProductBatchService] aggregateOrderRevenueByBatch IN", {
-      productId,
-      entryStr,
-      completeStr,
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
-      targetSoldQuantity,
-      expiryStr,
-    });
 
-    const matchOrderDetail = { product_id: new mongoose.Types.ObjectId(productId) };
-    if (expiryStart && expiryEnd) {
-      matchOrderDetail.expiry_date = { $gte: expiryStart, $lte: expiryEnd };
+    // Helper: chạy aggregate với optional expiry filter và date range
+    const runAggregate = (useExpiryFilter, rangeStart, rangeEnd) => {
+      const matchOrderDetail = { product_id: new mongoose.Types.ObjectId(productId) };
+      if (useExpiryFilter && expiryStart && expiryEnd) {
+        matchOrderDetail.expiry_date = { $gte: expiryStart, $lte: expiryEnd };
+      }
+      return OrderDetailModel.aggregate([
+        { $match: matchOrderDetail },
+        { $lookup: { from: "orders", localField: "order_id", foreignField: "_id", as: "order" } },
+        { $unwind: "$order" },
+        { $match: { "order.createdAt": { $gte: rangeStart, $lte: rangeEnd } } },
+        { $lookup: { from: "order_statuses", localField: "order.order_status_id", foreignField: "_id", as: "orderStatus" } },
+        { $unwind: { path: "$orderStatus", preserveNullAndEmptyArrays: true } },
+        { $match: { "orderStatus.name": { $regex: /^COMPLETED$/i } } },
+        { $project: { quantity: 1, price: 1, original_price: 1, orderCreatedAt: "$order.createdAt" } },
+        { $sort: { orderCreatedAt: -1, _id: -1 } },
+      ]);
+    };
+
+    let rows = await runAggregate(true, startDate, endDate);
+    // Fallback 1: khi filter expiry_date trả về 0 (OrderDetail.expiry_date null hoặc không khớp), thử lại không filter expiry
+    if (rows.length === 0 && expiryStr) {
+      rows = await runAggregate(false, startDate, endDate);
+    }
+    // Fallback 2: khi vẫn 0, mở rộng khoảng ngày 1 ngày trước warehouseEntry (trường hợp phiếu nhập ghi trễ)
+    if (rows.length === 0 && targetSoldQuantity > 0) {
+      const extendedStart = new Date(startDate.getTime() - 24 * 60 * 60 * 1000);
+      rows = await runAggregate(false, extendedStart, endDate);
     }
 
-    const rows = await OrderDetailModel.aggregate([
-      { $match: matchOrderDetail },
-      { $lookup: { from: "orders", localField: "order_id", foreignField: "_id", as: "order" } },
-      { $unwind: "$order" },
-      { $match: { "order.createdAt": { $gte: startDate, $lte: endDate } } },
-      { $project: { quantity: 1, price: 1, original_price: 1, orderCreatedAt: "$order.createdAt" } },
-      { $sort: { orderCreatedAt: -1, _id: -1 } },
-    ]);
-
-
     if (!rows.length) {
-      console.log("[ProductBatchService] aggregateOrderRevenueByBatch OUT", { productId, result: "no orders in range", ...defaultResult });
       return defaultResult;
     }
 
-    // Nếu có targetSoldQuantity, chỉ lấy đúng phần doanh thu tương ứng soldQuantity gần thời điểm chốt lô nhất.
-    // Cách này tránh cộng dồn khi cùng 1 sản phẩm bị chốt nhiều lần trong cùng ngày.
+    // Nếu targetSoldQuantity = 0 (lô hết hạn bị vứt bỏ, không bán được): không gán đơn hàng nào cho lô này.
+    // Tránh hiển thị sai Full price/Clearance từ đơn hàng của lô khác (cùng product, expiry_date trùng).
+    // Nếu có targetSoldQuantity > 0, chỉ lấy đúng phần doanh thu tương ứng soldQuantity gần thời điểm chốt lô nhất.
     let rowsUsed = rows;
-    if (targetSoldQuantity > 0) {
+    if (targetSoldQuantity === 0) {
+      rowsUsed = [];
+    } else if (targetSoldQuantity > 0) {
       let remaining = targetSoldQuantity;
       rowsUsed = [];
       for (const row of rows) {
@@ -212,10 +272,8 @@ const aggregateOrderRevenueByBatch = async (productId, warehouseEntryDate, compl
       fullPriceQuantity: r.fullPriceQuantity || 0,
       fullPriceRevenue: Math.round((r.fullPriceRevenue || 0) * 100) / 100,
     };
-    console.log("[ProductBatchService] aggregateOrderRevenueByBatch OUT", { productId, ...out });
     return out;
   } catch (error) {
-    console.error("Error aggregateOrderRevenueByBatch:", error);
     return defaultResult;
   }
 };
@@ -295,17 +353,15 @@ const resetProductForNewBatch = async (productId, completionReason = "SOLD_OUT")
       expiryDate: product.expiryDate,
       expiryDateStr: product.expiryDateStr,
     };
-    // ✅ SOLD_OUT: Số đã xuất = received - onHand. EXPIRED: Số đã bán = tổng ISSUE trong khoảng [batchStart, today].
+    // ✅ SOLD_OUT: Số đã xuất = received - onHand. EXPIRED: received = sold + discarded → sold = received - discarded.
+    // Dùng received - discarded thay vì calculateSoldQuantity (ISSUE) vì: bán có thể không tạo ISSUE, hoặc timezone/date range sai.
     const onHand = batchSnapshot.onHandQuantity || 0;
     const received = batchSnapshot.receivedQuantity || 0;
     let soldQuantity = 0;
     let discardedQuantity = 0;
     if (completionReason === "EXPIRED") {
-      soldQuantity = await calculateSoldQuantity(productId, batchSnapshot.warehouseEntryDate, today);
       discardedQuantity = onHand;
-      if (soldQuantity + discardedQuantity > received) {
-        soldQuantity = Math.max(0, received - discardedQuantity);
-      }
+      soldQuantity = Math.max(0, received - discardedQuantity);
     } else {
       soldQuantity = Math.max(0, received - onHand);
       discardedQuantity = onHand;
@@ -330,8 +386,7 @@ const resetProductForNewBatch = async (productId, completionReason = "SOLD_OUT")
           harvestBatchId = harvestBatch._id;
         }
       } catch (error) {
-        console.error("Error finding harvestBatch:", error);
-        // Không throw error, chỉ log (không bắt buộc phải có harvestBatch)
+        // Không throw error (không bắt buộc phải có harvestBatch)
       }
     }
     // ✅ Snapshot giá nhập / giá bán tại thời điểm chốt lô (để báo cáo doanh thu, lợi nhuận gộp, tổn thất)
@@ -349,23 +404,6 @@ const resetProductForNewBatch = async (productId, completionReason = "SOLD_OUT")
     );
     const orderTotalQty = (revenueStats.fullPriceQuantity || 0) + (revenueStats.clearanceQuantity || 0);
     const useOrderStats = orderTotalQty > 0;
-    console.log("[ProductBatchService] resetProductForNewBatch revenue", {
-      productId,
-      completionReason,
-      soldQuantity,
-      discardedQuantity,
-      received,
-      revenueStats,
-      orderTotalQty,
-      useOrderStats,
-      window: { entry: batchSnapshot.warehouseEntryDateStr, completed: todayStr },
-    });
-    if (orderTotalQty === 0 && soldQuantity > 0) {
-      console.warn(
-        "[ProductBatchService] resetProductForNewBatch: no matched orders for batch window. Fallback sẽ dùng sold*unitSell ở màn hình.",
-        { productId, soldQuantity, orderTotalQty, window: { entry: batchSnapshot.warehouseEntryDateStr, completed: todayStr } }
-      );
-    }
     let finalActualRevenue = 0;
     let finalClearanceQuantity = 0;
     let finalClearanceRevenue = 0;
@@ -378,15 +416,6 @@ const resetProductForNewBatch = async (productId, completionReason = "SOLD_OUT")
       finalFullPriceQuantity = revenueStats.fullPriceQuantity;
       finalFullPriceRevenue = revenueStats.fullPriceRevenue;
     }
-    console.log("[ProductBatchService] resetProductForNewBatch saved order stats", {
-      productId,
-      batchNumber: batchSnapshot.batchNumber,
-      finalActualRevenue,
-      finalFullPriceQuantity,
-      finalClearanceQuantity,
-      finalFullPriceRevenue,
-      finalClearanceRevenue,
-    });
     // Snapshot name, category, brand tại thời điểm chốt lô (minh bạch, không đổi khi product sửa sau)
     const productNameSnapshot = (product.name && product.name.toString()) ? product.name.toString().trim() : "";
     const productCategoryNameSnapshot = (product.category && product.category.name) ? String(product.category.name).trim() : "";
@@ -467,7 +496,6 @@ const resetProductForNewBatch = async (productId, completionReason = "SOLD_OUT")
     };
   } catch (error) {
     await session.abortTransaction();
-    console.error("Error resetting product:", error);
     return { status: "ERR", message: error.message };
   } finally {
     session.endSession();
@@ -489,7 +517,8 @@ const autoResetExpiredProducts = async () => {
     const startOfTodayVN = new Date(today);
     startOfTodayVN.setHours(0, 0, 0, 0);
     // Tìm products hết hạn và còn tồn kho
-    // Hết hạn: expiryDateStr < today HOẶC (expiryDateStr null/trống và expiryDate < today) để cover data cũ
+    // Hết hạn: expiryDateStr <= today (bao gồm hết hạn trong ngày) HOẶC (expiryDateStr null và expiryDate <= endOfToday)
+    const endOfTodayVN = new Date(startOfTodayVN.getTime() + 24 * 60 * 60 * 1000 - 1);
     const expiredProducts = await ProductModel.find({
       onHandQuantity: { $gt: 0 },
       $or: [
@@ -499,8 +528,8 @@ const autoResetExpiredProducts = async () => {
       $and: [
         {
           $or: [
-            { expiryDateStr: { $exists: true, $ne: null, $lt: todayStr } },
-            { $and: [{ expiryDateStr: { $in: [null, ""] } }, { expiryDate: { $lt: startOfTodayVN } }] },
+            { expiryDateStr: { $exists: true, $ne: null, $lte: todayStr } },
+            { $and: [{ expiryDateStr: { $in: [null, ""] } }, { expiryDate: { $lte: endOfTodayVN } }] },
           ],
         },
       ],
@@ -520,11 +549,19 @@ const autoResetExpiredProducts = async () => {
 
 
     const resetResults = [];
-
+    const skippedProducts = [];
 
     // Tự động reset từng product
     for (const product of expiredProducts) {
       try {
+        // Chỉ chốt lô khi TẤT CẢ đơn chứa sản phẩm đều COMPLETED/CANCELLED/REFUND.
+        // Tránh chốt rồi có đơn PENDING/SHIPPING bị cancel → hàng trả kho khó xử lý.
+        const inTransition = await hasOrdersInTransitionForProduct(product._id.toString());
+        if (inTransition) {
+          skippedProducts.push({ productId: product._id.toString(), productName: product.name, reason: "orders_in_transition" });
+          continue;
+        }
+
         const result = await resetProductForNewBatch(product._id.toString(), "EXPIRED");
        
         if (result.status === "OK") {
@@ -535,25 +572,24 @@ const autoResetExpiredProducts = async () => {
             onHandQuantity: product.onHandQuantity,
             expiryDateStr: product.expiryDateStr,
           });
-        } else {
-          console.error(`Error resetting product ${product._id}:`, result.message);
         }
       } catch (error) {
-        console.error(`Error resetting product ${product._id}:`, error);
+        // Skip on error
       }
     }
 
 
     return {
       status: "OK",
-      message: `Automatically reset ${resetResults.length} expired products`,
+      message: `Automatically reset ${resetResults.length} expired products${skippedProducts.length > 0 ? `, skipped ${skippedProducts.length} (orders in transition)` : ""}`,
       data: {
         resetCount: resetResults.length,
         resetProducts: resetResults,
+        skippedCount: skippedProducts.length,
+        skippedProducts,
       },
     };
   } catch (error) {
-    console.error("Error in autoResetExpiredProducts:", error);
     return { status: "ERR", message: error.message };
   }
 };
@@ -564,9 +600,10 @@ const autoResetExpiredProducts = async () => {
  * Được gọi từ InventoryTransactionService sau khi tạo ISSUE transaction
  * Tự động reset và lưu vào ProductBatchHistoryModel
  * @param {String} productId - Product ID
+ * @param {Object} [options] - { excludeOrderId: string } - Loại trừ đơn khi kiểm tra (vd: đơn vừa COMPLETED)
  * @returns {Promise<Object>} { status, message, data }
  */
-const autoResetSoldOutProduct = async (productId) => {
+const autoResetSoldOutProduct = async (productId, options = {}) => {
   try {
     const product = await ProductModel.findById(productId);
     if (!product) {
@@ -579,6 +616,22 @@ const autoResetSoldOutProduct = async (productId) => {
       product.onHandQuantity === 0 &&
       (product.warehouseEntryDate || product.warehouseEntryDateStr)
     ) {
+      if (!isBatchReceivingComplete(product)) {
+        return {
+          status: "OK",
+          message: "Batch receiving not complete (waiting for full receipt or end of day)",
+          data: null,
+        };
+      }
+      const excludeOrderId = options?.excludeOrderId ?? null;
+      const inTransition = await hasOrdersInTransitionForProduct(productId, excludeOrderId);
+      if (inTransition) {
+        return {
+          status: "OK",
+          message: "Orders in transition (waiting for COMPLETED/CANCELLED/REFUND)",
+          data: null,
+        };
+      }
       const result = await resetProductForNewBatch(productId, "SOLD_OUT");
      
       if (result.status === "OK") {
@@ -603,7 +656,6 @@ const autoResetSoldOutProduct = async (productId) => {
       data: null,
     };
   } catch (error) {
-    console.error("Error in autoResetSoldOutProduct:", error);
     return { status: "ERR", message: error.message };
   }
 };
@@ -700,14 +752,6 @@ const getProductBatchHistory = async (productId, filters = {}) => {
       const rawActual = batch.actualRevenue ?? 0;
       const orderQtyValid = rawFull + rawClearance <= sold && ((rawFull + rawClearance) > 0 || rawActual > 0);
       const orderQty = rawFull + rawClearance;
-      if (orderQtyValid && orderQty > 0 && orderQty < sold) {
-        console.warn("[ProductBatchService] getProductBatchHistory: soldQuantity > orderQuantity, possible missing orders", {
-          productId: batch.product?.toString?.(),
-          batchNumber: batch.batchNumber,
-          sold,
-          orderQty,
-        });
-      }
       let clearanceQuantity = orderQtyValid ? rawClearance : 0;
       let clearanceRevenue = orderQtyValid ? (batch.clearanceRevenue ?? 0) : 0;
       let fullPriceQuantity = orderQtyValid ? rawFull : 0;
@@ -725,19 +769,7 @@ const getProductBatchHistory = async (productId, filters = {}) => {
       const grossProfit = Math.round((revenue - cogs) * 100) / 100;
       const inventoryLoss = discarded * unitCost;
       const opportunityLoss = discarded * unitSell;
-      console.log("[ProductBatchService] getProductBatchHistory batch", {
-        batchNumber: batch.batchNumber,
-        sold,
-        unitSell,
-        unitCost,
-        revenueFromPrice,
-        orderQty,
-        orderQtyValid,
-        actualRevenueFromOrders,
-        revenue,
-        cogs,
-        grossProfit,
-      });
+      const actualProfit = Math.round((grossProfit - inventoryLoss) * 100) / 100;
       const payload = {
         ...batch,
         productDisplay,
@@ -756,6 +788,7 @@ const getProductBatchHistory = async (productId, filters = {}) => {
           actualRevenue: actualRevenueFromOrders,
           grossProfit,
           inventoryLoss,
+          actualProfit,
           opportunityLoss,
           clearanceQuantity,
           clearanceRevenue,
@@ -765,13 +798,6 @@ const getProductBatchHistory = async (productId, filters = {}) => {
       };
       return payload;
     });
-    if (data.length > 0) {
-      console.log("[ProductBatchService] getProductBatchHistory summary (first)", {
-        productId,
-        totalBatches: data.length,
-        first: { batchNumber: data[0].batchNumber, revenue: data[0].revenue, grossProfit: data[0].financial?.grossProfit },
-      });
-    }
     return {
       status: "OK",
       message: "Fetched batch history successfully",
@@ -823,7 +849,7 @@ const autoResetSoldOutProductsCatchUp = async () => {
           });
         }
       } catch (error) {
-        console.error(`Error catch-up reset product ${product._id}:`, error);
+        // Skip on error
       }
     }
 
@@ -836,7 +862,6 @@ const autoResetSoldOutProductsCatchUp = async () => {
       },
     };
   } catch (error) {
-    console.error("Error in autoResetSoldOutProductsCatchUp:", error);
     return { status: "ERR", message: error.message };
   }
 };
@@ -847,4 +872,5 @@ module.exports = {
   autoResetSoldOutProduct,
   autoResetSoldOutProductsCatchUp,
   getProductBatchHistory,
+  isBatchReceivingComplete,
 };

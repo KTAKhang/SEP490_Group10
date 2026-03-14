@@ -16,7 +16,7 @@ const UserModel = require("../models/UserModel");
 const ReviewModel = require("../models/ReviewModel");
 const { default: mongoose } = require("mongoose");
 const { createVnpayUrl } = require("../utils/createVnpayUrl");
-const { getEffectivePrice } = require("../utils/productPrice");
+const { getEffectivePrice, isProductExpired } = require("../utils/productPrice");
 const STATUS_OPTIONS = [
   { value: "PENDING", label: "Pending" },
   { value: "PAID", label: "Paid" },
@@ -189,6 +189,8 @@ const confirmCheckoutAndCreateOrder = async ({
 
       if (!product || !product.status)
         throw new Error("The product is unavailable");
+      if (isProductExpired(product))
+        throw new Error(`Sản phẩm "${product.name}" đã hết hạn sử dụng. Không thể đặt hàng.`);
       const { effectivePrice, originalPrice } = getEffectivePrice(product);
       totalPrice += item.quantity * effectivePrice;
       orderDetails.push({
@@ -520,7 +522,7 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
       if (currentStatusName !== "COMPLETED") {
         throw new Error("Only COMPLETED orders can be moved to the refund workflow");
       }
-      // Chỉ cho phép REFUND khi tổng số lượng sản phẩm trong đơn < 50
+      // Chỉ cho phép REFUND khi tổng số lượng sản phẩm trong đơn < 100
       const orderDetails = await OrderDetailModel.find({ order_id: order._id })
         .select("quantity")
         .session(session)
@@ -529,9 +531,9 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
         (sum, item) => sum + (Number(item.quantity) || 0),
         0
       );
-      if (totalOrderQuantity >= 50) {
+      if (totalOrderQuantity > 100) {
         throw new Error(
-          "Refund is only allowed for orders with total product quantity below 50"
+          "Refund is only allowed for orders with total product quantity below or equal to 100kg"
         );
       }
     } else if (isShippingToCancelled) {
@@ -685,9 +687,10 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
             .map((p) => p._id.toString());
 
           const ProductBatchService = require("./ProductBatchService");
+          const orderIdStr = order._id?.toString?.();
           for (const pid of eligibleProductIds) {
             try {
-              await ProductBatchService.autoResetSoldOutProduct(pid);
+              await ProductBatchService.autoResetSoldOutProduct(pid, { excludeOrderId: orderIdStr });
             } catch (e) {
               console.error("Auto-reset sold out product after COMPLETED failed:", pid, e);
             }
