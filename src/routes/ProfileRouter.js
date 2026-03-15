@@ -24,6 +24,6 @@ routerProfile.put(
 
 routerProfile.get("/user-info",
     authUserMiddleware,
-     profileController.getUserById);
+    profileController.getUserById);
 
 module.exports = routerProfile;

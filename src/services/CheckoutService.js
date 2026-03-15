@@ -6,7 +6,7 @@ const ProductModel = require("../models/ProductModel");
 const { getEffectivePrice } = require("../utils/productPrice");
 const HOLD_MINUTES = 15;
 const COOLDOWN_MINUTES = 30;
-const MAX_HOLD_PERCENT = 1;
+const MAX_HOLD_PERCENT = 0.6;
 const MAX_HOLD_PER_DAY = 3;
 
 

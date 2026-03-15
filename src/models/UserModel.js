@@ -6,6 +6,7 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: [true, "Tên người dùng là bắt buộc"],
       trim: true,
+      unique: true,
       minlength: [3, "Tên người dùng phải có ít nhất 3 ký tự"],
       maxlength: [50, "Tên người dùng không được vượt quá 50 ký tự"],
     },
