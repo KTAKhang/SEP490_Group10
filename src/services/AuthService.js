@@ -9,6 +9,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const jwtService = require("./JwtService");
 const dotenv = require("dotenv");
+const EmailService = require("./CustomerEmailService");
 
 dotenv.config();
 
@@ -246,14 +247,22 @@ const sendRegisterOTP = async (
   birthday,
   gender,
 ) => {
-  const existingUser = await UserModel.findOne({ email });
-  const existingUserName = await UserModel.findOne({ user_name });
-  if (existingUser) {
-    return { status: "ERR", message: "Email address has been registered!" };
-  }
 
-  if (existingUserName) {
-    return { status: "ERR", message: "The username is already in use!" };
+  const existingUser = await UserModel.findOne({
+    $or: [
+      { email: email },
+      { user_name: user_name }
+    ]
+  });
+
+  if (existingUser) {
+    if (existingUser.email === email) {
+      return { status: "ERR", message: "Email address has been registered!" };
+    }
+
+    if (existingUser.user_name === user_name) {
+      return { status: "ERR", message: "The username is already in use!" };
+    }
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -274,25 +283,21 @@ const sendRegisterOTP = async (
     { upsert: true, new: true },
   );
 
-  await transporter.sendMail({
-    from: process.env.SMTP_USER,
-    to: email,
-    subject: "🔐 OTP for Registration",
-    html: `
-        <div style="max-width: 400px; margin: 20px auto; padding: 20px; border: 2px solid #4CAF50; border-radius: 10px; background-color: #f9fff9; font-family: Arial, sans-serif; text-align: center;">
-  <h2 style="color: #4CAF50; margin-bottom: 10px;">Your OTP Code</h2>
-  <p style="font-size: 16px; color: #333;">
-    Please use the following OTP to verify your account:
-  </p>
-  <div style="font-size: 24px; font-weight: bold; color: #ffffff; background-color: #4CAF50; padding: 10px 20px; border-radius: 8px; display: inline-block; letter-spacing: 2px;">
-    ${otp}
-  </div>
-  <p style="margin-top: 15px; color: #666;">This code will expire in <strong>10 minutes</strong>.</p>
-</div>
-`,
-  });
+  // call EmailService
+  const emailResult = await EmailService.sendRegisterOTPEmail(
+    email,
+    fullName,
+    otp
+  );
 
-  return { status: "OK", message: "The OTP has been sent to your email." };
+  if (emailResult.status === "ERR") {
+    return emailResult;
+  }
+
+  return {
+    status: "OK",
+    message: "The OTP has been sent to your email.",
+  };
 };
 
 const confirmRegisterOTP = async (email, otp) => {
@@ -347,46 +352,38 @@ const confirmRegisterOTP = async (email, otp) => {
 
 const sendResetPasswordOTP = async (email) => {
   const user = await UserModel.findOne({ email });
-  if (!user) throw new Error("The email address doesn't exist");
 
-  // ✅ Không cho reset password với tài khoản Google
+  if (!user) {
+    return {
+      status: "ERR",
+      message: "The email address doesn't exist",
+    };
+  }
+
+  // Không cho reset với tài khoản Google
   if (user.isGoogleAccount) {
-    throw new Error(
-      "This account uses Google login information and the password cannot be reset.",
-    );
+    return {
+      status: "ERR",
+      message:
+        "This account uses Google login information and the password cannot be reset.",
+    };
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
   user.resetPasswordOTP = otp;
   user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
+
   await user.save();
 
-  try {
-    await transporter.sendMail({
-      from: process.env.SMTP_USER,
-      to: email,
-      subject: "🔒 Reset Password OTP",
-      html: `
-      <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 500px; margin: auto; border: 1px solid #ddd; border-radius: 10px;background-color:rgb(174, 216, 48);">
-        <h2 style="color: #007bff; text-align: center;">🔐 Reset Your Password</h2>
-        <p style="font-size: 16px;">Hello,</p>
-        <p style="font-size: 16px;">We received a request to reset your password. Use the OTP below to proceed:</p>
-        <div style="text-align: center; padding: 10px 20px; background-color: #f3f3f3; border-radius: 5px; font-size: 20px; font-weight: bold;">
-          ${otp}
-        </div>
-        <p style="font-size: 14px; color: red;">⚠️ This OTP is valid for <strong>10 minutes</strong>. Do not share it with anyone.</p>
-        <p style="font-size: 16px;">If you did not request this, please ignore this email.</p>
-        <hr style="border: 0.5px solid #ddd;">
-        <p style="text-align: center; font-size: 12px; color: #666;">&copy; 2024 Your Company. All rights reserved.</p>
-      </div>
-    `,
-    });
-  } catch (err) {
-    return {
-      status: "ERR",
-      message: "Email could not be sent. Please try again later",
-    };
+  const emailResult = await EmailService.sendResetPasswordOTPEmail(
+    email,
+    user.fullName,
+    otp
+  );
+
+  if (emailResult.status === "ERR") {
+    return emailResult;
   }
 
   return {

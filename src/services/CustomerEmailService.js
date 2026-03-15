@@ -817,6 +817,260 @@ Smart Fruit Shop
       return { status: "ERR", message: error.message };
     }
   },
+  /**
+ * Send OTP email for account registration
+ *
+ * @param {String} customerEmail
+ * @param {String} customerName
+ * @param {String} otp
+ * @returns {Promise<Object>}
+ */
+async sendRegisterOTPEmail(customerEmail, customerName, otp) {
+  try {
+    const transporter = createTransporter();
+
+    const mailOptions = {
+      from: {
+        name: "Smart Fruit Shop",
+        address: process.env.SMTP_USER || "noreply@smartfruitshop.vn",
+      },
+      to: customerEmail,
+      subject: "🔐 OTP Verification for Registration – Smart Fruit Shop",
+
+      html: `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+body{
+  font-family: Arial, sans-serif;
+  background:#f4f4f4;
+  padding:20px;
+}
+.container{
+  max-width:500px;
+  margin:auto;
+  background:white;
+  padding:30px;
+  border-radius:10px;
+  border:1px solid #ddd;
+  text-align:center;
+}
+.header{
+  background:#4CAF50;
+  color:white;
+  padding:15px;
+  border-radius:8px 8px 0 0;
+  margin:-30px -30px 20px -30px;
+}
+.otp{
+  font-size:28px;
+  font-weight:bold;
+  letter-spacing:4px;
+  background:#4CAF50;
+  color:white;
+  padding:12px 25px;
+  border-radius:8px;
+  display:inline-block;
+  margin:20px 0;
+}
+.footer{
+  margin-top:20px;
+  font-size:12px;
+  color:#888;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<div class="header">
+<h2>Email Verification</h2>
+</div>
+
+<p>Hello <strong>${customerName || "Customer"}</strong>,</p>
+
+<p>Please use the OTP below to verify your Smart Fruit Shop account.</p>
+
+<div class="otp">
+${otp}
+</div>
+
+<p>This OTP will expire in <strong>10 minutes</strong>.</p>
+
+<p>If you did not request this, please ignore this email.</p>
+
+<div class="footer">
+Smart Fruit Shop – Automated Email
+</div>
+
+</div>
+
+</body>
+</html>
+`,
+
+      text: `
+Hello ${customerName || "Customer"},
+
+Your OTP for Smart Fruit Shop registration is: ${otp}
+
+This OTP will expire in 10 minutes.
+
+If you did not request this email, please ignore it.
+`.trim(),
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+
+    return {
+      status: "OK",
+      message: "OTP email sent successfully",
+      messageId: info.messageId,
+    };
+  } catch (error) {
+    console.error("OTP email error:", error);
+    return {
+      status: "ERR",
+      message: `Failed to send OTP email: ${error.message}`,
+    };
+  }
+},
+/**
+ * Send OTP email for resetting password
+ *
+ * @param {String} customerEmail
+ * @param {String} customerName
+ * @param {String} otp
+ * @returns {Promise<Object>}
+ */
+async sendResetPasswordOTPEmail(customerEmail, customerName, otp) {
+  try {
+    const transporter = createTransporter();
+
+    const mailOptions = {
+      from: {
+        name: "Smart Fruit Shop",
+        address: process.env.SMTP_USER || "noreply@smartfruitshop.vn",
+      },
+      to: customerEmail,
+      subject: "🔒 Reset Password OTP – Smart Fruit Shop",
+
+      html: `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+body{
+  font-family: Arial, sans-serif;
+  background:#f4f4f4;
+  padding:20px;
+}
+.container{
+  max-width:500px;
+  margin:auto;
+  background:white;
+  padding:30px;
+  border-radius:10px;
+  border:1px solid #ddd;
+}
+.header{
+  background:#007bff;
+  color:white;
+  padding:15px;
+  border-radius:8px 8px 0 0;
+  text-align:center;
+  margin:-30px -30px 20px -30px;
+}
+.otp{
+  font-size:28px;
+  font-weight:bold;
+  letter-spacing:4px;
+  background:#f3f3f3;
+  padding:12px 25px;
+  border-radius:8px;
+  text-align:center;
+  margin:20px 0;
+}
+.warning{
+  color:red;
+  font-size:14px;
+}
+.footer{
+  margin-top:20px;
+  font-size:12px;
+  color:#888;
+  text-align:center;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<div class="header">
+<h2>Reset Your Password</h2>
+</div>
+
+<p>Hello <strong>${customerName || "Customer"}</strong>,</p>
+
+<p>We received a request to reset your password.</p>
+
+<p>Please use the OTP below to continue:</p>
+
+<div class="otp">
+${otp}
+</div>
+
+<p class="warning">
+⚠️ This OTP is valid for <strong>10 minutes</strong>. Do not share it with anyone.
+</p>
+
+<p>If you did not request this, please ignore this email.</p>
+
+<div class="footer">
+Smart Fruit Shop – Automated Email
+</div>
+
+</div>
+
+</body>
+</html>
+`,
+
+      text: `
+Hello ${customerName || "Customer"},
+
+Your OTP for resetting password is: ${otp}
+
+This code is valid for 10 minutes.
+
+If you did not request this, please ignore this email.
+
+Smart Fruit Shop
+`.trim(),
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+
+    return {
+      status: "OK",
+      message: "Reset password OTP email sent",
+      messageId: info.messageId,
+    };
+  } catch (error) {
+    console.error("Reset password OTP email error:", error);
+    return {
+      status: "ERR",
+      message: `Failed to send email: ${error.message}`,
+    };
+  }
+},
 };
 
 module.exports = EmailService;

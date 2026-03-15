@@ -31,7 +31,6 @@ const updateProfile = async (req, res) => {
     const id = req.user._id;
     const { user_name,fullName, phone, address, birthday, gender } = req.body;
     const file = req.file;
-console.log("REQ.FILE:", req.file);
     // Validate user_name
     const isStrictUserName = (name) => /^[\p{L}\p{N}_ ]{3,30}$/u.test(name);
     if (!isStrictUserName(user_name)) {
@@ -116,7 +115,7 @@ console.log("REQ.FILE:", req.file);
     const response = await ProfileService.updateProfile(
       id,
       { user_name,fullName, phone, address, birthday, gender },
-      file,
+      file
     );
     return res.status(200).json(response);
   } catch (error) {
