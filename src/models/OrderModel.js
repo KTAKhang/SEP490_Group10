@@ -43,23 +43,6 @@ const orderSchema = new mongoose.Schema(
       required: [true, "Tổng giá trị đơn hàng là bắt buộc"],
       min: [0, "Tổng giá trị đơn hàng không được âm"],
     },
-    // thêm vào orderSchema
-    shipping_fee: {
-      type: Number,
-      required: true,
-      min: [0, "Tiền ship không được âm"],
-    },
-
-    shipping_type: {
-      type: String,
-      enum: ["IN_PROVINCE", "OUT_PROVINCE"],
-      required: true,
-    },
-
-    shipping_weight: {
-      type: Number, // kg
-      required: true,
-    },
     note: {
       type: String,
       trim: true,

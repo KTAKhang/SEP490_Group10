@@ -207,18 +207,8 @@ const confirmCheckoutAndCreateOrder = async ({
       });
     }
 
-    /* =======================
-   3️⃣.5 CALCULATE SHIPPING
-======================= */
-    const { shippingFee, shippingType, shippingWeight } =
-      await ShippingService.calculateShippingForCheckout({
-        user_id,
-        selected_product_ids,
-        city,
-        session,
-      });
 
-    const orderValueBeforeDiscount = totalPrice + shippingFee;
+    const orderValueBeforeDiscount = totalPrice;
     let finalTotalPrice = orderValueBeforeDiscount;
     let discountCode = null;
     let discountAmount = 0;
@@ -250,9 +240,6 @@ const confirmCheckoutAndCreateOrder = async ({
         {
           user_id,
           total_price: finalTotalPrice,
-          shipping_fee: shippingFee,
-          shipping_type: shippingType,
-          shipping_weight: shippingWeight,
           receiver_name: receiverInfo.receiver_name,
           receiver_phone: receiverInfo.receiver_phone,
           receiver_address: receiverInfo.receiver_address,
@@ -1120,11 +1107,10 @@ const getOrderByUser = async (order_id, user_id) => {
       review: reviewMap.get(detail.product_id?.toString()) || null,
     }));
 
-    const shippingFee = order.shipping_fee ?? 0;
     const discountAmount = order.discount_amount ?? 0;
     const totalPrice = order.total_price ?? 0;
     // Tổng tiền sản phẩm (chưa ship, chưa trừ voucher): total_price = subtotal_products + shipping_fee - discount_amount
-    const subtotalProducts = totalPrice - shippingFee + discountAmount;
+    const subtotalProducts = totalPrice + discountAmount;
 
     return {
       status: "OK",
@@ -1134,7 +1120,6 @@ const getOrderByUser = async (order_id, user_id) => {
           ...order,
           discount_code: order.discount_code ?? null,
           discount_amount: discountAmount,
-          shipping_fee: shippingFee,
           total_price: totalPrice,
           subtotal_products: subtotalProducts,
         },
@@ -1232,16 +1217,14 @@ const getOrdersForAdmin = async (filters = {}) => {
 
     const data = orders
       .map((order) => {
-        const shippingFee = order.shipping_fee ?? 0;
         const discountAmount = order.discount_amount ?? 0;
         const totalPrice = order.total_price ?? 0;
-        const subtotalProducts = totalPrice - shippingFee + discountAmount;
+        const subtotalProducts = totalPrice + discountAmount;
         return {
           ...order,
           payment: paymentMap.get(order._id.toString()) || null,
           discount_code: order.discount_code ?? null,
           discount_amount: discountAmount,
-          shipping_fee: shippingFee,
           total_price: totalPrice,
           subtotal_products: subtotalProducts,
         };
@@ -1289,10 +1272,9 @@ const getOrderDetailForAdmin = async (order_id) => {
       PaymentModel.findOne({ order_id: order._id, type: "PAYMENT" }).lean(),
     ]);
 
-    const shippingFee = order.shipping_fee ?? 0;
     const discountAmount = order.discount_amount ?? 0;
     const totalPrice = order.total_price ?? 0;
-    const subtotalProducts = totalPrice - shippingFee + discountAmount;
+    const subtotalProducts = totalPrice + discountAmount;
 
     return {
       status: "OK",
@@ -1302,7 +1284,6 @@ const getOrderDetailForAdmin = async (order_id) => {
           ...order,
           discount_code: order.discount_code ?? null,
           discount_amount: discountAmount,
-          shipping_fee: shippingFee,
           total_price: totalPrice,
           subtotal_products: subtotalProducts,
         },
