@@ -3,6 +3,7 @@ const ProductModel = require("../models/ProductModel");
 const CategoryModel = require("../models/CategoryModel");
 const InventoryTransactionModel = require("../models/InventoryTransactionModel");
 const { getEffectivePrice } = require("../utils/productPrice");
+const { escapeRegex } = require("./fruitNameMapService");
 
 // Lấy tối đa 6 sản phẩm bán chạy nhất (chỉ từ ISSUE, không bổ sung sản phẩm khác)
 const getFeaturedProducts = async () => {
@@ -244,6 +245,91 @@ const getProducts = async ({ page = 1, limit = 12, search = "", category, sortBy
   }
 };
 
+const formatPublicProductListItem = (product) => {
+  const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
+  const formatted = {
+    ...product,
+    price: effectivePrice,
+    effectivePrice,
+    isNearExpiry,
+    originalPrice,
+  };
+  if (Array.isArray(product.images) && product.images.length > 0) {
+    formatted.featuredImage = product.images[0];
+  } else {
+    formatted.featuredImage = null;
+  }
+  return formatted;
+};
+
+/** GET /products/search?name= — substring match on product name (public, active products + active category) */
+const searchProductsByName = async ({ name, limit: limitRaw } = {}) => {
+  try {
+    const trimmed = (name && String(name).trim()) || "";
+    if (!trimmed) {
+      return { status: "ERR", message: "name is required" };
+    }
+    const limit = Math.min(50, Math.max(1, parseInt(limitRaw, 10) || 20));
+    const raw = await ProductModel.find({
+      status: true,
+      name: { $regex: escapeRegex(trimmed), $options: "i" },
+    })
+      .populate({
+        path: "category",
+        select: "name description image status",
+        match: { status: true },
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    const data = raw.filter((p) => p.category).map(formatPublicProductListItem);
+    return {
+      status: "OK",
+      message: "Search completed",
+      data,
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
+/**
+ * OR search on name for any keyword (used by fruit AI assistant).
+ * @param {string[]} keywords
+ */
+const searchProductsByKeywords = async (keywords, { limit: limitRaw } = {}) => {
+  try {
+    const cleaned = [...new Set((keywords || []).map((k) => String(k).trim()).filter(Boolean))];
+    if (!cleaned.length) {
+      return { status: "OK", message: "No keywords", data: [] };
+    }
+    const limit = Math.min(50, Math.max(1, parseInt(limitRaw, 10) || 12));
+    const or = cleaned.map((k) => ({ name: { $regex: escapeRegex(k), $options: "i" } }));
+    const raw = await ProductModel.find({
+      status: true,
+      $or: or,
+    })
+      .populate({
+        path: "category",
+        select: "name description image status",
+        match: { status: true },
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    const data = raw.filter((p) => p.category).map(formatPublicProductListItem);
+    return {
+      status: "OK",
+      message: "Search completed",
+      data,
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
 // Lấy chi tiết sản phẩm (hiển thị tất cả ảnh)
 const getProductById = async (id) => {
   try {
@@ -291,4 +377,6 @@ module.exports = {
   getFeaturedProducts,
   getProducts,
   getProductById,
+  searchProductsByName,
+  searchProductsByKeywords,
 };

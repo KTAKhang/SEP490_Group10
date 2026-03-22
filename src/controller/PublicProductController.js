@@ -34,8 +34,22 @@ const getProductById = async (req, res) => {
   }
 };
 
+const searchProducts = async (req, res) => {
+  try {
+    const response = await PublicProductService.searchProductsByName({
+      name: req.query.name,
+      limit: req.query.limit,
+    });
+    if (response.status === "ERR") return res.status(400).json(response);
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({ status: "ERR", message: error.message });
+  }
+};
+
 module.exports = {
   getFeaturedProducts,
   getProducts,
   getProductById,
+  searchProducts,
 };
