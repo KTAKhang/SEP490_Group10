@@ -9,6 +9,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const jwtService = require("./JwtService");
 const dotenv = require("dotenv");
+const EmailService = require("./CustomerEmailService");
 
 dotenv.config();
 
@@ -41,7 +42,7 @@ const loginWithGoogle = async (idToken) => {
 
     const payload = ticket.getPayload();
     console.log("TOKEN AUD:", payload.aud);
-console.log("EXPECTED:", CLIENT_IDS);
+    console.log("EXPECTED:", CLIENT_IDS);
     const { sub: googleId, email, name, picture } = payload;
     let user = await UserModel.findOne({
       $or: [{ googleId }, { email }],
@@ -65,7 +66,9 @@ console.log("EXPECTED:", CLIENT_IDS);
     }
 
     if (user.status === false) {
-      const err = new Error("Tài khoản bị chặn");
+      const err = new Error(
+        "Your account is locked, please contact us for support.",
+      );
       err.status = "ERR";
       throw err;
     }
@@ -91,10 +94,11 @@ console.log("EXPECTED:", CLIENT_IDS);
     });
 
     user.refreshToken = refreshToken;
+    user.currentAccessToken = accessToken;
     await user.save();
     return {
       status: "OK",
-      message: "Đăng nhập Google thành công",
+      message: "Login by Google Successfully",
       data: {
         _id: populatedUser._id,
         user_name: populatedUser.user_name,
@@ -121,14 +125,36 @@ const loginUser = async ({ email, password }) => {
     const user = await UserModel.findOne({
       email: { $regex: new RegExp(`^${email}$`, "i") },
     });
-    if (!user) throw { status: "ERR", message: "Tài khoản không tồn tại" };
-
+    if (!user) throw { status: "ERR", message: "Incorrect email or password." };
+    const MAX_LOGIN_ATTEMPTS = 5;
+    const LOCK_TIME = 15 * 60 * 1000;
     if (user.status === false)
-      throw { status: "ERR", message: "Tài khoản bị chặn" };
+      throw {
+        status: "ERR",
+        message: "Your account is locked, please contact us for support.",
+      };
+
+    if (user.lockUntil && user.lockUntil > Date.now()) {
+      throw {
+        status: "ERR",
+        message: "Your account has been locked for 15 minutes due to too many incorrect login attempts.",
+      };
+    }
 
     const passwordMatch = bcrypt.compareSync(password, user.password);
 
-    if (!passwordMatch) throw { status: "ERR", message: "Mật khẩu không đúng" };
+    if (!passwordMatch) {
+      user.loginAttempts += 1;
+
+      if (user.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+        user.lockUntil = Date.now() + LOCK_TIME;
+        user.loginAttempts = 0;
+      }
+
+      await user.save();
+
+      throw { status: "ERR", message: "Incorrect email or password." };
+    }
 
     const populatedUser = await UserModel.findById(user._id).populate(
       "role_id",
@@ -145,11 +171,14 @@ const loginUser = async ({ email, password }) => {
       isAdmin: roleName === "admin",
       role: roleName,
     });
+    user.loginAttempts = 0;
+    user.lockUntil = null;
     user.refreshToken = refreshToken;
+    user.currentAccessToken = accessToken;
     await user.save();
     return {
       status: "OK",
-      message: "Đăng nhập thành công",
+      message: "Login Successfully",
       data: {
         _id: populatedUser._id,
         user_name: populatedUser.user_name,
@@ -180,46 +209,60 @@ const refreshAccessToken = async (refreshToken) => {
     const user = await UserModel.findById(payload._id);
 
     if (!user || user.refreshToken !== refreshToken)
-      throw { status: "ERR", message: "refresh token không hợp lệ" };
+      throw { status: "ERR", message: "Invalid refresh token" };
 
     const newAccessToken = jwtService.generalAccessToken({
       _id: user._id,
       isAdmin: payload.isAdmin,
       role: payload.role,
     });
+    // ❗ update accessToken mới
+    user.currentAccessToken = newAccessToken;
+    await user.save();
 
     return { access_token: newAccessToken };
   } catch (err) {
     if (err.name === "TokenExpiredError") {
-      throw { status: "ERR", message: "Refresh token đã hết hạn" };
+      throw { status: "ERR", message: "The refresh token has expired." };
     }
-    throw { status: "ERR", message: "Refresh token không hợp lệ" };
+    throw { status: "ERR", message: "Invalid refresh token" };
   }
 };
 
 const logoutUser = async (userId) => {
-  // Xoá refresh token trong DB
-  await UserModel.findByIdAndUpdate(userId, { $unset: { refreshToken: 1 } });
-  return { status: "OK", message: "Đăng xuất thành công", userId };
+  await UserModel.findByIdAndUpdate(userId, {
+    refreshToken: null,
+    currentAccessToken: null,
+  });
+  return { status: "OK", message: "Logout successfull", userId };
 };
 
 const sendRegisterOTP = async (
   user_name,
   email,
   password,
+  fullName,
   phone,
   address,
   birthday,
   gender,
 ) => {
-  const existingUser = await UserModel.findOne({ email });
-  const existingUserName = await UserModel.findOne({ user_name });
-  if (existingUser) {
-    return { status: "ERR", message: "Email address has been registered!" };
-  }
 
-  if (existingUserName) {
-    return { status: "ERR", message: "The username is already in use!" };
+  const existingUser = await UserModel.findOne({
+    $or: [
+      { email: email },
+      { user_name: user_name }
+    ]
+  });
+
+  if (existingUser) {
+    if (existingUser.email === email) {
+      return { status: "ERR", message: "Email address has been registered!" };
+    }
+
+    if (existingUser.user_name === user_name) {
+      return { status: "ERR", message: "The username is already in use!" };
+    }
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -231,6 +274,7 @@ const sendRegisterOTP = async (
       expiresAt: Date.now() + 10 * 60 * 1000,
       user_name,
       password,
+      fullName,
       phone,
       address,
       birthday,
@@ -239,25 +283,21 @@ const sendRegisterOTP = async (
     { upsert: true, new: true },
   );
 
-  await transporter.sendMail({
-    from: process.env.SMTP_USER,
-    to: email,
-    subject: "🔐 OTP for Registration",
-    html: `
-        <div style="max-width: 400px; margin: 20px auto; padding: 20px; border: 2px solid #4CAF50; border-radius: 10px; background-color: #f9fff9; font-family: Arial, sans-serif; text-align: center;">
-  <h2 style="color: #4CAF50; margin-bottom: 10px;">Your OTP Code</h2>
-  <p style="font-size: 16px; color: #333;">
-    Please use the following OTP to verify your account:
-  </p>
-  <div style="font-size: 24px; font-weight: bold; color: #ffffff; background-color: #4CAF50; padding: 10px 20px; border-radius: 8px; display: inline-block; letter-spacing: 2px;">
-    ${otp}
-  </div>
-  <p style="margin-top: 15px; color: #666;">This code will expire in <strong>10 minutes</strong>.</p>
-</div>
-`,
-  });
+  // call EmailService
+  const emailResult = await EmailService.sendRegisterOTPEmail(
+    email,
+    fullName,
+    otp
+  );
 
-  return { status: "OK", message: "The OTP has been sent to your email." };
+  if (emailResult.status === "ERR") {
+    return emailResult;
+  }
+
+  return {
+    status: "OK",
+    message: "The OTP has been sent to your email.",
+  };
 };
 
 const confirmRegisterOTP = async (email, otp) => {
@@ -295,6 +335,7 @@ const confirmRegisterOTP = async (email, otp) => {
     email,
     password: hashedPassword,
     role_id: customerRole._id,
+    fullName: tempRecord.fullName,
     phone: tempRecord.phone,
     address: tempRecord.address,
     birthday: tempRecord.birthday,
@@ -311,46 +352,38 @@ const confirmRegisterOTP = async (email, otp) => {
 
 const sendResetPasswordOTP = async (email) => {
   const user = await UserModel.findOne({ email });
-  if (!user) throw new Error("The email address doesn't exist");
 
-  // ✅ Không cho reset password với tài khoản Google
+  if (!user) {
+    return {
+      status: "ERR",
+      message: "The email address doesn't exist",
+    };
+  }
+
+  // Không cho reset với tài khoản Google
   if (user.isGoogleAccount) {
-    throw new Error(
-      "This account uses Google login information and the password cannot be reset.",
-    );
+    return {
+      status: "ERR",
+      message:
+        "This account uses Google login information and the password cannot be reset.",
+    };
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
   user.resetPasswordOTP = otp;
   user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
+
   await user.save();
 
-  try {
-    await transporter.sendMail({
-      from: process.env.SMTP_USER,
-      to: email,
-      subject: "🔒 Reset Password OTP",
-      html: `
-      <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 500px; margin: auto; border: 1px solid #ddd; border-radius: 10px;background-color:rgb(174, 216, 48);">
-        <h2 style="color: #007bff; text-align: center;">🔐 Reset Your Password</h2>
-        <p style="font-size: 16px;">Hello,</p>
-        <p style="font-size: 16px;">We received a request to reset your password. Use the OTP below to proceed:</p>
-        <div style="text-align: center; padding: 10px 20px; background-color: #f3f3f3; border-radius: 5px; font-size: 20px; font-weight: bold;">
-          ${otp}
-        </div>
-        <p style="font-size: 14px; color: red;">⚠️ This OTP is valid for <strong>10 minutes</strong>. Do not share it with anyone.</p>
-        <p style="font-size: 16px;">If you did not request this, please ignore this email.</p>
-        <hr style="border: 0.5px solid #ddd;">
-        <p style="text-align: center; font-size: 12px; color: #666;">&copy; 2024 Your Company. All rights reserved.</p>
-      </div>
-    `,
-    });
-  } catch (err) {
-    return {
-      status: "ERR",
-      message: "Email could not be sent. Please try again later",
-    };
+  const emailResult = await EmailService.sendResetPasswordOTPEmail(
+    email,
+    user.fullName,
+    otp
+  );
+
+  if (emailResult.status === "ERR") {
+    return emailResult;
   }
 
   return {

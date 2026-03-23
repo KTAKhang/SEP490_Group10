@@ -83,17 +83,14 @@ const sendMessage = async ({
   }
 
   if (!content && images.length === 0) {
-    throw new Error("Message must have content or images");
+    throw new Error("Message cannot be empty.");
   }
 
   if (images.length > 3) {
     throw new Error("Maximum 3 images allowed");
   }
 
-  const room = await ChatRoom.findById(roomId).populate(
-    "user",
-    "user_name avatar"
-  );
+  const room = await ChatRoom.findById(roomId)
 
   if (!room) throw new Error("Room not found");
 
@@ -118,6 +115,7 @@ const sendMessage = async ({
     type,
   });
 
+  
   /* ======================
      2️⃣ UPDATE ROOM
   ====================== */
@@ -156,6 +154,37 @@ const sendMessage = async ({
       ],
     },
   ]);
+
+  /* ======================
+   SEND NOTIFICATION
+====================== */
+let receiverId = null;
+
+if (senderRole === "customer") {
+  receiverId = room.staff.toString();
+} else {
+  receiverId = room.user.toString();
+}
+const senderName = message.sender?.user_name || "Someone";
+
+setImmediate(async () => {
+  try {
+    await NotificationService.sendToUser(receiverId, {
+      title: `💬 ${senderName}`,
+      body: content
+        ? content.slice(0, 100)
+        : "📷 You received an image message",
+      data: {
+        type: "chat",
+        roomId,
+        action: "open_chat",
+      },
+    });
+  } catch (err) {
+    console.error("Send notification failed:", err.message);
+  }
+});
+
 
   return message;
 };
@@ -239,11 +268,153 @@ const getRoomsByUser = async (userId) => {
     .populate("staff", "user_name avatar email")
     .sort({ updatedAt: -1 });
 };
+
+const getChatRoomsForAdmin = async (filters = {}) => {
+  try {
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      sortBy = "updatedAt",
+      sortOrder = "desc",
+    } = filters;
+
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 10));
+    const skip = (pageNum - 1) * limitNum;
+
+    const query = {};
+
+    const allowedSortFields = ["createdAt", "updatedAt"];
+    const sortField = allowedSortFields.includes(sortBy)
+      ? sortBy
+      : "updatedAt";
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortObj = { [sortField]: sortDirection };
+
+    let roomsQuery = ChatRoom.find(query)
+      .populate({
+        path: "user",
+        select: "user_name email avatar",
+      })
+      .populate({
+        path: "staff",
+        select: "user_name email avatar",
+      })
+      .sort(sortObj)
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    const rooms = await roomsQuery;
+
+    // 🔎 Search theo tên user
+    let filteredRooms = rooms;
+
+    if (search) {
+      const escaped = search
+        .toString()
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+      const regex = new RegExp(escaped, "i");
+
+      filteredRooms = rooms.filter(
+        (room) =>
+          room.user?.user_name?.match(regex) ||
+          room.staff?.user_name?.match(regex)
+      );
+    }
+
+    const total = await ChatRoom.countDocuments(query);
+
+    return {
+      status: "OK",
+      message: "Fetched chat room list successfully",
+      data: filteredRooms,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    };
+  } catch (error) {
+    return {
+      status: "ERR",
+      message: error.message,
+    };
+  }
+};
+
+const getRoomDetailForAdmin = async (roomId, options = {}) => {
+  try {
+    const { limit = 6, before } = options;
+
+    // 1️⃣ Kiểm tra room tồn tại
+    const room = await ChatRoom.findById(roomId)
+      .populate("user", "user_name email avatar")
+      .populate("staff", "user_name email avatar")
+      .lean();
+
+    if (!room) {
+      return {
+        status: "ERR",
+        message: "Room not found",
+      };
+    }
+
+    // 2️⃣ Build query
+    const query = { room: roomId };
+
+    if (before) {
+      const beforeMessage = await Message.findById(before);
+      if (beforeMessage) {
+        query.createdAt = { $lt: beforeMessage.createdAt };
+      }
+    }
+
+    // 3️⃣ Lấy tin nhắn mới nhất trước
+    const messages = await Message.find(query)
+      .populate("sender", "user_name avatar role")
+      .sort({ createdAt: -1 }) // Tin mới nhất trước
+      .limit(parseInt(limit));
+
+    // 4️⃣ Reverse lại để hiển thị đúng thứ tự chat
+    const sortedMessages = messages.reverse();
+
+    // 5️⃣ Check còn tin nhắn cũ hơn không
+    const hasMore = messages.length === parseInt(limit);
+
+    const oldestMessageId =
+      sortedMessages.length > 0
+        ? sortedMessages[0]._id
+        : null;
+
+    return {
+      status: "OK",
+      message: "Fetched room detail successfully",
+      data: {
+        room,
+        messages: sortedMessages,
+        hasMore,
+        oldestMessageId,
+      },
+    };
+  } catch (error) {
+    return {
+      status: "ERR",
+      message: error.message,
+    };
+  }
+};
 module.exports = {
   getOrCreateRoom,
   sendMessage,
   getMessagesByRoom,
   getRoomsByStaff,
   markAsRead,
-  getRoomsByUser
+  getRoomsByUser,
+  getChatRoomsForAdmin,
+  getRoomDetailForAdmin
 };

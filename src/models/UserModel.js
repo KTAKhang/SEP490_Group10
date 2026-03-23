@@ -6,6 +6,7 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: [true, "Tên người dùng là bắt buộc"],
       trim: true,
+      unique: true,
       minlength: [3, "Tên người dùng phải có ít nhất 3 ký tự"],
       maxlength: [50, "Tên người dùng không được vượt quá 50 ký tự"],
     },
@@ -48,7 +49,20 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    loginAttempts: {
+      type: Number,
+      default: 0,
+    },
 
+    lockUntil: {
+      type: Date,
+      default: null,
+    },
+
+    currentAccessToken: {
+      type: String,
+      default: null,
+    },
     googleId: {
       type: String,
       default: undefined,
@@ -59,7 +73,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-
+    fullName: {
+      type: String,
+      default: null,
+    },
     phone: {
       type: String,
       default: null,

@@ -29,6 +29,13 @@ const tempOTPSchema = new mongoose.Schema({
     type: String,
     required: [true, "Mật khẩu là bắt buộc"],
   },
+  fullName: {
+    type: String,
+    required: [true, "Họ và tên là bắt buộc"],
+    trim: true,
+    minlength: [3, "Họ và tên phải có ít nhất 3 ký tự"],
+    maxlength: [50, "Họ và tên không được vượt quá 50 ký tự"],
+  },
   phone: {
     type: String,
     required: [true, "Số điện thoại là bắt buộc"],
