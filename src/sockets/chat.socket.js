@@ -1,5 +1,5 @@
 const ChatService = require("../services/ChatService");
-const { staffOnline, staffOffline, getOnlineStaffs } = require("./staffPool");
+const { staffOnline, staffOfflineByStaffId, getOnlineStaffs } = require("./staffPool");
 /**
  * staffId => {
  *   socketId,
@@ -17,14 +17,24 @@ module.exports = (io) => {
        STAFF ONLINE
     ====================== */
     socket.on("staff_online", (staffId, userName, avatar) => {
+      socket.staffId = staffId; // 🔥 QUAN TRỌNG
+
       staffOnline(staffId, socket.id, { userName, avatar });
-      console.log("🟢 Staff online:", {
-        staffId,
-        userName,
-        avatar,
-      });
+
       io.emit("online_staffs", getOnlineStaffs());
     });
+
+    socket.on("staff_offline", () => {
+  if (!socket.staffId) return;
+
+  const isRemoved = staffOfflineByStaffId(socket.staffId, socket.id);
+
+  if (isRemoved) {
+    io.emit("online_staffs", getOnlineStaffs());
+  }
+
+  console.log("🔴 staff_offline:", socket.id);
+});
 
     /* ======================
        JOIN ROOM
@@ -49,7 +59,7 @@ module.exports = (io) => {
         if (!roomId) return;
 
         io.to(roomId).emit("receive_message", message);
-         io.emit("room_updated", {
+        io.emit("room_updated", {
           _id: message.room._id,
           user: message.room.user,
           staff: message.room.staff,
@@ -62,13 +72,13 @@ module.exports = (io) => {
       }
     });
 
- 
-
     /* ======================
        DISCONNECT
     ====================== */
     socket.on("disconnect", () => {
-      const isStaff = staffOffline(socket.id);
+      if (!socket.staffId) return;
+
+      const isStaff = staffOfflineByStaffId(socket.staffId, socket.id);
 
       if (isStaff) {
         io.emit("online_staffs", getOnlineStaffs());

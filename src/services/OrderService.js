@@ -8,7 +8,6 @@ const { createVnpayPaymentUrl } = require("../controller/PaymentController");
 const ProductModel = require("../models/ProductModel");
 const StockLockModel = require("../models/StockLockModel");
 const PaymentService = require("../services/PaymentService");
-const ShippingService = require("../services/ShippingService");
 const NotificationService = require("../services/NotificationService");
 const CustomerEmailService = require("./CustomerEmailService");
 const DiscountService = require("./DiscountService");
@@ -190,7 +189,7 @@ const confirmCheckoutAndCreateOrder = async ({
       if (!product || !product.status)
         throw new Error("The product is unavailable");
       if (isProductExpired(product))
-        throw new Error(`Sản phẩm "${product.name}" đã hết hạn sử dụng. Không thể đặt hàng.`);
+        throw new Error(`The product "${product.name}" has expired. It is not possible to place an order.`);
       const { effectivePrice, originalPrice } = getEffectivePrice(product);
       totalPrice += item.quantity * effectivePrice;
       orderDetails.push({

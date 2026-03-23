@@ -30,7 +30,7 @@ const addItemToCart = async (user_id, product_id, quantity) => {
     }
 
     if (isProductExpired(product)) {
-      throw new Error(`Sản phẩm "${product.name}" đã hết hạn sử dụng. Không thể thêm vào giỏ hàng.`);
+      throw new Error(`The product "${product.name}" has expired. It cannot be added to the shopping cart.`);
     }
 
     /* =======================
@@ -138,7 +138,7 @@ const updateItemInCart = async (user_id, product_id, newQuantity) => {
     }
 
     if (isProductExpired(product)) {
-      throw new Error(`Sản phẩm "${product.name}" đã hết hạn sử dụng. Vui lòng xóa khỏi giỏ hàng.`);
+      throw new Error(`The product "${product.name}" has expired. It cannot be added to the shopping cart.`);
     }
 
     if (newQuantity > product.onHandQuantity) {
@@ -306,7 +306,7 @@ const getCartItems = async (user_id) => {
       in_stock: item.product_id.onHandQuantity,
       status: item.product_id.status,
       warning: expired
-        ? "Sản phẩm đã hết hạn sử dụng. Vui lòng xóa khỏi giỏ hàng."
+        ? "The product has expired. Please remove it from your cart."
         : !item.product_id.status
         ? "The product has been discontinued"
         : item.product_id.onHandQuantity <= 0
