@@ -90,10 +90,7 @@ const sendMessage = async ({
     throw new Error("Maximum 3 images allowed");
   }
 
-  const room = await ChatRoom.findById(roomId).populate(
-    "user",
-    "user_name avatar"
-  );
+  const room = await ChatRoom.findById(roomId)
 
   if (!room) throw new Error("Room not found");
 
@@ -118,6 +115,7 @@ const sendMessage = async ({
     type,
   });
 
+  
   /* ======================
      2️⃣ UPDATE ROOM
   ====================== */
@@ -156,6 +154,37 @@ const sendMessage = async ({
       ],
     },
   ]);
+
+  /* ======================
+   SEND NOTIFICATION
+====================== */
+let receiverId = null;
+
+if (senderRole === "customer") {
+  receiverId = room.staff.toString();
+} else {
+  receiverId = room.user.toString();
+}
+const senderName = message.sender?.user_name || "Someone";
+
+setImmediate(async () => {
+  try {
+    await NotificationService.sendToUser(receiverId, {
+      title: `💬 ${senderName}`,
+      body: content
+        ? content.slice(0, 100)
+        : "📷 You received an image message",
+      data: {
+        type: "chat",
+        roomId,
+        action: "open_chat",
+      },
+    });
+  } catch (err) {
+    console.error("Send notification failed:", err.message);
+  }
+});
+
 
   return message;
 };

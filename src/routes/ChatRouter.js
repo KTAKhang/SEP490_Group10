@@ -5,30 +5,31 @@ const ChatController = require("../controller/ChatController");
 const {
   authUserMiddleware,
   authAdminMiddleware,
+  customerOrFeedbackStaffMiddleware
 } = require("../middleware/authMiddleware");
 const { uploadChatImages } = require("../middleware/uploadMiddleware");
 
 chatRouter.post("/room", authUserMiddleware, ChatController.createOrGetRoom);
 chatRouter.post(
   "/message",
-  authUserMiddleware,
+  customerOrFeedbackStaffMiddleware,
   uploadChatImages,
   ChatController.sendMessage,
 );
 chatRouter.get(
   "/room/:roomId/messages",
-  authUserMiddleware,
+  customerOrFeedbackStaffMiddleware,
   ChatController.getMessages,
 );
 chatRouter.get(
   "/staff/rooms",
-  authUserMiddleware,
+  customerOrFeedbackStaffMiddleware,
   ChatController.getStaffRooms,
 );
-chatRouter.get("/user/rooms", authUserMiddleware, ChatController.getUserRooms);
+chatRouter.get("/user/rooms", customerOrFeedbackStaffMiddleware, ChatController.getUserRooms);
 chatRouter.get(
   "/room/:roomId/mark-as-read",
-  authUserMiddleware,
+  customerOrFeedbackStaffMiddleware,
   ChatController.markAsRead,
 );
 chatRouter.get(
