@@ -39,6 +39,7 @@ const StaffRouter = require("./StaffRouter");
 const CustomerRouter = require("./CustomerRouter");
 const DiscountRouter = require("./DiscountRouter");
 const NotificationRouter = require("./NotificationRouter");
+const FruitAssistantRouter = require("./FruitAssistantRouter");
 
 const routes = (app) => {
     // Authentication & Profile
@@ -87,6 +88,7 @@ const routes = (app) => {
     app.use("/api/homepage-assets", HomepageAssetRouter);
     // Public routes (không cần authentication)
     app.use("/products", PublicProductRouter);
+    app.use("/fruit-assistant", FruitAssistantRouter);
     app.use("/categories", PublicCategoryRouter);
     // Customer routes (chỉ Customer)
     app.use("/favorites", FavoriteRouter);
