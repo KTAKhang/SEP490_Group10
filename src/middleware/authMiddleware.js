@@ -660,6 +660,40 @@ const customerOrFeedbackStaffMiddleware = async (req, res, next) => {
     });
   }
 };
+
+/**
+ * Optional authentication middleware:
+ * - Nếu không có token: req.user = null
+ * - Nếu có token hợp lệ: req.user = { _id, role_name }
+ */
+const authOptionalMiddleware = async (req, res, next) => {
+    const authHeader = req.headers?.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        req.user = null;
+        return next();
+    }
+
+    const token = authHeader.split(" ")[1];
+    try {
+        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        const userData = await UserModel.findById(decoded._id).populate("role_id", "name");
+
+        if (userData) {
+            const roleName = userData.role_id?.name || null;
+            req.user = {
+                _id: userData._id.toString(),
+                role_name: roleName,
+            };
+        } else {
+            req.user = null;
+        }
+    } catch (err) {
+        req.user = null;
+    }
+
+    return next();
+};
+
 module.exports = {
   authMiddleware,
   authAdminMiddleware,
@@ -671,4 +705,5 @@ module.exports = {
   authAdminOrWarehouseStaffMiddleware,
   authAdminOrFeedbackedStaffMiddleware,
   customerOrFeedbackStaffMiddleware,
+  authOptionalMiddleware,
 };

@@ -1,5 +1,15 @@
 const ContactService = require("../services/ContactService");
 
+const isAdminOrFeedbackedStaff = (reqUser) => {
+    const roleName =
+        reqUser?.role_id?.name ||
+        reqUser?.role_id?.name?.toLowerCase?.() ||
+        reqUser?.role ||
+        reqUser?.role_name ||
+        null;
+    return roleName === "admin" || roleName === "feedbacked-staff";
+};
+
 /**
  * Tạo Contact mới
  * POST /contacts
@@ -35,7 +45,7 @@ const createContact = async (req, res) => {
 const getContacts = async (req, res) => {
     try {
         const userId = req.user._id;
-        const isAdmin = req.user.isAdmin;
+        const isAdmin = isAdminOrFeedbackedStaff(req.user);
         const { status, category, page, limit } = req.query;
 
         const response = await ContactService.getContacts(userId, isAdmin, {
@@ -66,7 +76,7 @@ const getContactById = async (req, res) => {
     try {
         const { id } = req.params;
         const userId = req.user._id;
-        const isAdmin = req.user.isAdmin;
+        const isAdmin = isAdminOrFeedbackedStaff(req.user);
 
         const response = await ContactService.getContactById(id, userId, isAdmin);
 
@@ -91,7 +101,7 @@ const updateContactStatus = async (req, res) => {
     try {
         const { id } = req.params;
         const userId = req.user._id;
-        const isAdmin = req.user.isAdmin;
+        const isAdmin = isAdminOrFeedbackedStaff(req.user);
         const { status, assigned_admin_id } = req.body;
         const response = await ContactService.updateContactStatus(id, userId, isAdmin, {
             status,
@@ -119,7 +129,7 @@ const createReply = async (req, res) => {
     try {
         const { id } = req.params;
         const userId = req.user._id;
-        const isAdmin = req.user.isAdmin;
+        const isAdmin = isAdminOrFeedbackedStaff(req.user);
         const { message } = req.body;
 
         const response = await ContactService.createReply(id, userId, isAdmin, { message });
@@ -145,7 +155,7 @@ const getReplies = async (req, res) => {
     try {
         const { id } = req.params;
         const userId = req.user._id;
-        const isAdmin = req.user.isAdmin;
+        const isAdmin = isAdminOrFeedbackedStaff(req.user);
 
         const response = await ContactService.getReplies(id, userId, isAdmin);
 
@@ -170,7 +180,7 @@ const updateReply = async (req, res) => {
     try {
         const { id, replyId } = req.params;
         const userId = req.user._id;
-        const isAdmin = req.user.isAdmin;
+        const isAdmin = isAdminOrFeedbackedStaff(req.user);
         const { message } = req.body;
 
         const response = await ContactService.updateReply(id, replyId, userId, isAdmin, { message });
@@ -196,7 +206,7 @@ const deleteReply = async (req, res) => {
     try {
         const { id, replyId } = req.params;
         const userId = req.user._id;
-        const isAdmin = req.user.isAdmin;
+        const isAdmin = isAdminOrFeedbackedStaff(req.user);
 
         const response = await ContactService.deleteReply(id, replyId, userId, isAdmin);
 
@@ -221,7 +231,7 @@ const uploadAttachment = async (req, res) => {
     try {
         const { id } = req.params;
         const userId = req.user._id;
-        const isAdmin = req.user.isAdmin;
+        const isAdmin = isAdminOrFeedbackedStaff(req.user);
         const file = req.file;
 
 
@@ -248,7 +258,7 @@ const getAttachments = async (req, res) => {
     try {
         const { id } = req.params;
         const userId = req.user._id;
-        const isAdmin = req.user.isAdmin;
+        const isAdmin = isAdminOrFeedbackedStaff(req.user);
 
         const response = await ContactService.getAttachments(id, userId, isAdmin);
 
@@ -273,7 +283,7 @@ const deleteAttachment = async (req, res) => {
     try {
         const { attachmentId } = req.params;
         const userId = req.user._id;
-        const isAdmin = req.user.isAdmin;
+        const isAdmin = isAdminOrFeedbackedStaff(req.user);
 
         const response = await ContactService.deleteAttachment(attachmentId, userId, isAdmin);
 
