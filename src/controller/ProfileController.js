@@ -29,9 +29,8 @@ const checkRole = async (userID) => {
 const updateProfile = async (req, res) => {
   try {
     const id = req.user._id;
-    const { user_name, phone, address, birthday, gender } = req.body;
+    const { user_name,fullName, phone, address, birthday, gender } = req.body;
     const file = req.file;
-console.log("REQ.FILE:", req.file);
     // Validate user_name
     const isStrictUserName = (name) => /^[\p{L}\p{N}_ ]{3,30}$/u.test(name);
     if (!isStrictUserName(user_name)) {
@@ -39,6 +38,15 @@ console.log("REQ.FILE:", req.file);
         status: "ERR",
         message:
           "Usernames must be between 3 and 30 characters long and can only include letters, numbers, spaces, or underscores.",
+      });
+    }
+
+
+    if (!isStrictUserName(fullName)) {
+      return res.status(400).json({
+        status: "ERR",
+        message:
+          "Fullname must be between 3 and 30 characters long and can only include letters, numbers, spaces, or underscores.",
       });
     }
 
@@ -106,8 +114,8 @@ console.log("REQ.FILE:", req.file);
 
     const response = await ProfileService.updateProfile(
       id,
-      { user_name, phone, address, birthday, gender },
-      file,
+      { user_name,fullName, phone, address, birthday, gender },
+      file
     );
     return res.status(200).json(response);
   } catch (error) {

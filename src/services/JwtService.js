@@ -12,7 +12,7 @@ const generalAccessToken = (payload) => {
 
 const generalRefreshToken = (payload) => {
   const refreshToken = jwt.sign(payload, process.env.REFRESH_TOKEN_SECRET, {
-    expiresIn: "7d",
+    expiresIn: "30d",
   });
   return refreshToken;
 };

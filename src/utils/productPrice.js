@@ -21,6 +21,18 @@ const getDaysUntilExpiry = (expiryDate, referenceDate) => {
  * @param {Date} [referenceDate] - Ngày tham chiếu (mặc định: hôm nay VN)
  * @returns {{ effectivePrice: number, isNearExpiry: boolean, originalPrice: number }}
  */
+/**
+ * Kiểm tra sản phẩm đã hết hạn (expiryDate <= referenceDate).
+ * @param {Object} product - Document product (expiryDateStr hoặc expiryDate)
+ * @param {Date} [referenceDate] - Ngày tham chiếu (mặc định: hôm nay VN)
+ * @returns {boolean}
+ */
+const isProductExpired = (product, referenceDate) => {
+  const refDate = referenceDate || getTodayInVietnam();
+  const daysUntil = getDaysUntilExpiry(product?.expiryDateStr ?? product?.expiryDate ?? null, refDate);
+  return daysUntil != null && daysUntil < 0;
+};
+
 const getEffectivePrice = (product, referenceDate) => {
   const originalPrice = Number(product?.price) || 0;
   const refDate = referenceDate || getTodayInVietnam();
@@ -43,4 +55,5 @@ const getEffectivePrice = (product, referenceDate) => {
 module.exports = {
   getDaysUntilExpiry,
   getEffectivePrice,
+  isProductExpired,
 };

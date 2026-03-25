@@ -1102,7 +1102,6 @@ const DiscountService = {
             if (existingUsage) {
                 return { status: "ERR", message: "You have already used this discount code" };
             }
-
             // Validate minimum order value
             if (orderValue < discount.minOrderValue) {
                 return {

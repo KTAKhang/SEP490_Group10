@@ -1,8 +1,14 @@
 const mongoose = require("mongoose");
 const ProductModel = require("../models/ProductModel");
 const CategoryModel = require("../models/CategoryModel");
-const OrderDetailModel = require("../models/OrderDetailModel");
+const InventoryTransactionModel = require("../models/InventoryTransactionModel");
 const { getEffectivePrice } = require("../utils/productPrice");
+const { escapeRegex } = require("./fruitNameMapService");
+const OrderDetailModel = require("../models/OrderDetailModel");
+
+
+const { getEffectivePrice, isProductExpired } = require("../utils/productPrice");
+
 
 // Lấy tối đa 6 sản phẩm bán chạy nhất từ đơn hàng COMPLETED
 const getFeaturedProducts = async () => {
@@ -72,10 +78,17 @@ const getFeaturedProducts = async () => {
       .map((id) => productMap.get(id.toString()))
       .filter((p) => p != null && p.category != null);
 
-    // Format: ảnh đầu tiên + giá hiệu lực (sắp hết hạn giảm 50%)
+    // Format: ảnh đầu tiên + giá hiệu lực (sắp hết hạn giảm 50%) + isExpired cho frontend
     const formattedProducts = finalProducts.map((product) => {
       const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
-      const formatted = { ...product, price: effectivePrice, effectivePrice, isNearExpiry, originalPrice };
+      const formatted = {
+        ...product,
+        price: effectivePrice,
+        effectivePrice,
+        isNearExpiry,
+        originalPrice,
+        isExpired: isProductExpired(product),
+      };
       if (Array.isArray(product.images) && product.images.length > 0) {
         formatted.featuredImage = product.images[0];
       } else {
@@ -212,7 +225,7 @@ const getProducts = async ({ page = 1, limit = 12, search = "", category, sortBy
     const data = result[0]?.data || [];
     const total = result[0]?.total[0]?.count || 0;
 
-    // Format category info, giá hiệu lực (sắp hết hạn giảm 50%), và chỉ lấy ảnh đầu tiên cho list view
+    // Format category info, giá hiệu lực (sắp hết hạn giảm 50%), isExpired, và chỉ lấy ảnh đầu tiên cho list view
     const formattedProducts = data.map((product) => {
       const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
       const formatted = {
@@ -221,6 +234,7 @@ const getProducts = async ({ page = 1, limit = 12, search = "", category, sortBy
         effectivePrice,
         isNearExpiry,
         originalPrice,
+        isExpired: isProductExpired(product),
         category: {
           _id: product.categoryInfo._id,
           name: product.categoryInfo.name,
@@ -262,6 +276,91 @@ const getProducts = async ({ page = 1, limit = 12, search = "", category, sortBy
   }
 };
 
+const formatPublicProductListItem = (product) => {
+  const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
+  const formatted = {
+    ...product,
+    price: effectivePrice,
+    effectivePrice,
+    isNearExpiry,
+    originalPrice,
+  };
+  if (Array.isArray(product.images) && product.images.length > 0) {
+    formatted.featuredImage = product.images[0];
+  } else {
+    formatted.featuredImage = null;
+  }
+  return formatted;
+};
+
+/** GET /products/search?name= — substring match on product name (public, active products + active category) */
+const searchProductsByName = async ({ name, limit: limitRaw } = {}) => {
+  try {
+    const trimmed = (name && String(name).trim()) || "";
+    if (!trimmed) {
+      return { status: "ERR", message: "name is required" };
+    }
+    const limit = Math.min(50, Math.max(1, parseInt(limitRaw, 10) || 20));
+    const raw = await ProductModel.find({
+      status: true,
+      name: { $regex: escapeRegex(trimmed), $options: "i" },
+    })
+      .populate({
+        path: "category",
+        select: "name description image status",
+        match: { status: true },
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    const data = raw.filter((p) => p.category).map(formatPublicProductListItem);
+    return {
+      status: "OK",
+      message: "Search completed",
+      data,
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
+/**
+ * OR search on name for any keyword (used by fruit AI assistant).
+ * @param {string[]} keywords
+ */
+const searchProductsByKeywords = async (keywords, { limit: limitRaw } = {}) => {
+  try {
+    const cleaned = [...new Set((keywords || []).map((k) => String(k).trim()).filter(Boolean))];
+    if (!cleaned.length) {
+      return { status: "OK", message: "No keywords", data: [] };
+    }
+    const limit = Math.min(50, Math.max(1, parseInt(limitRaw, 10) || 12));
+    const or = cleaned.map((k) => ({ name: { $regex: escapeRegex(k), $options: "i" } }));
+    const raw = await ProductModel.find({
+      status: true,
+      $or: or,
+    })
+      .populate({
+        path: "category",
+        select: "name description image status",
+        match: { status: true },
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    const data = raw.filter((p) => p.category).map(formatPublicProductListItem);
+    return {
+      status: "OK",
+      message: "Search completed",
+      data,
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
 // Lấy chi tiết sản phẩm (hiển thị tất cả ảnh)
 const getProductById = async (id) => {
   try {
@@ -293,7 +392,14 @@ const getProductById = async (id) => {
     }
 
     const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
-    const data = { ...product, price: effectivePrice, effectivePrice, isNearExpiry, originalPrice };
+    const data = {
+      ...product,
+      price: effectivePrice,
+      effectivePrice,
+      isNearExpiry,
+      originalPrice,
+      isExpired: isProductExpired(product),
+    };
 
     return {
       status: "OK",
@@ -309,4 +415,6 @@ module.exports = {
   getFeaturedProducts,
   getProducts,
   getProductById,
+  searchProductsByName,
+  searchProductsByKeywords,
 };

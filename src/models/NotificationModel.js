@@ -45,7 +45,7 @@ const notificationSchema = new mongoose.Schema(
             type: String,
             required: [true, "Notification type is required"],
             trim: true,
-            enum: ["discount", "order", "contact", "product", "news", "general", "preorder","harvest_batch_preorder"],
+            enum: ["discount", "order", "contact", "product", "news", "general", "preorder","harvest_batch_preorder","chat"],
             default: "general",
             index: true,
         },
