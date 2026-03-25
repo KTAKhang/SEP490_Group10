@@ -1,6 +1,7 @@
 const express = require("express");
 const NewsController = require("../controller/NewsController");
-const { newsAuthMiddleware, newsOptionalAuthMiddleware } = require("../middleware/newsMiddleware");
+const { newsOptionalAuthMiddleware } = require("../middleware/newsMiddleware");
+const { authStaffOrAdminMiddleware } = require("../middleware/authMiddleware");
 const { uploadNewsThumbnail, uploadNewsContentImage } = require("../middleware/uploadMiddleware");
 
 const NewsRouter = express.Router();
@@ -10,12 +11,12 @@ NewsRouter.get("/public", NewsController.getNews); // ?public=true
 NewsRouter.get("/public/featured", NewsController.getFeaturedNews);
 NewsRouter.get("/public/:id", newsOptionalAuthMiddleware, NewsController.getNewsById);
 
-// Author endpoints (require auth)
-NewsRouter.post("/", newsAuthMiddleware, uploadNewsThumbnail, NewsController.createNews);
-NewsRouter.post("/upload-content-image", newsAuthMiddleware, uploadNewsContentImage, NewsController.uploadContentImage);
-NewsRouter.get("/", newsAuthMiddleware, NewsController.getNews); // Get own news or all if admin
-NewsRouter.get("/:id", newsAuthMiddleware, NewsController.getNewsById);
-NewsRouter.put("/:id", newsAuthMiddleware, uploadNewsThumbnail, NewsController.updateNews);
-NewsRouter.delete("/:id", newsAuthMiddleware, NewsController.deleteNews);
+// Author endpoints (require auth: admin or sales-staff)
+NewsRouter.post("/", authStaffOrAdminMiddleware, uploadNewsThumbnail, NewsController.createNews);
+NewsRouter.post("/upload-content-image", authStaffOrAdminMiddleware, uploadNewsContentImage, NewsController.uploadContentImage);
+NewsRouter.get("/", authStaffOrAdminMiddleware, NewsController.getNews); // Get own news or all if admin
+NewsRouter.get("/:id", authStaffOrAdminMiddleware, NewsController.getNewsById);
+NewsRouter.put("/:id", authStaffOrAdminMiddleware, uploadNewsThumbnail, NewsController.updateNews);
+NewsRouter.delete("/:id", authStaffOrAdminMiddleware, NewsController.deleteNews);
 
 module.exports = NewsRouter;
