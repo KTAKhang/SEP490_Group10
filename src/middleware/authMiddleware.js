@@ -628,7 +628,7 @@ const customerOrFeedbackStaffMiddleware = async (req, res, next) => {
     if (roleName !== "customer" && roleName !== "feedbacked-staff") {
       return res.status(403).json({
         status: "ERR",
-        message: "Only customers can use this feature.",
+        message: "Only customers or feedbacked-staff can use this feature.",
       });
     }
 

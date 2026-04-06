@@ -31,22 +31,31 @@ const updateProfile = async (req, res) => {
     const id = req.user._id;
     const { user_name,fullName, phone, address, birthday, gender } = req.body;
     const file = req.file;
-    // Validate user_name
-    const isStrictUserName = (name) => /^[\p{L}\p{N}_ ]{3,30}$/u.test(name);
-    if (!isStrictUserName(user_name)) {
+    // Username: không dấu, không space, chỉ a-z A-Z 0-9 _
+    const isValidUsername = (name) => {
+      const regex = /^[a-zA-Z0-9_]{3,30}$/;
+      return regex.test(name);
+    };
+
+    // Fullname: cho phép chữ có dấu, khoảng trắng, KHÔNG số
+    const isValidFullName = (name) => {
+      const regex = /^[\p{L} ]{3,50}$/u;
+      return regex.test(name.trim());
+    };
+
+    if (!isValidUsername(user_name)) {
       return res.status(400).json({
         status: "ERR",
         message:
-          "Usernames must be between 3 and 30 characters long and can only include letters, numbers, spaces, or underscores.",
+          "Username must be 3–30 characters, no spaces, only letters, numbers, and underscores.",
       });
     }
 
-
-    if (!isStrictUserName(fullName)) {
+    if (!isValidFullName(fullName)) {
       return res.status(400).json({
         status: "ERR",
         message:
-          "Fullname must be between 3 and 30 characters long and can only include letters, numbers, spaces, or underscores.",
+          "Full name must be 3–50 characters, only letters and spaces (no numbers).",
       });
     }
 
