@@ -1,9 +1,28 @@
 const CartService = require("../services/CartService");
 
+const isValidQuantity = (quantity) => {
+    return Number.isInteger(quantity) && quantity > 0;
+};
+
 const addItemToCart = async (req, res) => {
     try {
         const user_id = req.user._id; 
         const { product_id, quantity } = req.body;
+
+        // ✅ Validate
+        if (!product_id) {
+            return res.status(400).json({
+                status: "ERR",
+                message: "Product ID is required"
+            });
+        }
+
+        if (!isValidQuantity(quantity)) {
+            return res.status(400).json({
+                status: "ERR",
+                message: "Quantity must be a positive integer"
+            });
+        }
 
         const response = await CartService.addItemToCart(user_id, product_id, quantity);
 
@@ -21,6 +40,21 @@ const updateItemInCart = async (req, res) => {
     try {
         const user_id = req.user._id;
         const { product_id, quantity } = req.body;
+
+        // ✅ Validate
+        if (!product_id) {
+            return res.status(400).json({
+                status: "ERR",
+                message: "Product ID is required"
+            });
+        }
+
+        if (!isValidQuantity(quantity)) {
+            return res.status(400).json({
+                status: "ERR",
+                message: "Quantity must be a positive integer"
+            });
+        }
 
         const response = await CartService.updateItemInCart(user_id, product_id, quantity);
 

@@ -17,12 +17,12 @@ const getShopInfo = async () => {
     if (!shop) {
       shop = new ShopModel({
         shopName: "My Shop",
-        address: "Chưa cập nhật",
-        email: "",
-        phone: "",
-        logo: "",
-        description: "",
-        workingHours: "",
+        address: "Not Updated",
+        email: "not@updated.com",
+        phone: "0000000000",
+        logo: "https://via.placeholder.com/150",
+        description: "Not Updated",
+        workingHours: "Not Updated",
         images: [],
         imagePublicIds: [],
       });

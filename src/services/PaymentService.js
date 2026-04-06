@@ -5,6 +5,30 @@ const OrderModel = require("../models/OrderModel");
    CREATE COD PAYMENT
 ============================ */
 const createCODPayment = async ({ order_id, amount, session }) => {
+  // 1️⃣ Validate order_id
+  if (!order_id) {
+    throw new Error("order_id is required");
+  }
+
+  // 2️⃣ Validate amount
+  if (amount == null) {
+    throw new Error("amount is required");
+  }
+
+  if (typeof amount !== "number" || isNaN(amount)) {
+    throw new Error("amount must be a valid number");
+  }
+
+  if (amount <= 0) {
+    throw new Error("amount must be greater than 0");
+  }
+
+  // 3️⃣ Optional: validate session (nếu dùng transaction)
+  if (!session) {
+    throw new Error("session is required for transaction");
+  }
+
+  // 4️⃣ Create payment
   return PaymentModel.create(
     [
       {
@@ -16,7 +40,7 @@ const createCODPayment = async ({ order_id, amount, session }) => {
         note: "Payment upon delivery",
       },
     ],
-    { session },
+    { session }
   );
 };
 
@@ -83,53 +107,10 @@ const createVnpayPaymentUrl = async ({ order_id, user_id, ip, isMobile, session 
 
   return payUrl;
 };
-/* ============================
-   REFUND VNPAY (SYNC – NGAY LẬP TỨC)
-============================ */
-const refundVNPaySync = async ({ order_id, session }) => {
-  const payment = await PaymentModel.findOne({
-    order_id,
-    method: "VNPAY",
-    type: "PAYMENT",
-    status: "SUCCESS",
-  }).session(session);
-
-  if (!payment) {
-    throw new Error("No successful VNPay payment found for this order");
-  }
-
-  const result = await refund({
-    order_id,
-    amount: payment.amount,
-    provider_txn_id: payment.provider_txn_id,
-  });
-
-
-  if (result.vnp_ResponseCode !== "00") {
-    throw new Error("VNPay refund failed");
-  }
-
-
-  await PaymentModel.create(
-    [
-      {
-        order_id,
-        type: "REFUND",
-        method: "VNPAY",
-        amount: payment.amount,
-        status: "SUCCESS",
-        provider_response: result,
-        note: "Refund for cancelled order",
-      },
-    ],
-    { session },
-  );
-};
 
 
 module.exports = {
   createCODPayment,
   createOnlinePendingPayment,
-  refundVNPaySync,
   createVnpayPaymentUrl,
 };
