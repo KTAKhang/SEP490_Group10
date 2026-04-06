@@ -230,41 +230,41 @@ async function executeGeminiInstruction(instruction) {
 }
 
 function buildTopicInstruction(topic, displayFruit, shopLine) {
-  const base = `Bạn là chuyên gia ẩm thực & dinh dưỡng cho cửa hàng trái cây tại Việt Nam.
-Ngữ cảnh: khách vừa quét ảnh; AI nhận diện trái: "${displayFruit}" (tên từ model, có thể là tiếng Anh/snake_case).
+  const base = `You are an expert in food and nutrition for a fruit shop in Vietnam.
+Context: the customer just scanned an image; the AI identified the fruit as: "${displayFruit}" (model label; may be English or snake_case).
 ${shopLine}
-Viết hoàn toàn bằng tiếng Việt, rõ ràng, thân thiện.`;
+Write in English only, clear, friendly, and practical.`;
 
   if (topic === "nutrition") {
     return `${base}
 
-Nhiệm vụ: CHỈ viết phần giá trị dinh dưỡng của trái này.
-- Bắt đầu bằng tiêu đề ## Giá trị dinh dưỡng
-- Nêu vitamin, khoáng chất, chất xơ, nước, đường tự nhiên (nếu có) và vai trò tóm tắt.
-- Có thể ước lượng khẩu phần / năng lượng đại khái nếu phù hợp.
-- Không viết công thức món ăn ở phần này.`;
+Task: ONLY write the nutrition value of this fruit.
+- Start with the heading: ## Nutrition Facts
+- Mention vitamins, minerals, fiber, water, and natural sugars (if applicable) with a short role/benefit for each group.
+- You may estimate approximate serving size / calories if it helps.
+- Do NOT include any recipes in this section.`;
   }
 
   if (topic === "health") {
     return `${base}
 
-Nhiệm vụ: CHỈ viết lợi ích sức khỏe.
-- Bắt đầu bằng tiêu đề ## Lợi ích sức khỏe
-- 4–7 ý ngắn, thực tế.
-- KHÔNG chẩn đoán bệnh, KHÔNG hứa chữa bệnh, KHÔNG thay thuốc, KHÔNG khuyên ngừng điều trị.`;
+Task: ONLY write health benefits.
+- Start with the heading: ## Health Benefits
+- Provide 4–7 short, practical bullet points.
+- Do NOT diagnose diseases, do NOT claim to cure, do NOT replace medical treatment, and do NOT advise stopping prescribed treatment.`;
   }
 
   if (topic === "recipes") {
     return `${base}
 
-Nhiệm vụ: CHỈ viết gợi ý món ăn / đồ uống và công thức.
-- Bắt đầu bằng tiêu đề ## Gợi ý món & công thức
-- Đưa ÍT NHẤT 2 món hoặc đồ uống khác nhau (phù hợp ẩm thực Việt hoặc quốc tế phổ biến).
-- Với MỖI món: tên món; nguyên liệu có SỐ LƯỢNG cụ thể (vd: 1 quả, 2 thìa canh, 200 ml); cách làm 4–8 bước ngắn.
-- Ưu tiên nguyên liệu dễ mua tại VN.`;
+Task: ONLY write recipe ideas / formulas.
+- Start with the heading: ## Recipe Ideas & Formulas
+- Provide at least 2 different meals or drinks (suitable for common Vietnamese or widely-known international cuisine).
+- For EACH option: give the dish name; ingredients with specific quantities (e.g., 1 fruit, 2 tbsp, 200 ml); and 4–8 short steps.
+- Prefer ingredients that are easy to buy in Vietnam.`;
   }
 
-  return `${base}\nTrả lời ngắn gọn.`;
+  return `${base}\nAnswer briefly.`;
 }
 
 /**
@@ -282,8 +282,8 @@ async function generateFruitTopicAdvice({ topic, fruitLabelEn, inStock, productN
   const displayFruit = (fruitLabelEn || "fruit").replace(/_/g, " ");
   const shopLine =
     inStock && productName
-      ? `Cửa hàng đang bán sản phẩm: "${productName}" (có thể nhắc nhẹ một lần trong phần mở đầu, không quảng cáo quá đà).`
-      : `Trái này hiện không có trong cửa hàng; vẫn tư vấn đầy đủ theo chủ đề khách chọn.`;
+      ? `This shop currently sells a related product: "${productName}". You may mention it once in the opening as a subtle reference, but do not advertise excessively.`
+      : `This fruit is not currently listed by the shop. Still provide complete advice based on what the customer selected.`;
 
   const instruction = buildTopicInstruction(topic, displayFruit, shopLine);
   return executeGeminiInstruction(instruction);

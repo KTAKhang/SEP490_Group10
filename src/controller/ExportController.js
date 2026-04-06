@@ -15,13 +15,18 @@ const ExportService = require("../services/ExportService");
  */
 const exportSalesStatsExcel = async (req, res) => {
   try {
-    const buffer = await ExportService.exportSalesStatsToExcel();
+    const buffer = await ExportService.exportSalesStatsToExcel({
+      periodType: req.query.periodType,
+      year: req.query.year,
+      month: req.query.month,
+      quarter: req.query.quarter,
+    });
     const filename = `sales-stats-${new Date().toISOString().slice(0, 16).replace("T", "-").replace(":", "-")}.xlsx`;
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.send(buffer);
   } catch (err) {
-    res.status(500).json({ status: "ERR", message: err.message });
+    res.status(err.statusCode || 500).json({ status: "ERR", message: err.message });
   }
 };
 
