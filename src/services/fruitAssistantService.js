@@ -128,9 +128,10 @@ async function analyzeFruitImage(originalBuffer, mimetype = "") {
     return payload;
   }
 
-  const { keywords } = getSearchKeywords(className);
+  const { keywords, startPatterns } = getSearchKeywords(className);
   const searchResult = await PublicProductService.searchProductsByKeywords(keywords, {
     limit: 12,
+    patterns: startPatterns,
   });
   if (searchResult.status === "ERR") {
     return {

@@ -106,12 +106,74 @@ function fmtDate(v) {
  *
  * @returns {Promise<Buffer>} Excel file buffer
  */
-async function exportSalesStatsToExcel() {
+function buildPeriodConfig(options = {}) {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const currentQuarter = Math.ceil(currentMonth / 3);
+
+  const periodType = ["month", "quarter", "year"].includes(options.periodType)
+    ? options.periodType
+    : "year";
+  const year = Number.isFinite(Number(options.year)) ? Number(options.year) : currentYear;
+  const month = Number.isFinite(Number(options.month)) ? Number(options.month) : currentMonth;
+  const quarter = Number.isFinite(Number(options.quarter))
+    ? Number(options.quarter)
+    : currentQuarter;
+
+  if (periodType === "month" && (month < 1 || month > 12)) {
+    const err = new Error("Invalid month. Please select a month from 1 to 12.");
+    err.statusCode = 400;
+    throw err;
+  }
+  if (periodType === "quarter" && (quarter < 1 || quarter > 4)) {
+    const err = new Error("Invalid quarter. Please select a quarter from 1 to 4.");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return { periodType, year, month, quarter };
+}
+
+function getTargetLabel(periodConfig) {
+  if (periodConfig.periodType === "month") {
+    return `${periodConfig.year}-${String(periodConfig.month).padStart(2, "0")}`;
+  }
+  if (periodConfig.periodType === "quarter") {
+    return `Q${periodConfig.quarter}/${periodConfig.year}`;
+  }
+  return String(periodConfig.year);
+}
+
+function getNoDataMessage(periodConfig) {
+  if (periodConfig.periodType === "month") {
+    return "No data is currently available for this month.";
+  }
+  if (periodConfig.periodType === "quarter") {
+    return "No data is currently available for this quarter.";
+  }
+  return "No data is currently available for this year.";
+}
+
+function filterRevenueRefundByLabel(revenueRefund, label) {
+  const revenue = (revenueRefund.revenue || []).filter((item) => item.label === label);
+  const refund = (revenueRefund.refund || []).filter((item) => item.label === label);
+  const netRevenue = (revenueRefund.netRevenue || []).filter((item) => item.label === label);
+
+  const hasData = revenue.length > 0 || refund.length > 0 || netRevenue.length > 0;
+  if (!hasData) return null;
+
+  return { ...revenueRefund, revenue, refund, netRevenue };
+}
+
+async function exportSalesStatsToExcel(options = {}) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Dashboard Export";
   workbook.created = new Date();
 
-  const currentYear = new Date().getFullYear();
+  const periodConfig = buildPeriodConfig(options);
+  const targetLabel = getTargetLabel(periodConfig);
+  const currentYear = periodConfig.year;
   const endDate = new Date();
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - 30);
@@ -122,7 +184,16 @@ async function exportSalesStatsToExcel() {
   const orderCountsRes = await OrderService.getOrderStatusCounts();
   const totalOrders = orderCountsRes?.data?.totalOrders ?? 0;
   const statusCounts = orderCountsRes?.data?.statusCounts ?? [];
-  const revenueRefund = await OrderService.getOrderRevenueRefundStats({ groupBy: "month", year: currentYear });
+  const revenueRefundRaw = await OrderService.getOrderRevenueRefundStats({
+    groupBy: periodConfig.periodType,
+    year: periodConfig.year,
+  });
+  const revenueRefund = filterRevenueRefundByLabel(revenueRefundRaw, targetLabel);
+  if (!revenueRefund) {
+    const err = new Error(getNoDataMessage(periodConfig));
+    err.statusCode = 404;
+    throw err;
+  }
 
   const wsOrderStats = workbook.addWorksheet("Order Stats", { sheetView: { showGridLines: true } });
   wsOrderStats.addRow(["Metric", "Value"]);

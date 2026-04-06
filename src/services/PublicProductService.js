@@ -324,17 +324,28 @@ const searchProductsByName = async ({ name, limit: limitRaw } = {}) => {
 };
 
 /**
- * OR search on name for any keyword (used by fruit AI assistant).
+ * OR search on product name for any keyword or regex pattern.
+ * Used by fruit AI assistant.
+ *
  * @param {string[]} keywords
+ * @param {Object} options
+ * @param {string[]} [options.patterns] - regex patterns (already escaped/anchored as needed),
+ *   matched against Product.name via Mongo `$regex`.
  */
-const searchProductsByKeywords = async (keywords, { limit: limitRaw } = {}) => {
+const searchProductsByKeywords = async (keywords, { limit: limitRaw, patterns } = {}) => {
   try {
     const cleaned = [...new Set((keywords || []).map((k) => String(k).trim()).filter(Boolean))];
-    if (!cleaned.length) {
+    const cleanedPatterns = [...new Set((patterns || []).map((p) => String(p).trim()).filter(Boolean))];
+
+    if (!cleaned.length && !cleanedPatterns.length) {
       return { status: "OK", message: "No keywords", data: [] };
     }
     const limit = Math.min(50, Math.max(1, parseInt(limitRaw, 10) || 12));
-    const or = cleaned.map((k) => ({ name: { $regex: escapeRegex(k), $options: "i" } }));
+
+    const or = (cleanedPatterns.length ? cleanedPatterns : cleaned).map((item) => ({
+      name: { $regex: cleanedPatterns.length ? item : escapeRegex(item), $options: "i" },
+    }));
+
     const raw = await ProductModel.find({
       status: true,
       $or: or,

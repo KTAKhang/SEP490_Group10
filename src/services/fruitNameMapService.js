@@ -20,6 +20,7 @@ const VI_KEYWORDS_BY_CLASS = {
   coconut: ["dừa", "coconut"],
   cranberry: ["nam việt quất", "cranberry"],
   custard_apple: ["mãng cầu", "na", "custard apple"],
+  cempedak: ["cempedak", "mít cempedak", "mít cempedak chín"],
   dragonfruit: ["thanh long", "dragon fruit", "dragonfruit"],
   durian: ["sầu riêng", "durian"],
   eggplant: ["cà tím", "eggplant"],
@@ -72,6 +73,19 @@ const VI_KEYWORDS_BY_CLASS = {
   rose_hip: ["tầm xuân"],
 };
 
+/**
+ * Family-level fallback keywords:
+ * if model labels are different but belong to the same fruit family,
+ * we still search by the shared Vietnamese core name.
+ */
+const FAMILY_CORE_BY_CLASS = {
+  cempedak: ["mít"],
+  jackfruit: ["mít"],
+  apple: ["táo"],
+  sugar_apple: ["mãng cầu"],
+  custard_apple: ["mãng cầu"],
+};
+
 function normalizeClassKey(className) {
   if (!className || typeof className !== "string") return "";
   return className.trim().toLowerCase().replace(/\s+/g, "_");
@@ -79,6 +93,23 @@ function normalizeClassKey(className) {
 
 function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function collectCoreTokens(keywords) {
+  const out = [];
+  for (const raw of keywords) {
+    const k = String(raw || "").trim().toLowerCase();
+    if (!k) continue;
+    out.push(k);
+    const parts = k.split(/\s+/).filter(Boolean);
+    // Vietnamese products often look like: "<core fruit> <origin/extra>"
+    // We keep a safe "core phrase" (first 2 words) instead of very generic tokens.
+    if (parts.length >= 2) {
+      const firstTwo = parts.slice(0, 2).join(" ");
+      if (firstTwo.length >= 3) out.push(firstTwo);
+    }
+  }
+  return out;
 }
 
 /**
@@ -89,13 +120,26 @@ function getSearchKeywords(className) {
   const key = normalizeClassKey(className);
   const humanEn = key.replace(/_/g, " ");
   const fromMap = VI_KEYWORDS_BY_CLASS[key];
-  const keywords = fromMap
-    ? [...fromMap, humanEn, key.replace(/_/g, "")]
-    : [humanEn, ...key.split("_").filter((w) => w.length > 1)];
+  const compactEn = key.replace(/_/g, "");
+  const familyCore = FAMILY_CORE_BY_CLASS[key] || [];
+  const baseKeywords = fromMap
+    ? [...fromMap, ...familyCore, humanEn, compactEn]
+    : [humanEn, compactEn, ...key.split("_").filter((w) => w.length > 1)];
+  const keywords = [...baseKeywords, ...collectCoreTokens(baseKeywords)];
   const unique = [...new Set(keywords.map((k) => String(k).trim()).filter(Boolean))];
+
+  // Prefer prefix-matching (product names are usually: "<fruit> + <origin/variant>").
+  // We use '^' so "nho Mỹ" matches "nho", but doesn't match substrings elsewhere.
+  const startCandidates = [
+    ...(fromMap || []),
+    ...(familyCore || []),
+  ].map((v) => String(v).trim()).filter(Boolean);
+  const startPatterns = [...new Set(startCandidates.map((c) => `^${escapeRegex(c)}`))];
+
   return {
     keywords: unique,
     escapedPatterns: unique.map(escapeRegex),
+    startPatterns,
   };
 }
 
