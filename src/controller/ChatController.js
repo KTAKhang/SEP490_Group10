@@ -16,8 +16,7 @@ const createOrGetRoom = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const senderId = req.user._id;
-    const senderRole = req.user.role_id.name;
-
+    const senderRole = req.user.role;
     const { roomId, content, images, imagePublicIds } = req.body;
     if (!content && (!images || images.length === 0)) {
       throw new Error("Message cannot be empty.");
@@ -40,8 +39,14 @@ const sendMessage = async (req, res) => {
 const getMessages = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const { limit = 6, before } = req.query; 
+    const { limit = 6, before } = req.query;
 
+    if (!roomId) {
+      return res.status(400).json({
+        status: "ERR",
+        message: "roomId is required",
+      });
+    }
     const result = await ChatService.getMessagesByRoom(
       roomId,
       req.user._id.toString(),
@@ -62,7 +67,7 @@ const markAsRead = async (req, res) => {
     const { roomId } = req.params;
     const markAsRead = await ChatService.markAsRead(
       roomId,
-      req.user.role_id.name,
+      req.user.role,
     );
 
     res.json({ status: "OK", data: markAsRead });
@@ -74,7 +79,7 @@ const markAsRead = async (req, res) => {
 const getStaffRooms = async (req, res) => {
   try {
     const rooms = await ChatService.getRoomsByStaff(req.user._id);
-    res.json({ status: "OK", data: rooms });
+    res.json({ status: "OK", message: "Get rooms successfully", data: rooms });
   } catch (err) {
     res.status(500).json({ status: "ERR", message: err.message });
   }
@@ -83,7 +88,7 @@ const getStaffRooms = async (req, res) => {
 const getUserRooms = async (req, res) => {
   try {
     const rooms = await ChatService.getRoomsByUser(req.user._id);
-    res.json({ status: "OK", data: rooms });
+    res.json({ status: "OK", message: "Get rooms successfully", data: rooms });
   } catch (err) {
     res.status(500).json({ status: "ERR", message: err.message });
   }
@@ -108,7 +113,12 @@ const getChatRoomsAdmin = async (req, res) => {
 const getRoomDetailAdmin = async (req, res) => {
   try {
     const { roomId } = req.params;
-
+    if (!roomId) {
+      return res.status(400).json({
+        status: "ERR",
+        message: "roomId is required",
+      });
+    }
     const response = await ChatService.getRoomDetailForAdmin(
       roomId,
       req.query

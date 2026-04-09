@@ -41,14 +41,46 @@ const createOrder = async (req, res) => {
       });
     }
 
+    // Fullname: cho phép chữ có dấu, khoảng trắng, KHÔNG số
+    const isValidFullName = (name) => {
+      const regex = /^[\p{L} ]{3,50}$/u;
+      return regex.test(name.trim());
+    };
 
-    if (!/^0\d{9}$/.test(receiverInfo.receiver_phone)) {
+  
+
+    if (!isValidFullName(receiverInfo.receiver_name)) {
       return res.status(400).json({
-        success: false,
-        message: "Invalid phone number",
+        status: "ERR",
+        message:
+          "Receiver name must be 3–50 characters, only letters and spaces (no numbers).",
       });
     }
 
+    const isStrictPhone = (phone) => {
+      const phoneRegex = /^0\d{8,10}$/;
+      return phoneRegex.test(phone);
+    };
+    if (!isStrictPhone(receiverInfo.receiver_phone)) {
+      return res.status(400).json({
+        status: "ERR",
+        message:
+          "Invalid phone number (must start with 0 and contain 9–11 digits)",
+      });
+    }
+
+    // Validate address (5–100 ký tự, cho phép chữ, số, dấu , . - và khoảng trắng)
+    const isStrictAddress = (addr) => {
+      const regex = /^[\p{L}\p{N}\s,.\-\/]{5,100}$/u;
+      return regex.test(addr);
+    };
+    if (!isStrictAddress(receiverInfo.receiver_address)) {
+      return res.status(400).json({
+        status: "ERR",
+        message:
+          "Addresses must be between 5 and 100 characters long and contain only letters, numbers, spaces, and commas ,.-",
+      });
+    }
 
     if (!["COD", "VNPAY"].includes(payment_method)) {
       return res.status(400).json({

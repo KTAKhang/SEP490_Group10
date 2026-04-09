@@ -8,7 +8,6 @@ const { createVnpayPaymentUrl } = require("../controller/PaymentController");
 const ProductModel = require("../models/ProductModel");
 const StockLockModel = require("../models/StockLockModel");
 const PaymentService = require("../services/PaymentService");
-const ShippingService = require("../services/ShippingService");
 const NotificationService = require("../services/NotificationService");
 const CustomerEmailService = require("./CustomerEmailService");
 const DiscountService = require("./DiscountService");
@@ -30,10 +29,10 @@ const STATUS_OPTIONS = [
 const getStatusDisplayLabel = (statusName) => {
   const normalized = statusName
     ? statusName
-        .toString()
-        .trim()
-        .toUpperCase()
-        .replace(/[_\s]+/g, "-")
+      .toString()
+      .trim()
+      .toUpperCase()
+      .replace(/[_\s]+/g, "-")
     : "";
   const option = STATUS_OPTIONS.find((o) => o.value === normalized);
   return option ? option.label : normalized || "Updated";
@@ -181,8 +180,14 @@ const confirmCheckoutAndCreateOrder = async ({
     for (const item of cartItems) {
       const lock = lockMap.get(item.product_id.toString());
 
-      if (!lock || lock.quantity < item.quantity)
+      const now = new Date();
+
+      if (!lock || lock.expiresAt < now) {
         throw new Error("The holding period has expired");
+      }
+      if (lock.quantity < item.quantity) {
+        throw new Error("Not enough reserved stock for this product");
+      }
       const product = await ProductModel.findById(item.product_id)
         .populate("category", "name")
         .session(session);
@@ -190,7 +195,9 @@ const confirmCheckoutAndCreateOrder = async ({
       if (!product || !product.status)
         throw new Error("The product is unavailable");
       if (isProductExpired(product))
-        throw new Error(`Product "${product.name}" has expired and cannot be ordered.`);
+
+        throw new Error(`The product "${product.name}" has expired. It is not possible to place an order.`);
+
       const { effectivePrice, originalPrice } = getEffectivePrice(product);
       totalPrice += item.quantity * effectivePrice;
       orderDetails.push({
@@ -249,7 +256,7 @@ const confirmCheckoutAndCreateOrder = async ({
           status: true,
           discount_code: discountCode,
           discount_amount: discountAmount,
-          is_mobile: isMobile, 
+          is_mobile: isMobile,
         },
       ],
       { session },
@@ -332,7 +339,7 @@ const confirmCheckoutAndCreateOrder = async ({
         session,
       });
       await session.commitTransaction();
-       if (discount_id && discountCode) {
+      if (discount_id && discountCode) {
         try {
           await DiscountService.applyDiscountCode(
             discount_id,
@@ -347,12 +354,13 @@ const confirmCheckoutAndCreateOrder = async ({
       const orderId = order._id.toString();
       let redirect_url_cod;
       if (isMobile) {
-          redirect_url_cod = `myshopapps://create-order-success?orderId=${orderId}`;
-        } else {
-          redirect_url_cod = `http://localhost:5173/customer/order-success?orderId=${orderId}`;
-        }
+        redirect_url_cod = `myshopapps://create-order-success?orderId=${orderId}`;
+      } else {
+        redirect_url_cod = `http://localhost:5173/customer/order-success?orderId=${orderId}`;
+      }
       const response = {
         success: true,
+        message: "Order placed successfully with Cash on Delivery",
         type: "COD",
         redirect_url: redirect_url_cod,
         order_id: orderId,
@@ -455,6 +463,7 @@ const confirmCheckoutAndCreateOrder = async ({
       // }
       return {
         success: true,
+        message: "Create payment successfully",
         payment_url: paymentUrl,
         order_id: order._id,
       };
@@ -495,8 +504,8 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
       "Customer refused to receive, restocked inventory";
     const statusHistoryNote = isShippingToCancelled
       ? [note?.toString?.().trim?.(), autoShippingCancelNote]
-          .filter(Boolean)
-          .join(" | ")
+        .filter(Boolean)
+        .join(" | ")
       : note;
 
     if (isRefundStatus(nextStatusName)) {
@@ -930,6 +939,7 @@ const retryVnpayPayment = async ({ order_id, user_id, ip, isMobile }) => {
 
     return {
       success: true,
+      message: "Payment URL generated successfully",
       payment_url: paymentUrl,
     };
   } catch (err) {

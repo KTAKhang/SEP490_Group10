@@ -1,6 +1,8 @@
 const mongoose = require("mongoose");
 const ProductModel = require("../models/ProductModel");
 const CategoryModel = require("../models/CategoryModel");
+const InventoryTransactionModel = require("../models/InventoryTransactionModel");
+const { escapeRegex } = require("./fruitNameMapService");
 const OrderDetailModel = require("../models/OrderDetailModel");
 
 const { getEffectivePrice, isProductExpired } = require("../utils/productPrice");
@@ -272,6 +274,102 @@ const getProducts = async ({ page = 1, limit = 12, search = "", category, sortBy
   }
 };
 
+const formatPublicProductListItem = (product) => {
+  const { effectivePrice, isNearExpiry, originalPrice } = getEffectivePrice(product);
+  const formatted = {
+    ...product,
+    price: effectivePrice,
+    effectivePrice,
+    isNearExpiry,
+    originalPrice,
+  };
+  if (Array.isArray(product.images) && product.images.length > 0) {
+    formatted.featuredImage = product.images[0];
+  } else {
+    formatted.featuredImage = null;
+  }
+  return formatted;
+};
+
+/** GET /products/search?name= — substring match on product name (public, active products + active category) */
+const searchProductsByName = async ({ name, limit: limitRaw } = {}) => {
+  try {
+    const trimmed = (name && String(name).trim()) || "";
+    if (!trimmed) {
+      return { status: "ERR", message: "name is required" };
+    }
+    const limit = Math.min(50, Math.max(1, parseInt(limitRaw, 10) || 20));
+    const raw = await ProductModel.find({
+      status: true,
+      name: { $regex: escapeRegex(trimmed), $options: "i" },
+    })
+      .populate({
+        path: "category",
+        select: "name description image status",
+        match: { status: true },
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    const data = raw.filter((p) => p.category).map(formatPublicProductListItem);
+    return {
+      status: "OK",
+      message: "Search completed",
+      data,
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
+/**
+ * OR search on product name for any keyword or regex pattern.
+ * Used by fruit AI assistant.
+ *
+ * @param {string[]} keywords
+ * @param {Object} options
+ * @param {string[]} [options.patterns] - regex patterns (already escaped/anchored as needed),
+ *   matched against Product.name via Mongo `$regex`.
+ */
+const searchProductsByKeywords = async (keywords, { limit: limitRaw, patterns } = {}) => {
+  try {
+    const cleaned = [...new Set((keywords || []).map((k) => String(k).trim()).filter(Boolean))];
+    const cleanedPatterns = [...new Set((patterns || []).map((p) => String(p).trim()).filter(Boolean))];
+
+    if (!cleaned.length && !cleanedPatterns.length) {
+      return { status: "OK", message: "No keywords", data: [] };
+    }
+    const limit = Math.min(50, Math.max(1, parseInt(limitRaw, 10) || 12));
+
+    const or = (cleanedPatterns.length ? cleanedPatterns : cleaned).map((item) => ({
+      name: { $regex: cleanedPatterns.length ? item : escapeRegex(item), $options: "i" },
+    }));
+
+    const raw = await ProductModel.find({
+      status: true,
+      $or: or,
+    })
+      .populate({
+        path: "category",
+        select: "name description image status",
+        match: { status: true },
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    const data = raw.filter((p) => p.category).map(formatPublicProductListItem);
+    return {
+      status: "OK",
+      message: "Search completed",
+      data,
+    };
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
 // Lấy chi tiết sản phẩm (hiển thị tất cả ảnh)
 const getProductById = async (id) => {
   try {
@@ -326,4 +424,6 @@ module.exports = {
   getFeaturedProducts,
   getProducts,
   getProductById,
+  searchProductsByName,
+  searchProductsByKeywords,
 };

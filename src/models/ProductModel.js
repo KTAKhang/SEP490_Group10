@@ -78,14 +78,6 @@ const productSchema = new mongoose.Schema(
     },
 
 
-    // ✅ Kg allocated to pre-orders — subtracted from sellable availability in UI
-    preOrderAllocatedKg: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-
-
     receivingStatus: {
       type: String,
       enum: ["NOT_RECEIVED", "PARTIAL", "RECEIVED"], // none / partial / full vs planned

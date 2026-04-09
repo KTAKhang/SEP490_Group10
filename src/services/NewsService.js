@@ -509,7 +509,7 @@ const getNewsById = async (id, userId = null, ipAddress = null) => {
       if (userIdStr) {
         const user = await UserModel.findById(userIdStr).populate("role_id", "name");
         const roleName = user?.role_id?.name;
-        isAdmin = roleName === "admin" || roleName === "feedbacked-staff";
+        isAdmin = roleName === "admin" || roleName === "sales-staff";
       }
 
       // Only track view if not admin
@@ -553,12 +553,7 @@ const getNewsById = async (id, userId = null, ipAddress = null) => {
  * - Tìm bài viết theo ID
  * - Nếu không tìm thấy → trả về lỗi
  * 
- * BƯỚC 2: Kiểm tra quyền chỉnh sửa (BR-NEWS-02)
- * - Admin: Có thể sửa tất cả bài viết
- * - Author: Chỉ có thể sửa bài viết của chính mình
- * - Nếu không có quyền → trả về lỗi
- * 
- * BƯỚC 3: Validate bảo mật HTML content (nếu có update)
+ * BƯỚC 2: Validate bảo mật HTML content (nếu có update)
  * - Kiểm tra script tags, iframe, event handlers
  * - Nếu phát hiện → trả về lỗi và KHÔNG cho update
  * 
@@ -571,31 +566,31 @@ const getNewsById = async (id, userId = null, ipAddress = null) => {
  * - Loại bỏ malicious code
  * - Kiểm tra lại độ dài sau sanitize (có thể bị rút ngắn)
  * 
- * BƯỚC 6: Validate content limits
+ * BƯỚC 5: Validate content limits
  * - Kiểm tra độ dài title, excerpt, content, thumbnail format
  * 
- * BƯỚC 7: Cập nhật các fields được phép
+ * BƯỚC 6: Cập nhật các fields được phép
  * - Chỉ cập nhật các field trong allowedFields
  * - Sử dụng content đã được sanitize
  * 
- * BƯỚC 8: Xử lý status PUBLISHED (BR-NEWS-01)
+ * BƯỚC 7: Xử lý status PUBLISHED (BR-NEWS-01)
  * - Nếu chuyển sang PUBLISHED → validate publishing requirements
  * - Set published_at nếu chưa có
  * 
- * BƯỚC 9: Xử lý is_featured (BR-NEWS-03)
+ * BƯỚC 8: Xử lý is_featured (BR-NEWS-03)
  * - Chỉ PUBLISHED mới được featured
  * - Nếu set featured và đã PUBLISHED → quản lý featured limit
  * 
- * BƯỚC 10: Auto-regenerate excerpt (BR-NEWS-09)
+ * BƯỚC 9: Auto-regenerate excerpt (BR-NEWS-09)
  * - Nếu content thay đổi và không có excerpt mới
  * - Tự động lấy 200 ký tự đầu của content (strip HTML)
  * 
- * BƯỚC 11: Lưu và trả về kết quả
+ * BƯỚC 10: Lưu và trả về kết quả
  * 
  * @param {string} id - ID của bài viết
  * @param {object} payload - Các field cần update: { title?, content?, excerpt?, thumbnail_url?, thumbnailPublicId?, status?, is_featured? }
  * @param {string} userId - ID của user đang update
- * @param {boolean} isAdmin - User có phải admin không
+ * @param {boolean} isAdmin - (deprecated) quyền đã check ở middleware
  * @returns {Promise<object>} - { status: "OK"|"ERR", message: string, data?: NewsModel }
  */
 const updateNews = async (id, payload = {}, userId = null, isAdmin = false) => {
@@ -606,11 +601,6 @@ const updateNews = async (id, payload = {}, userId = null, isAdmin = false) => {
     }
     if (news.deleted_at) {
       return { status: "ERR", message: "Bài viết không tồn tại" };
-    }
-
-    // BR-NEWS-02: Check permission
-    if (!isAdmin && news.author_id.toString() !== userId) {
-      return { status: "ERR", message: "Bạn không có quyền chỉnh sửa bài viết này" };
     }
 
     // Validate bảo mật HTML content nếu có update
@@ -718,18 +708,13 @@ const updateNews = async (id, payload = {}, userId = null, isAdmin = false) => {
  * - Tìm bài viết theo ID
  * - Nếu không tìm thấy → trả về lỗi
  * 
- * BƯỚC 2: Kiểm tra quyền xóa (BR-NEWS-02)
- * - Admin: Có thể xóa tất cả bài viết
- * - Author: Chỉ có thể xóa bài viết của chính mình
- * - Nếu không có quyền → trả về lỗi
- * 
- * BƯỚC 3: Xóa mềm
+ * BƯỚC 2: Xóa mềm
  * - Set deleted_at = now(), deleted_by = userId
  * - Không xóa thumbnail Cloudinary, không xóa views, không xóa comments (có thể khôi phục sau)
  * 
  * @param {string} id - ID của bài viết
  * @param {string} userId - ID của user đang xóa
- * @param {boolean} isAdmin - User có phải admin không
+ * @param {boolean} isAdmin - (deprecated) quyền đã check ở middleware
  * @returns {Promise<object>} - { status: "OK"|"ERR", message: string }
  */
 const deleteNews = async (id, userId = null, isAdmin = false) => {
@@ -737,11 +722,6 @@ const deleteNews = async (id, userId = null, isAdmin = false) => {
     const news = await NewsModel.findById(id);
     if (!news) {
       return { status: "ERR", message: "Bài viết không tồn tại" };
-    }
-
-    // BR-NEWS-02: Check permission
-    if (!isAdmin && news.author_id.toString() !== userId) {
-      return { status: "ERR", message: "Bạn không có quyền xóa bài viết này" };
     }
 
     if (news.deleted_at) {

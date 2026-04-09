@@ -19,7 +19,7 @@ const getOrCreateRoom = async (userId, staffId) => {
   }
 
   // 1️⃣ Tìm room giữa USER và STAFF cụ thể này
-  let room = await ChatRoom.findOne({ 
+  let room = await ChatRoom.findOne({
     user: userId,
     staff: staffId  // 🔥 QUAN TRỌNG: phải tìm theo CẢ user VÀ staff
   });
@@ -33,7 +33,7 @@ const getOrCreateRoom = async (userId, staffId) => {
         unreadByStaff: 0,
         unreadByUser: 0,
       });
-      
+
       console.log("✅ Created new room:", {
         roomId: room._id,
         userId,
@@ -41,13 +41,13 @@ const getOrCreateRoom = async (userId, staffId) => {
       });
     } catch (err) {
       console.error("❌ Error creating room:", err);
-      
+
       // Tránh race condition - thử tìm lại
-      room = await ChatRoom.findOne({ 
+      room = await ChatRoom.findOne({
         user: userId,
-        staff: staffId 
+        staff: staffId
       });
-      
+
       if (!room) {
         throw new Error("Failed to create or find room");
       }
@@ -90,10 +90,7 @@ const sendMessage = async ({
     throw new Error("Maximum 3 images allowed");
   }
 
-  const room = await ChatRoom.findById(roomId).populate(
-    "user",
-    "user_name avatar"
-  );
+  const room = await ChatRoom.findById(roomId)
 
   if (!room) throw new Error("Room not found");
 
@@ -117,6 +114,7 @@ const sendMessage = async ({
     imagePublicIds,
     type,
   });
+
 
   /* ======================
      2️⃣ UPDATE ROOM
@@ -157,6 +155,37 @@ const sendMessage = async ({
     },
   ]);
 
+  /* ======================
+   SEND NOTIFICATION
+====================== */
+  let receiverId = null;
+
+  if (senderRole === "customer") {
+    receiverId = room.staff.toString();
+  } else {
+    receiverId = room.user.toString();
+  }
+  const senderName = message.sender?.user_name || "Someone";
+
+  setImmediate(async () => {
+    try {
+      await NotificationService.sendToUser(receiverId, {
+        title: `💬 ${senderName}`,
+        body: content
+          ? content.slice(0, 100)
+          : "📷 You received an image message",
+        data: {
+          type: "chat",
+          roomId,
+          action: "open_chat",
+        },
+      });
+    } catch (err) {
+      console.error("Send notification failed:", err.message);
+    }
+  });
+
+
   return message;
 };
 
@@ -165,7 +194,27 @@ const sendMessage = async ({
  */
 const getMessagesByRoom = async (roomId, currentUserId, options = {}) => {
   const { limit = 6, before } = options;
-  
+  // validate roomId
+  if (!roomId || !mongoose.Types.ObjectId.isValid(roomId)) {
+    throw new Error("Invalid roomId");
+  }
+
+  // validate currentUserId
+  if (!currentUserId || !mongoose.Types.ObjectId.isValid(currentUserId)) {
+    throw new Error("Invalid currentUserId");
+  }
+
+  // validate limit
+  const limitNum = parseInt(limit);
+  if (isNaN(limitNum) || limitNum < 1 || limitNum > 50) {
+    throw new Error("Limit must be between 1 and 50");
+  }
+
+  // validate before
+  if (before && !mongoose.Types.ObjectId.isValid(before)) {
+    throw new Error("Invalid before messageId");
+  }
+
   const room = await ChatRoom.findById(roomId);
   if (!room) throw new Error("Room not found");
 
@@ -178,7 +227,7 @@ const getMessagesByRoom = async (roomId, currentUserId, options = {}) => {
 
   // Build query
   const query = { room: roomId };
-  
+
   // Nếu có before, chỉ lấy tin nhắn cũ hơn message đó
   if (before) {
     const beforeMessage = await Message.findById(before);
@@ -198,8 +247,8 @@ const getMessagesByRoom = async (roomId, currentUserId, options = {}) => {
 
   // Check xem còn tin nhắn cũ hơn không
   const hasMore = messages.length === limit;
-  const oldestMessageId = sortedMessages.length > 0 
-    ? sortedMessages[0]._id 
+  const oldestMessageId = sortedMessages.length > 0
+    ? sortedMessages[0]._id
     : null;
 
   return {
@@ -225,6 +274,16 @@ const markAsRead = async (roomId, role) => {
  * Get staff rooms
  */
 const getRoomsByStaff = async (staffId) => {
+  // 1. Validate
+  if (!staffId) {
+    throw new Error("staffId is required");
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(staffId)) {
+    throw new Error("Invalid staffId");
+  }
+
+  // 2. Query
   return ChatRoom.find({ staff: staffId })
     .populate("user", "user_name avatar email")
     .sort({ updatedAt: -1 });
@@ -234,6 +293,14 @@ const getRoomsByStaff = async (staffId) => {
  * Get staff rooms
  */
 const getRoomsByUser = async (userId) => {
+  if (!userId) {
+    throw new Error("userId is required");
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error("Invalid userId");
+  }
+
   return ChatRoom.find({ user: userId })
     .populate("user", "user_name avatar email")
     .populate("staff", "user_name avatar email")
@@ -249,6 +316,35 @@ const getChatRoomsForAdmin = async (filters = {}) => {
       sortBy = "updatedAt",
       sortOrder = "desc",
     } = filters;
+
+    if (isNaN(page) || page < 1) {
+      return {
+        status: "ERR",
+        message: "Page must be a positive number",
+      };
+    }
+
+    if (isNaN(limit) || limit < 1 || limit > 100) {
+      return {
+        status: "ERR",
+        message: "Limit must be between 1 and 100",
+      };
+    }
+
+    if (!["asc", "desc"].includes(sortOrder)) {
+      return {
+        status: "ERR",
+        message: "sortOrder must be 'asc' or 'desc'",
+      };
+    }
+
+    if (search && search.length > 50) {
+      return {
+        status: "ERR",
+        message: "Search too long (max 50 characters)",
+      };
+    }
+
 
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 10));
@@ -321,6 +417,31 @@ const getChatRoomsForAdmin = async (filters = {}) => {
 const getRoomDetailForAdmin = async (roomId, options = {}) => {
   try {
     const { limit = 6, before } = options;
+
+    // validate roomId
+    if (!roomId || !mongoose.Types.ObjectId.isValid(roomId)) {
+      return {
+        status: "ERR",
+        message: "Invalid roomId",
+      };
+    }
+
+    // validate limit
+    const limitNum = parseInt(limit);
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 50) {
+      return {
+        status: "ERR",
+        message: "Limit must be a number between 1 and 50",
+      };
+    }
+
+    // validate before (optional)
+    if (before && !mongoose.Types.ObjectId.isValid(before)) {
+      return {
+        status: "ERR",
+        message: "Invalid before messageId",
+      };
+    }
 
     // 1️⃣ Kiểm tra room tồn tại
     const room = await ChatRoom.findById(roomId)

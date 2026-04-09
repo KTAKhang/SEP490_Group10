@@ -19,26 +19,18 @@ const staffOnline = (staffId, socketId, meta = {}) => {
   staff.sockets.add(socketId);
 };
 
-const staffOffline = (socketId) => {
-  let removed = false;
+const staffOfflineByStaffId = (staffId, socketId) => {
+  const staff = onlineStaffs.get(staffId);
+  if (!staff) return false;
 
-  for (const [staffId, info] of onlineStaffs.entries()) {
-    // 🔒 GUARD QUAN TRỌNG
-    if (!info.sockets) continue;
+  staff.sockets.delete(socketId);
 
-    if (info.sockets.has(socketId)) {
-      info.sockets.delete(socketId);
-
-      // chỉ remove staff khi không còn socket nào
-      if (info.sockets.size === 0) {
-        onlineStaffs.delete(staffId);
-        removed = true;
-      }
-      break;
-    }
+  if (staff.sockets.size === 0) {
+    onlineStaffs.delete(staffId);
+    return true;
   }
 
-  return removed;
+  return false;
 };
 
 const getOnlineStaffs = () =>
@@ -65,7 +57,7 @@ const pickAvailableStaff = () => {
 
 module.exports = {
   staffOnline,
-  staffOffline,
+  staffOfflineByStaffId,
   pickAvailableStaff,
   getOnlineStaffs,
 };

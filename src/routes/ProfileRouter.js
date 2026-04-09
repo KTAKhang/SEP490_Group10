@@ -4,14 +4,15 @@ const profileController = require("../controller/ProfileController");
 const multer = require("multer");
 const upload = multer({ storage: multer.memoryStorage() });
 const {
-    authUserMiddleware
+    authUserMiddleware,
+    customerMiddleware
 } = require("../middleware/authMiddleware");
 
 
 
 routerProfile.put(
     "/update-user",
-    authUserMiddleware,
+    customerMiddleware,
     upload.single("avatar"),
     profileController.updateProfile
 );

@@ -511,7 +511,7 @@ const customerMiddleware = async (req, res, next) => {
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({
         status: "ERR",
-        message: "Token không được cung cấp",
+        message: "Token is not provided",
       });
     }
 
@@ -533,14 +533,14 @@ const customerMiddleware = async (req, res, next) => {
     if (!user) {
       return res.status(404).json({
         status: "ERR",
-        message: "Người dùng không tồn tại",
+        message: "User not found",
       });
     }
 
     if (user.status === false) {
       return res.status(403).json({
         status: "ERR",
-        message: "Tài khoản bị khóa",
+        message: "Account is locked",
       });
     }
 
@@ -550,7 +550,7 @@ const customerMiddleware = async (req, res, next) => {
     if (roleName !== "customer") {
       return res.status(403).json({
         status: "ERR",
-        message: "Chỉ khách hàng mới có thể sử dụng tính năng này",
+        message: "Only customers can use this feature.",
       });
     }
 
@@ -567,13 +567,13 @@ const customerMiddleware = async (req, res, next) => {
     if (error.name === "TokenExpiredError") {
       return res.status(401).json({
         status: "ERR",
-        message: "Token đã hết hạn",
+        message: "Token has expired",
       });
     }
     if (error.name === "JsonWebTokenError") {
       return res.status(401).json({
         status: "ERR",
-        message: "Token không hợp lệ",
+        message: "Token is invalid",
       });
     }
     return res.status(500).json({
@@ -582,6 +582,118 @@ const customerMiddleware = async (req, res, next) => {
     });
   }
 };
+
+const customerOrFeedbackStaffMiddleware = async (req, res, next) => {
+  try {
+    const authHeader = req.headers?.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        status: "ERR",
+        message: "Token is not provided",
+      });
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+    const user = await UserModel.findById(decoded._id).populate(
+      "role_id",
+      "name",
+    );
+
+    if (user.currentAccessToken !== token) {
+      return res.status(401).json({
+        status: "ERR",
+        message: "Your account has been logged in from elsewhere.",
+      });
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        status: "ERR",
+        message: "User not found",
+      });
+    }
+
+    if (user.status === false) {
+      return res.status(403).json({
+        status: "ERR",
+        message: "Account is locked",
+      });
+    }
+
+    const roleName = user.role_id?.name || "customer";
+
+    // Chỉ cho phép Customer (không phải admin hoặc warehouse_staff)
+    if (roleName !== "customer" && roleName !== "feedbacked-staff") {
+      return res.status(403).json({
+        status: "ERR",
+        message: "Only customers or feedbacked-staff can use this feature.",
+      });
+    }
+
+    req.user = {
+      _id: user._id,
+      user_name: user.user_name,
+      email: user.email,
+      role: roleName,
+      isAdmin: false,
+    };
+
+    next();
+  } catch (error) {
+    if (error.name === "TokenExpiredError") {
+      return res.status(401).json({
+        status: "ERR",
+        message: "Token has expired",
+      });
+    }
+    if (error.name === "JsonWebTokenError") {
+      return res.status(401).json({
+        status: "ERR",
+        message: "Token is invalid",
+      });
+    }
+    return res.status(500).json({
+      status: "ERR",
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * Optional authentication middleware:
+ * - Nếu không có token: req.user = null
+ * - Nếu có token hợp lệ: req.user = { _id, role_name }
+ */
+const authOptionalMiddleware = async (req, res, next) => {
+    const authHeader = req.headers?.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        req.user = null;
+        return next();
+    }
+
+    const token = authHeader.split(" ")[1];
+    try {
+        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        const userData = await UserModel.findById(decoded._id).populate("role_id", "name");
+
+        if (userData) {
+            const roleName = userData.role_id?.name || null;
+            req.user = {
+                _id: userData._id.toString(),
+                role_name: roleName,
+            };
+        } else {
+            req.user = null;
+        }
+    } catch (err) {
+        req.user = null;
+    }
+
+    return next();
+};
+
 module.exports = {
   authMiddleware,
   authAdminMiddleware,
@@ -592,4 +704,6 @@ module.exports = {
   authAdminOrSalesStaffForOrderMiddleware,
   authAdminOrWarehouseStaffMiddleware,
   authAdminOrFeedbackedStaffMiddleware,
+  customerOrFeedbackStaffMiddleware,
+  authOptionalMiddleware,
 };
