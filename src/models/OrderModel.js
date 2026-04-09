@@ -5,7 +5,7 @@ const orderSchema = new mongoose.Schema(
     user_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "users",
-      required: [true, "Người dùng là bắt buộc"],
+      required: [true, "User is required"],
     },
     status_history: [
       {
@@ -40,38 +40,38 @@ const orderSchema = new mongoose.Schema(
     ],
     total_price: {
       type: Number,
-      required: [true, "Tổng giá trị đơn hàng là bắt buộc"],
-      min: [0, "Tổng giá trị đơn hàng không được âm"],
+      required: [true, "Order total is required"],
+      min: [0, "Order total cannot be negative"],
     },
     note: {
       type: String,
       trim: true,
-      maxlength: [500, "Ghi chú không được vượt quá 500 ký tự"],
+      maxlength: [500, "Note must be at most 500 characters"],
     },
     receiver_address: {
       type: String,
-      required: [true, "Địa chỉ người nhận là bắt buộc"],
+      required: [true, "Receiver address is required"],
       trim: true,
-      maxlength: [200, "Địa chỉ người nhận không được vượt quá 200 ký tự"],
+      maxlength: [200, "Receiver address must be at most 200 characters"],
     },
     receiver_name: {
       type: String,
-      required: [true, "Tên người nhận là bắt buộc"],
+      required: [true, "Receiver name is required"],
       trim: true,
-      maxlength: [100, "Tên người nhận không được vượt quá 100 ký tự"],
+      maxlength: [100, "Receiver name must be at most 100 characters"],
     },
     receiver_phone: {
       type: String,
-      required: [true, "Số điện thoại người nhận là bắt buộc"],
+      required: [true, "Receiver phone is required"],
       match: [
         /^0\d{9}$/,
-        "Số điện thoại không hợp lệ (phải bắt đầu bằng 0 và đủ 10 số)",
+        "Invalid phone (must start with 0 and be 10 digits)",
       ],
     },
     order_status_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "order_statuses",
-      required: [true, "Trạng thái đơn hàng là bắt buộc"],
+      required: [true, "Order status is required"],
     },
     is_preorder: {
       type: Boolean,
@@ -86,13 +86,13 @@ const orderSchema = new mongoose.Schema(
       required: true,
     },
 
-    /** Mã giảm giá đã áp dụng (để hiển thị trên đơn hàng) */
+    /** Applied discount code (shown on the order) */
     discount_code: {
       type: String,
       default: null,
       trim: true,
     },
-    /** Số tiền được giảm (VNĐ) */
+    /** Discount amount (VND) */
     discount_amount: {
       type: Number,
       default: 0,
@@ -122,7 +122,7 @@ const orderSchema = new mongoose.Schema(
     },
     status: {
       type: Boolean,
-      required: [true, "Trạng thái là bắt buộc"],
+      required: [true, "Status is required"],
       default: true,
     },
   },

@@ -1,15 +1,15 @@
 const mongoose = require("mongoose");
 
 /**
- * Supplier Schema
- * - Hỗ trợ nhiều sản phẩm cho 1 supplier
- * - Phù hợp hệ thống nông sản / truy xuất nguồn gốc
+ * Supplier schema
+ * - Multiple products per supplier
+ * - Fits produce / traceability workflows
  */
 
 const supplierSchema = new mongoose.Schema(
   {
     // ========================
-    // Thông tin cơ bản
+    // Core fields
     // ========================
     name: {
       type: String,
@@ -27,7 +27,7 @@ const supplierSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Mã nhà cung cấp (tự động sinh, không cho nhập)
+    // Supplier code (auto-generated, not user-editable)
     code: {
       type: String,
       trim: true,
@@ -37,7 +37,7 @@ const supplierSchema = new mongoose.Schema(
     },
 
     // ========================
-    // Thông tin liên hệ
+    // Contact
     // ========================
     contactPerson: {
       type: String,
@@ -64,7 +64,7 @@ const supplierSchema = new mongoose.Schema(
       maxlength: [500, "Address must be at most 500 characters"],
     },
 
-    // Trạng thái hợp tác
+    // Cooperation status
     cooperationStatus: {
       type: String,
       enum: ["ACTIVE", "TERMINATED"],
@@ -72,14 +72,14 @@ const supplierSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Map productId -> purchasePrice (dùng bởi ProductService, SupplierService)
+    // Map productId -> purchasePrice (ProductService, SupplierService)
     purchaseCosts: {
       type: Map,
       of: Number,
       default: () => new Map(),
     },
 
-    //  DANH SÁCH SẢN PHẨM CUNG CẤP (QUAN TRỌNG)
+    // Supplied products (line items)
     suppliedProducts: [
       {
         product: {
@@ -100,7 +100,7 @@ const supplierSchema = new mongoose.Schema(
     ],
 
     // ========================
-    // Thống kê & đánh giá
+    // Stats
     // ========================
     totalBatches: {
       type: Number,
@@ -114,7 +114,7 @@ const supplierSchema = new mongoose.Schema(
       min: 0,
     },
 
-    // Ghi chú & trạng thái
+    // Notes & active flag
     notes: {
       type: String,
       trim: true,
@@ -146,13 +146,13 @@ const supplierSchema = new mongoose.Schema(
 
 // INDEX & CONSTRAINTS
 
-// Không cho trùng tên + số điện thoại (nếu có phone)
+// Unique name + phone when phone is present
 supplierSchema.index(
   { name: 1, phone: 1 },
   { unique: true, sparse: true }
 );
 
-// Không cho trùng mã nhà cung cấp (nếu có code)
+// Unique supplier code when present
 supplierSchema.index(
   { code: 1 },
   { unique: true, sparse: true }
@@ -165,7 +165,7 @@ supplierSchema.index({ name: "text" });
 // VALIDATION
 
 
-// Phải có ít nhất phone hoặc email
+// At least phone or email (pre-save); create flow also requires both via SupplierService.createSupplier
 const buildSupplierCode = async (supplierDoc) => {
   const typePrefix = {
     FARM: "F",
@@ -200,7 +200,13 @@ const buildSupplierCode = async (supplierDoc) => {
 };
 
 supplierSchema.pre("save", async function (next) {
-  if (!this.phone && !this.email) {
+  const phoneOk = this.phone != null && String(this.phone).trim() !== "";
+  const emailOk = this.email != null && String(this.email).trim() !== "";
+  if (this.isNew) {
+    if (!phoneOk || !emailOk) {
+      return next(new Error("Phone number and email are both required"));
+    }
+  } else if (!phoneOk && !emailOk) {
     return next(new Error("At least one phone number or email is required"));
   }
 

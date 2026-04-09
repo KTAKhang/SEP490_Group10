@@ -43,6 +43,11 @@ const createHarvestBatch = async (payload = {}) => {
       return { status: "ERR", message: "Harvest date cannot be later than today" };
     }
 
+    const locationTrimmed = (location ?? "").toString().trim();
+    if (!locationTrimmed) {
+      return { status: "ERR", message: "Location is required" };
+    }
+
     const supplier = await SupplierModel.findById(supplierId);
     if (!supplier) {
       return { status: "ERR", message: "Supplier does not exist" };
@@ -88,7 +93,7 @@ const createHarvestBatch = async (payload = {}) => {
         fruitTypeId: new mongoose.Types.ObjectId(fruitTypeId),
         batchNumber: batchNumberTrimmed,
         harvestDate: new Date(harvestDate),
-        location: location?.toString().trim() || "",
+        location: locationTrimmed,
         notes: notes?.toString().trim() || "",
         receivedQuantity: 0,
         receiptEligible: true,
@@ -157,7 +162,7 @@ const createHarvestBatch = async (payload = {}) => {
       fruitTypeId: null,
       batchNumber: batchNumberTrimmed,
       harvestDate: new Date(harvestDate),
-      location: location?.toString().trim() || "",
+      location: locationTrimmed,
       notes: notes?.toString().trim() || "",
     });
     await harvestBatch.save();

@@ -4,24 +4,24 @@ const userSchema = new mongoose.Schema(
   {
     user_name: {
       type: String,
-      required: [true, "Tên người dùng là bắt buộc"],
+      required: [true, "Username is required"],
       trim: true,
       unique: true,
-      minlength: [3, "Tên người dùng phải có ít nhất 3 ký tự"],
-      maxlength: [50, "Tên người dùng không được vượt quá 50 ký tự"],
+      minlength: [3, "Username must be at least 3 characters"],
+      maxlength: [50, "Username must be at most 50 characters"],
     },
     email: {
       type: String,
-      required: [true, "Email là bắt buộc"],
+      required: [true, "Email is required"],
       trim: true,
       lowercase: true,
       unique: true,
-      match: [/\S+@\S+\.\S+/, "Định dạng email không hợp lệ"],
+      match: [/\S+@\S+\.\S+/, "Invalid email format"],
     },
     password: {
       type: String,
       required: function () {
-        return !this.isGoogleAccount; // Nếu không phải Google thì bắt buộc
+        return !this.isGoogleAccount; // Required when not a Google account
       },
     },
     avatar: {
@@ -31,7 +31,7 @@ const userSchema = new mongoose.Schema(
     role_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "roles",
-      required: [true, "Vai trò là bắt buộc"],
+      required: [true, "Role is required"],
     },
     resetPasswordOTP: {
       type: String,
@@ -66,8 +66,8 @@ const userSchema = new mongoose.Schema(
     googleId: {
       type: String,
       default: undefined,
-      unique: true, // mỗi Google ID là duy nhất
-      sparse: true, // cho phép null nhưng vẫn unique
+      unique: true, // each Google ID is unique
+      sparse: true, // allow null but still enforce uniqueness when set
     },
     isGoogleAccount: {
       type: Boolean,

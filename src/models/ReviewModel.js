@@ -27,13 +27,13 @@ const reviewSchema = new mongoose.Schema(
       max: 5,
       validate: {
         validator: Number.isInteger,
-        message: "rating phải là số nguyên",
+        message: "rating must be an integer",
       },
     },
     comment: {
       type: String,
       trim: true,
-      maxlength: [1000, "Comment không được vượt quá 1000 ký tự"],
+      maxlength: [1000, "Comment must be at most 1000 characters"],
       default: "",
     },
     images: {
@@ -42,7 +42,7 @@ const reviewSchema = new mongoose.Schema(
         validator: function (v) {
           return v.length <= 3;
         },
-        message: "Số lượng ảnh review không được vượt quá 3",
+        message: "Review images cannot exceed 3",
       },
       default: [],
     },
@@ -52,7 +52,7 @@ const reviewSchema = new mongoose.Schema(
         validator: function (v) {
           return v.length <= 3;
         },
-        message: "Số lượng imagePublicIds không được vượt quá 3",
+        message: "imagePublicIds cannot exceed 3",
       },
       default: [],
     },

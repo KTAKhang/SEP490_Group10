@@ -109,26 +109,22 @@ const createSupplier = async (userId, payload = {}) => {
       return { status: "ERR", message: "Notes must be at most 1000 characters" };
     }
 
-    // ✅ BR-SUP-02: At least phone or email required
+    // ✅ BR-SUP-02: Both phone and email required on create
     const normalizedPhone = phone?.toString().trim() || "";
     const normalizedEmail = email?.toString().trim() || "";
-    if (!normalizedPhone && !normalizedEmail) {
-      return {
-        status: "ERR",
-        message: "At least one phone number or email is required",
-      };
+    if (!normalizedPhone) {
+      return { status: "ERR", message: "Phone number is required" };
     }
-    if (normalizedPhone) {
-      const phoneCheck = validatePhone(normalizedPhone);
-      if (!phoneCheck.valid) {
-        return { status: "ERR", message: phoneCheck.message };
-      }
+    if (!normalizedEmail) {
+      return { status: "ERR", message: "Email is required" };
     }
-    if (normalizedEmail) {
-      const emailCheck = validateEmail(normalizedEmail);
-      if (!emailCheck.valid) {
-        return { status: "ERR", message: emailCheck.message };
-      }
+    const phoneCheck = validatePhone(normalizedPhone);
+    if (!phoneCheck.valid) {
+      return { status: "ERR", message: phoneCheck.message };
+    }
+    const emailCheck = validateEmail(normalizedEmail);
+    if (!emailCheck.valid) {
+      return { status: "ERR", message: emailCheck.message };
     }
 
 

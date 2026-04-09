@@ -8,40 +8,40 @@ const FruitTypeModel = require("../models/FruitTypeModel");
 const ReviewModel = require("../models/ReviewModel");
 
 
-// Sử dụng memory storage để nhận file từ multipart/form-data
+// Use memory storage to receive multipart/form-data files
 const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024 }, // giới hạn 5MB
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
 });
 
 // Single, clear error message for invalid file type (avoid duplicate or vague messages)
 const ALLOWED_IMAGE_MIMES = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"];
 const IMAGE_FILE_TYPE_ERROR = "Only image files are allowed (jpg, png, webp, gif). Documents and other file types are not accepted.";
 
-// Helper: Resize và compress ảnh trước khi upload (giảm kích thước file đáng kể)
+// Helper: Resize and compress image before upload (significantly reduces file size)
 const optimizeImage = async (buffer) => {
     try {
-        // Resize ảnh xuống tối đa 1920x1920 (giữ aspect ratio), compress với quality 85
-        // Format WebP nếu có thể (file nhỏ hơn 30-50% so với JPEG/PNG)
+        // Resize image to max 1920x1920 (keep aspect ratio), compress at quality 85
+        // Convert to WebP when possible (30-50% smaller than JPEG/PNG)
         const optimized = await sharp(buffer)
             .resize(1920, 1920, {
-                fit: 'inside', // Giữ aspect ratio, không crop
-                withoutEnlargement: true, // Không phóng to ảnh nhỏ
+                fit: 'inside', // Keep aspect ratio, no crop
+                withoutEnlargement: true, // Do not upscale small images
             })
-            .webp({ quality: 85 }) // Convert sang WebP với quality 85 (tốt nhưng file nhỏ)
+            .webp({ quality: 85 }) // Convert to WebP at quality 85 (good quality, smaller files)
             .toBuffer();
         
         return optimized;
     } catch (error) {
-        // Nếu lỗi (ví dụ: không phải ảnh), trả về buffer gốc
-        console.warn("Không thể optimize ảnh, sử dụng ảnh gốc:", error.message);
+        // If optimization fails (e.g. non-image input), return original buffer
+        console.warn("Could not optimize image, using original buffer:", error.message);
         return buffer;
     }
 };
 
-// Helper: Upload file lên Cloudinary với optimization và stream (nhanh hơn base64)
+// Helper: Upload file to Cloudinary using optimization and stream (faster than base64)
 const uploadToCloudinary = async (buffer, folder, options = {}) => {
-    // Tối ưu ảnh trước (resize + compress) - giảm kích thước file đáng kể
+    // Optimize image first (resize + compress) - significantly reduce file size
     const optimizedBuffer = await optimizeImage(buffer);
     
     return new Promise((resolve, reject) => {
@@ -49,7 +49,7 @@ const uploadToCloudinary = async (buffer, folder, options = {}) => {
             {
                 folder: folder,
                 resource_type: "image",
-                // Cloudinary sẽ tự động optimize thêm
+                // Cloudinary applies additional optimization
                 quality: "auto",
                 fetch_format: "auto",
                 ...options,
@@ -60,7 +60,7 @@ const uploadToCloudinary = async (buffer, folder, options = {}) => {
             }
         );
 
-        // Upload từ buffer stream đã được optimize (nhanh hơn nhiều)
+        // Upload optimized buffer stream (much faster)
         const bufferStream = new Readable();
         bufferStream.push(optimizedBuffer);
         bufferStream.push(null);
@@ -68,7 +68,7 @@ const uploadToCloudinary = async (buffer, folder, options = {}) => {
     });
 };
 
-// Middleware: Upload ảnh category lên Cloudinary nếu có file 'image'
+// Middleware: Upload category image to Cloudinary when 'image' file exists
 const uploadCategoryImage = (req, res, next) => {
     const handler = upload.single("image");
     handler(req, res, async (err) => {
@@ -81,39 +81,39 @@ const uploadCategoryImage = (req, res, next) => {
                 if (!ALLOWED_IMAGE_MIMES.includes(req.file.mimetype)) {
                     return res.status(400).json({ status: "ERR", message: IMAGE_FILE_TYPE_ERROR });
                 }
-                // ✅ Tự động lấy ảnh cũ từ database nếu đang update (có req.params.id)
+                // ✅ Auto-load old image from database for update flow (req.params.id)
                 let oldImagePublicId = null;
                 if (req.params && req.params.id) {
                     try {
                         const category = await CategoryModel.findById(req.params.id).select("imagePublicId");
                         if (category && category.imagePublicId) {
                             oldImagePublicId = category.imagePublicId;
-                            console.log(`📸 Tìm thấy ảnh cũ từ database: ${oldImagePublicId}`);
+                            console.log(`📸 Found old image from database: ${oldImagePublicId}`);
                         }
                     } catch (err) {
-                        // Nếu không tìm thấy hoặc lỗi, bỏ qua (có thể là create mới)
-                        console.warn("Không thể lấy ảnh cũ từ database:", err.message);
+                        // Ignore not-found/errors (may be a create flow)
+                        console.warn("Could not load old image from database:", err.message);
                     }
                 }
                 
-                // Nếu không có từ database, lấy từ body (frontend có thể gửi)
+                // If DB has no old image, read from body (frontend may send it)
                 if (!oldImagePublicId) {
                     oldImagePublicId = req.body.oldImagePublicId || req.body.imagePublicId;
                 }
                 
-                // Upload với stream (nhanh hơn base64) + optimization
+                // Upload using stream (faster than base64) + optimization
                 const result = await uploadToCloudinary(req.file.buffer, "categories");
                 req.body.image = result.secure_url;
                 req.body.imagePublicId = result.public_id;
                 
-                // ✅ Tự động xóa ảnh cũ nếu có ảnh mới và khác ảnh cũ
+                // ✅ Auto-delete old image when a different new image is uploaded
                 if (oldImagePublicId && oldImagePublicId !== result.public_id) {
-                    console.log(`🗑️ Xóa ảnh cũ category: ${oldImagePublicId}`);
+                    console.log(`🗑️ Deleting old category image: ${oldImagePublicId}`);
                     cloudinary.uploader.destroy(oldImagePublicId).catch(err => {
-                        console.warn(`Không thể xóa ảnh cũ ${oldImagePublicId} trên Cloudinary:`, err.message);
+                        console.warn(`Could not delete old image ${oldImagePublicId} on Cloudinary:`, err.message);
                     });
                 } else if (oldImagePublicId && oldImagePublicId === result.public_id) {
-                    console.log(`ℹ️ Ảnh mới trùng với ảnh cũ, không cần xóa`);
+                    console.log(`ℹ️ New image matches old image, no deletion needed`);
                 }
             }
             return next();
@@ -123,7 +123,7 @@ const uploadCategoryImage = (req, res, next) => {
     });
 };
 
-// Middleware: Upload ảnh FruitType (pre-order) lên Cloudinary nếu có file 'image' (single - legacy)
+// Middleware: Upload FruitType (pre-order) image to Cloudinary when 'image' file exists (single - legacy)
 const uploadFruitTypeImage = (req, res, next) => {
     const handler = upload.single("image");
     handler(req, res, async (err) => {
@@ -141,7 +141,7 @@ const uploadFruitTypeImage = (req, res, next) => {
                         const ft = await FruitTypeModel.findById(req.params.id).select("imagePublicId");
                         if (ft && ft.imagePublicId) oldImagePublicId = ft.imagePublicId;
                     } catch (e) {
-                        console.warn("Không thể lấy ảnh cũ FruitType:", e.message);
+                        console.warn("Could not load old FruitType image:", e.message);
                     }
                 }
                 if (!oldImagePublicId) {
@@ -152,7 +152,7 @@ const uploadFruitTypeImage = (req, res, next) => {
                 req.body.imagePublicId = result.public_id;
                 if (oldImagePublicId && oldImagePublicId !== result.public_id) {
                     cloudinary.uploader.destroy(oldImagePublicId).catch((e) =>
-                        console.warn("Không thể xóa ảnh cũ FruitType:", e.message)
+                        console.warn("Could not delete old FruitType image:", e.message)
                     );
                 }
             }
@@ -163,7 +163,7 @@ const uploadFruitTypeImage = (req, res, next) => {
     });
 };
 
-// Middleware: Upload nhiều ảnh FruitType (pre-order) lên Cloudinary - field "images" (max 10)
+// Middleware: Upload multiple FruitType (pre-order) images to Cloudinary - field "images" (max 10)
 const uploadFruitTypeImages = (req, res, next) => {
     const handler = upload.array("images", 10);
     handler(req, res, async (err) => {
@@ -234,7 +234,7 @@ const uploadFruitTypeImages = (req, res, next) => {
 
 module.exports = { uploadCategoryImage, uploadFruitTypeImage, uploadFruitTypeImages };
 
-// Middleware: Upload nhiều ảnh product lên Cloudinary nếu có field 'images'
+// Middleware: Upload multiple product images to Cloudinary when field 'images' exists
 const uploadProductImages = (req, res, next) => {
     const handler = upload.array("images", 10);
     handler(req, res, async (err) => {
@@ -243,7 +243,7 @@ const uploadProductImages = (req, res, next) => {
             return res.status(400).json({ status: "ERR", message: err.message });
         }
         try {
-            // ✅ Tự động lấy danh sách ảnh cũ từ database nếu đang update (có req.params.id)
+            // ✅ Auto-load old image list from database for update flow (req.params.id)
             let oldImagesFromDB = [];
             let oldImagePublicIdsFromDB = [];
             
@@ -255,16 +255,16 @@ const uploadProductImages = (req, res, next) => {
                         oldImagePublicIdsFromDB = Array.isArray(product.imagePublicIds) ? product.imagePublicIds : [];
                     }
                 } catch (err) {
-                    // Nếu không tìm thấy hoặc lỗi, bỏ qua (có thể là create mới)
-                    console.warn("Không thể lấy ảnh cũ từ database:", err.message);
+                    // Ignore not-found/errors (may be a create flow)
+                    console.warn("Could not load old image from database:", err.message);
                 }
             }
             
-            // Lấy danh sách ảnh cũ từ body (nếu frontend gửi - ưu tiên hơn DB). Gửi [] = "không giữ ảnh cũ".
+            // Get old image list from body (if provided - higher priority than DB). [] = "do not keep old images".
             let existingImages = [];
             let existingImagePublicIds = [];
             
-            // Parse existingImages và existingImagePublicIds từ body (có thể là JSON string hoặc array)
+            // Parse existingImages and existingImagePublicIds from body (JSON string or array)
             if (req.body.existingImages !== undefined) {
                 try {
                     existingImages = typeof req.body.existingImages === 'string'
@@ -285,8 +285,8 @@ const uploadProductImages = (req, res, next) => {
                 }
                 existingImagePublicIds = Array.isArray(existingImagePublicIds) ? existingImagePublicIds : [];
             }
-            // Chỉ dùng ảnh cũ từ DB khi frontend KHÔNG gửi existingImages/existingImagePublicIds (tương thích ngược).
-            // Nếu frontend gửi rõ (kể cả mảng rỗng [] = "xóa hết ảnh cũ, chỉ giữ ảnh mới") thì không ghi đè bằng DB.
+            // Use old DB images only when frontend does NOT send existingImages/existingImagePublicIds (backward compatibility).
+            // If frontend sends explicit values (including [] = "remove all old images, keep only new"), do not override from DB.
             const didSendExisting = req.body.existingImages !== undefined || req.body.existingImagePublicIds !== undefined;
             if (!didSendExisting && req.params && req.params.id) {
                 if (oldImagesFromDB.length > 0) existingImages = oldImagesFromDB;
@@ -305,9 +305,9 @@ const uploadProductImages = (req, res, next) => {
                 }
             }
 
-            // ✅ Xử lý file upload thực tế - Upload song song với stream + optimization
+            // ✅ Actual upload flow - parallel upload with stream + optimization
             if (Array.isArray(req.files) && req.files.length > 0) {
-                // Upload tất cả ảnh song song với stream (nhanh hơn base64)
+                // Upload all images in parallel using stream (faster than base64)
                 const uploads = req.files.map((file) => 
                     uploadToCloudinary(file.buffer, "products")
                 );
@@ -316,13 +316,13 @@ const uploadProductImages = (req, res, next) => {
                 const newImages = results.map((r) => r.secure_url);
                 const newImagePublicIds = results.map((r) => r.public_id);
                 
-                // Merge ảnh cũ (giữ lại) và ảnh mới
+                // Merge old images (kept) and newly uploaded images
                 const finalImages = [...existingImages, ...newImages];
                 const finalImagePublicIds = [...existingImagePublicIds, ...newImagePublicIds];
                 
-                // ✅ Tự động xóa ảnh cũ không còn trong danh sách mới
-                // So sánh ảnh cũ từ DB với danh sách mới (ảnh cũ giữ lại + ảnh mới)
-                // Nếu có ảnh cũ không còn trong danh sách mới → xóa trên Cloudinary
+                // ✅ Auto-delete old images no longer present in final list
+                // Compare old DB images with final list (kept old + new images)
+                // If any old image is missing from final list -> delete on Cloudinary
                 const allOldImagePublicIds = oldImagePublicIdsFromDB.length > 0 
                     ? oldImagePublicIdsFromDB 
                     : existingImagePublicIds;
@@ -332,17 +332,17 @@ const uploadProductImages = (req, res, next) => {
                         oldId => !finalImagePublicIds.includes(oldId)
                     );
                     
-                    // Xóa ảnh cũ trên Cloudinary (chạy song song, không block)
+                    // Delete old images on Cloudinary (parallel, non-blocking)
                     if (imagesToDelete.length > 0) {
-                        console.log(`🗑️ Xóa ${imagesToDelete.length} ảnh cũ không còn trong danh sách mới`);
+                        console.log(`🗑️ Deleting ${imagesToDelete.length} old images not present in final list`);
                         Promise.all(
                             imagesToDelete.map(publicId => 
                                 cloudinary.uploader.destroy(publicId).catch(err => {
-                                    console.warn(`Không thể xóa ảnh ${publicId} trên Cloudinary:`, err.message);
+                                    console.warn(`Could not delete image ${publicId} on Cloudinary:`, err.message);
                                 })
                             )
                         ).catch(err => {
-                            console.warn("Lỗi khi xóa ảnh cũ:", err.message);
+                            console.warn("Error while deleting old images:", err.message);
                         });
                     }
                 }
@@ -350,12 +350,12 @@ const uploadProductImages = (req, res, next) => {
                 req.body.images = finalImages;
                 req.body.imagePublicIds = finalImagePublicIds;
             } else {
-                // Không có file mới, giữ nguyên ảnh cũ (nếu có)
+                // No new files: keep old images (if any)
                 if (existingImages.length > 0 || existingImagePublicIds.length > 0) {
                     req.body.images = existingImages;
                     req.body.imagePublicIds = existingImagePublicIds;
                 }
-                // Nếu không có ảnh cũ và không có file mới, để service xử lý (có thể là xóa tất cả ảnh)
+                // If no old images and no new files, let service layer handle it (may remove all images)
             }
             
             return next();
@@ -369,7 +369,7 @@ const uploadProductImages = (req, res, next) => {
 
 module.exports.uploadProductImages = uploadProductImages;
 
-// Middleware: Upload nhiều ảnh review lên Cloudinary
+// Middleware: Upload multiple review images to Cloudinary
 const uploadReviewImages = (req, res, next) => {
     const handler = upload.array("images", 3);
     handler(req, res, async (err) => {
@@ -389,7 +389,7 @@ const uploadReviewImages = (req, res, next) => {
                         oldImagePublicIdsFromDB = Array.isArray(review.imagePublicIds) ? review.imagePublicIds : [];
                     }
                 } catch (err) {
-                    console.warn("Không thể lấy ảnh cũ từ database:", err.message);
+                    console.warn("Could not load old image from database:", err.message);
                 }
             }
 
@@ -448,11 +448,11 @@ const uploadReviewImages = (req, res, next) => {
                         Promise.all(
                             imagesToDelete.map(publicId =>
                                 cloudinary.uploader.destroy(publicId).catch(err => {
-                                    console.warn(`Không thể xóa ảnh ${publicId} trên Cloudinary:`, err.message);
+                                    console.warn(`Could not delete image ${publicId} on Cloudinary:`, err.message);
                                 })
                             )
                         ).catch(err => {
-                            console.warn("Lỗi khi xóa ảnh cũ:", err.message);
+                            console.warn("Error while deleting old images:", err.message);
                         });
                     }
                 }
@@ -499,7 +499,7 @@ const uploadReviewImages = (req, res, next) => {
 
 module.exports.uploadReviewImages = uploadReviewImages;
 
-// Middleware: Upload news thumbnail lên Cloudinary
+// Middleware: Upload news thumbnail to Cloudinary
 const uploadNewsThumbnail = (req, res, next) => {
     const handler = upload.single("thumbnail");
     handler(req, res, async (err) => {
@@ -517,7 +517,7 @@ const uploadNewsThumbnail = (req, res, next) => {
                     });
                 }
 
-                // ✅ Tự động lấy ảnh cũ từ database nếu đang update (có req.params.id)
+                // ✅ Auto-load old image from database during update (req.params.id)
                 let oldThumbnailPublicId = null;
                 if (req.params && req.params.id) {
                     try {
@@ -527,25 +527,25 @@ const uploadNewsThumbnail = (req, res, next) => {
                             oldThumbnailPublicId = news.thumbnailPublicId;
                         }
                     } catch (err) {
-                        console.warn("Không thể lấy ảnh cũ từ database:", err.message);
+                        console.warn("Could not load old image from database:", err.message);
                     }
                 }
 
-                // Nếu không có từ database, lấy từ body (frontend có thể gửi)
+                // If DB has no old image, read from body (frontend may send it)
                 if (!oldThumbnailPublicId) {
                     oldThumbnailPublicId = req.body.oldThumbnailPublicId || req.body.thumbnailPublicId;
                 }
 
-                // Upload với stream + optimization
+                // Upload with stream + optimization
                 const result = await uploadToCloudinary(req.file.buffer, "news");
 
                 req.body.thumbnail_url = result.secure_url;
                 req.body.thumbnailPublicId = result.public_id;
 
-                // ✅ Tự động xóa ảnh cũ nếu có ảnh mới và khác ảnh cũ
+                // ✅ Auto-delete old image when a different new image is uploaded
                 if (oldThumbnailPublicId && oldThumbnailPublicId !== result.public_id) {
                     cloudinary.uploader.destroy(oldThumbnailPublicId).catch((err) => {
-                        console.warn(`Không thể xóa ảnh cũ ${oldThumbnailPublicId} trên Cloudinary:`, err.message);
+                        console.warn(`Could not delete old image ${oldThumbnailPublicId} on Cloudinary:`, err.message);
                     });
                 }
             }
@@ -558,7 +558,7 @@ const uploadNewsThumbnail = (req, res, next) => {
 
 module.exports.uploadNewsThumbnail = uploadNewsThumbnail;
 
-// Middleware: Upload ảnh cho content (dùng trong HTML editor)
+// Middleware: Upload content image (used in HTML editor)
 const uploadNewsContentImage = (req, res, next) => {
     const handler = upload.single("image");
     handler(req, res, async (err) => {
@@ -576,10 +576,10 @@ const uploadNewsContentImage = (req, res, next) => {
                     });
                 }
 
-                // Upload với stream + optimization vào folder "news/content"
+                // Upload with stream + optimization to "news/content"
                 const result = await uploadToCloudinary(req.file.buffer, "news/content");
 
-                // Trả về URL và publicId để frontend sử dụng
+                // Return URL and publicId for frontend usage
                 req.uploadedImage = {
                     url: result.secure_url,
                     publicId: result.public_id,
@@ -599,7 +599,7 @@ const uploadNewsContentImage = (req, res, next) => {
 
 module.exports.uploadNewsContentImage = uploadNewsContentImage;
 
-// Middleware: Upload shop description image lên Cloudinary
+// Middleware: Upload shop description image to Cloudinary
 const uploadShopDescriptionImage = (req, res, next) => {
     const handler = upload.single("image"); // Field name for description image
     handler(req, res, async (err) => {
@@ -617,10 +617,10 @@ const uploadShopDescriptionImage = (req, res, next) => {
                     });
                 }
 
-                // Upload với stream + optimization vào folder "shop/description"
+                // Upload with stream + optimization to "shop/description"
                 const result = await uploadToCloudinary(req.file.buffer, "shop/description");
 
-                // Trả về URL và publicId để frontend sử dụng
+                // Return URL and publicId for frontend usage
                 req.uploadedImage = {
                     url: result.secure_url,
                     publicId: result.public_id,
@@ -640,7 +640,7 @@ const uploadShopDescriptionImage = (req, res, next) => {
 
 module.exports.uploadShopDescriptionImage = uploadShopDescriptionImage;
 
-// Middleware: Upload nhiều ảnh shop lên Cloudinary
+// Middleware: Upload multiple shop images to Cloudinary
 const uploadShopImages = (req, res, next) => {
     const handler = upload.array("images", 20); // Allow up to 20 images
     handler(req, res, async (err) => {
@@ -649,7 +649,7 @@ const uploadShopImages = (req, res, next) => {
             return res.status(400).json({ status: "ERR", message: err.message });
         }
         try {
-            // ✅ Tự động lấy danh sách ảnh cũ từ database
+            // ✅ Auto-load old image list from database
             let oldImagesFromDB = [];
             let oldImagePublicIdsFromDB = [];
             
@@ -661,14 +661,14 @@ const uploadShopImages = (req, res, next) => {
                     oldImagePublicIdsFromDB = Array.isArray(shop.imagePublicIds) ? shop.imagePublicIds : [];
                 }
             } catch (err) {
-                console.warn("Không thể lấy ảnh cũ từ database:", err.message);
+                console.warn("Could not load old image from database:", err.message);
             }
             
-            // Lấy danh sách ảnh cũ từ body (nếu frontend gửi - ưu tiên hơn DB)
+            // Get old image list from body (if frontend sends it - higher priority than DB)
             let existingImages = [];
             let existingImagePublicIds = [];
             
-            // Parse existingImages và existingImagePublicIds từ body
+            // Parse existingImages and existingImagePublicIds from body
             if (req.body.existingImages) {
                 try {
                     existingImages = typeof req.body.existingImages === 'string' 
@@ -689,7 +689,7 @@ const uploadShopImages = (req, res, next) => {
                 }
             }
             
-            // Nếu frontend không gửi, dùng ảnh cũ từ database
+            // If frontend does not send these values, use old images from database
             if (existingImages.length === 0 && oldImagesFromDB.length > 0) {
                 existingImages = oldImagesFromDB;
             }
@@ -717,9 +717,9 @@ const uploadShopImages = (req, res, next) => {
                 }
             }
             
-            // ✅ Xử lý file upload thực tế - Upload song song với stream + optimization
+            // ✅ Actual upload flow - parallel upload with stream + optimization
             if (Array.isArray(req.files) && req.files.length > 0) {
-                // Upload tất cả ảnh song song với stream (nhanh hơn base64)
+                // Upload all images in parallel using stream (faster than base64)
                 const uploads = req.files.map((file) => 
                     uploadToCloudinary(file.buffer, "shop")
                 );
@@ -728,11 +728,11 @@ const uploadShopImages = (req, res, next) => {
                 const newImages = results.map((r) => r.secure_url);
                 const newImagePublicIds = results.map((r) => r.public_id);
                 
-                // Merge ảnh cũ (giữ lại) và ảnh mới
+                // Merge old images (kept) and newly uploaded images
                 const finalImages = [...existingImages, ...newImages];
                 const finalImagePublicIds = [...existingImagePublicIds, ...newImagePublicIds];
                 
-                // ✅ Tự động xóa ảnh cũ không còn trong danh sách mới
+                // ✅ Auto-delete old images no longer present in final list
                 const allOldImagePublicIds = oldImagePublicIdsFromDB.length > 0 
                     ? oldImagePublicIdsFromDB 
                     : existingImagePublicIds;
@@ -742,17 +742,17 @@ const uploadShopImages = (req, res, next) => {
                         oldId => !finalImagePublicIds.includes(oldId)
                     );
                     
-                    // Xóa ảnh cũ trên Cloudinary (chạy song song, không block)
+                    // Delete old images on Cloudinary (parallel, non-blocking)
                     if (imagesToDelete.length > 0) {
-                        console.log(`🗑️ Xóa ${imagesToDelete.length} ảnh cũ không còn trong danh sách mới`);
+                        console.log(`🗑️ Deleting ${imagesToDelete.length} old images not present in final list`);
                         Promise.all(
                             imagesToDelete.map(publicId => 
                                 cloudinary.uploader.destroy(publicId).catch(err => {
-                                    console.warn(`Không thể xóa ảnh ${publicId} trên Cloudinary:`, err.message);
+                                    console.warn(`Could not delete image ${publicId} on Cloudinary:`, err.message);
                                 })
                             )
                         ).catch(err => {
-                            console.warn("Lỗi khi xóa ảnh cũ:", err.message);
+                            console.warn("Error while deleting old images:", err.message);
                         });
                     }
                 }
@@ -760,10 +760,10 @@ const uploadShopImages = (req, res, next) => {
                 req.body.images = finalImages;
                 req.body.imagePublicIds = finalImagePublicIds;
             } else {
-                // Không có file mới upload
-                // Nếu frontend gửi trực tiếp images và imagePublicIds trong body (không qua file upload)
+                // No new files uploaded
+                // If frontend sends images and imagePublicIds directly in body (without file upload)
                 if (req.body.images !== undefined || req.body.imagePublicIds !== undefined) {
-                    // Parse nếu là JSON string (từ form-data)
+                    // Parse if it's a JSON string (from form-data)
                     let imagesArray = req.body.images;
                     let imagePublicIdsArray = req.body.imagePublicIds;
                     
@@ -783,11 +783,11 @@ const uploadShopImages = (req, res, next) => {
                         }
                     }
                     
-                    // Frontend đang gửi trực tiếp arrays (có thể là để xóa tất cả ảnh)
+                    // Frontend is sending arrays directly (possibly to clear all images)
                     req.body.images = Array.isArray(imagesArray) ? imagesArray : [];
                     req.body.imagePublicIds = Array.isArray(imagePublicIdsArray) ? imagePublicIdsArray : [];
                 } else {
-                    // Giữ nguyên ảnh cũ (nếu có)
+                    // Keep old images as-is (if any)
                     req.body.images = existingImages;
                     req.body.imagePublicIds = existingImagePublicIds;
                 }
@@ -830,10 +830,10 @@ const uploadShopImage = (req, res, next) => {
                     });
                 }
 
-                // Upload với stream + optimization vào folder "shop"
+                // Upload with stream + optimization to "shop"
                 const result = await uploadToCloudinary(req.file.buffer, "shop");
 
-                // Trả về URL và publicId để frontend sử dụng
+                // Return URL and publicId for frontend usage
                 req.uploadedImage = {
                     url: result.secure_url,
                     publicId: result.public_id,
@@ -853,7 +853,7 @@ const uploadShopImage = (req, res, next) => {
 
 module.exports.uploadShopImage = uploadShopImage;
 
-// Middleware: Upload homepage asset image lên Cloudinary
+// Middleware: Upload homepage asset image to Cloudinary
 const uploadHomepageAssetImage = (req, res, next) => {
     const handler = upload.single("image");
     handler(req, res, async (err) => {
@@ -879,10 +879,10 @@ const uploadHomepageAssetImage = (req, res, next) => {
                     });
                 }
 
-                // Upload với stream + optimization vào folder "homepage"
+                // Upload with stream + optimization to "homepage"
                 const result = await uploadToCloudinary(req.file.buffer, "homepage");
 
-                // Trả về URL và publicId để frontend sử dụng
+                // Return URL and publicId for frontend usage
                 req.uploadedImage = {
                     url: result.secure_url,
                     publicId: result.public_id,
@@ -939,3 +939,4 @@ const uploadChatImages = (req, res, next) => {
 };
 
 module.exports.uploadChatImages = uploadChatImages;
+

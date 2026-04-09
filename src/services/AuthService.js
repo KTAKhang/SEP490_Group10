@@ -234,8 +234,9 @@ const logoutUser = async (userId) => {
     refreshToken: null,
     currentAccessToken: null,
   });
+
   return { status: "OK", message: "Logout successful", userId };
-};
+
 
 const sendRegisterOTP = async (
   user_name,

@@ -10,7 +10,7 @@ const addFavorite = async (req, res) => {
     const { productId } = req.body;
 
     if (!productId) {
-      return res.status(400).json({ status: "ERR", message: "productId là bắt buộc" });
+      return res.status(400).json({ status: "ERR", message: "productId is required" });
     }
 
     const response = await FavoriteService.addFavorite(userId, productId);

@@ -11,29 +11,28 @@ const inventoryTransactionSchema = new mongoose.Schema(
       index: true,
     },
 
-    // quantity luôn là số dương; hệ thống hiểu tăng/giảm theo type
+    // quantity is always positive; sign implied by type
     quantity: {
       type: Number,
       required: true,
       min: 1,
       validate: {
         validator: Number.isInteger,
-        message: "quantity phải là số nguyên",
+        message: "quantity must be an integer",
       },
     },
 
-    // ai thao tác (user)
+    // actor (user)
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "users", required: true, index: true },
 
     note: { type: String, default: "", trim: true },
 
-    // tuỳ chọn: liên kết tới order/shipment/receipt bên nghiệp vụ sale
+    // optional: link to order/shipment/receipt in sales flow
     referenceType: { type: String, default: "", trim: true },
     referenceId: { type: mongoose.Schema.Types.ObjectId, default: null },
 
-    // ✅ Liên kết với Harvest Batch (nếu nhập hàng từ lô thu hoạch)
-    // LƯU Ý: Đối với RECEIPT transactions, nếu sản phẩm có supplier thì harvestBatch là BẮT BUỘC
-    // Validation được xử lý ở service level (InventoryTransactionService.createReceipt)
+    // ✅ Harvest batch when receiving from a harvest batch
+    // NOTE: For RECEIPT, if product has a supplier, harvestBatch is required — validated in InventoryTransactionService.createReceipt
     harvestBatch: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "harvest_batches",
@@ -44,10 +43,10 @@ const inventoryTransactionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Index cho query theo product và thời gian
+// Index: product + time
 inventoryTransactionSchema.index({ product: 1, createdAt: -1 });
 
-// Index composite cho query RECEIPT transactions theo harvest batch (optimize query lịch sử nhập hàng từ lô thu hoạch)
+// Composite index: RECEIPT by harvest batch (receipt history from harvest)
 inventoryTransactionSchema.index({ harvestBatch: 1, type: 1, createdAt: -1 });
 
 module.exports = mongoose.model("inventory_transactions", inventoryTransactionSchema);

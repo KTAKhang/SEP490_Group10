@@ -6,7 +6,7 @@ const harvestBatchSchema = new mongoose.Schema(
     supplier: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "suppliers",
-      required: [true, "Nhà cung cấp là bắt buộc"],
+      required: [true, "Supplier is required"],
       index: true,
     },
 
@@ -34,77 +34,77 @@ const harvestBatchSchema = new mongoose.Schema(
     },
 
 
-    // ✅ BR-SUP-11: Harvest Batch Code (tự động sinh, unique, required)
+    // ✅ BR-SUP-11: Harvest batch code (auto-generated, unique, required)
     batchCode: {
       type: String,
       trim: true,
       uppercase: true,
       unique: true,
-      required: false, // ✅ Đảm bảo luôn có giá trị
-      maxlength: [30, "Mã lô thu hoạch không được vượt quá 30 ký tự"],
+      required: false, // ✅ Always populated on save via pre hook
+      maxlength: [30, "Harvest batch code must be at most 30 characters"],
       immutable: true,
     },
 
 
     batchNumber: {
       type: String,
-      required: [true, "Số lô thu hoạch là bắt buộc"],
+      required: [true, "Harvest batch number is required"],
       trim: true,
     },
 
 
     harvestDate: {
       type: Date,
-      required: [true, "Ngày thu hoạch là bắt buộc"],
+      required: [true, "Harvest date is required"],
     },
 
 
     harvestDateStr: {
       type: String,
-      match: [/^\d{4}-\d{2}-\d{2}$/, "harvestDateStr phải có format YYYY-MM-DD"],
+      match: [/^\d{4}-\d{2}-\d{2}$/, "harvestDateStr must be YYYY-MM-DD"],
     },
-    // ✅ Tracking số lượng đã nhập kho
+    // ✅ Quantity received into warehouse
     receivedQuantity: {
       type: Number,
       default: 0,
       min: 0,
       validate: {
         validator: Number.isInteger,
-        message: "receivedQuantity phải là số nguyên",
+        message: "receivedQuantity must be an integer",
       },
     },
     location: {
       type: String,
       trim: true,
-      maxlength: [200, "Địa điểm thu hoạch không được vượt quá 200 ký tự"],
-      // ✅ BR-SUP-10: Location (khu vực/vùng trồng) là recommended nhưng optional để linh hoạt
+      maxlength: [200, "Harvest location must be at most 200 characters"],
+      // ✅ BR-SUP-10: Location (growing area) recommended but optional
     },
     notes: {
       type: String,
       trim: true,
-      maxlength: [500, "Ghi chú không được vượt quá 500 ký tự"],
+      maxlength: [500, "Notes must be at most 500 characters"],
       default: "",
     },
 
 
-    // ✅ Liên kết với Inventory Transactions (array của transaction IDs)
+    // ✅ Linked inventory transaction IDs
     inventoryTransactionIds: {
       type: [mongoose.Schema.Types.ObjectId],
       ref: "inventory_transactions",
       default: [],
     },
     /**
-     * receiptEligible: Chỉ lô có status true mới được chọn để nhập hàng vào kho.
-     * false = không thể chọn lô này khi tạo phiếu nhập kho.
+     * receiptEligible: Only batches with true may be selected for warehouse receipt.
+     * false = cannot select this batch when creating a receipt.
      */
     receiptEligible: {
       type: Boolean,
       default: true,
     },
     /**
-     * visibleInReceipt: Ẩn/hiện trong danh sách chọn lô khi nhập kho.
-     * false = ẩn khỏi dropdown (tránh hiển thị lô đã nhập, giảm rối loạn cho nhân viên kho).
-     * Được set false sau khi lô đã được nhập kho.
+     * visibleInReceipt: Show/hide in batch picker when receiving stock.
+     * false = hidden from dropdown (e.g. already received) to reduce clutter for warehouse staff.
+     * Set false after the batch has been received.
      */
     visibleInReceipt: {
       type: Boolean,
@@ -130,7 +130,7 @@ harvestBatchSchema.index(
 );
 // Pre-save hook
 harvestBatchSchema.pre("save", function (next) {
-  // ✅ BR-SUP-12: Validation harvestDate không được lớn hơn ngày hiện tại
+  // ✅ BR-SUP-12: harvestDate must not be after today
   if (this.isModified("harvestDate") && this.harvestDate) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -138,7 +138,7 @@ harvestBatchSchema.pre("save", function (next) {
     harvestDate.setHours(0, 0, 0, 0);
    
     if (harvestDate > today) {
-      return next(new Error("Ngày thu hoạch không được lớn hơn ngày hiện tại"));
+      return next(new Error("Harvest date cannot be after today"));
     }
     // Sync harvestDateStr
     const d = new Date(this.harvestDate);
@@ -148,20 +148,20 @@ harvestBatchSchema.pre("save", function (next) {
     const day = String(vnDate.getDate()).padStart(2, "0");
     this.harvestDateStr = `${year}-${month}-${day}`;
   }
-  // ✅ BR-SUP-11: Tự động sinh batchCode khi tạo mới
+  // ✅ BR-SUP-11: Auto-generate batchCode on insert
   if (this.isNew) {
     const timestamp = Date.now().toString(36).toUpperCase();
     const random = Math.random().toString(36).substring(2, 6).toUpperCase();
     this.batchCode = `HB-${timestamp}-${random}`;
   }
-  // ✅ BR-SUP-11: Không cho chỉnh sửa batchCode sau khi tạo
+  // ✅ BR-SUP-11: batchCode is immutable after create
   if (!this.isNew && this.isModified("batchCode")) {
-    return next(new Error("Mã lô thu hoạch không thể chỉnh sửa sau khi tạo"));
+    return next(new Error("Harvest batch code cannot be changed after creation"));
   }
   // ✅ Validation: receivedQuantity >= 0
   if (this.isModified("receivedQuantity") && this.receivedQuantity !== undefined) {
     if (this.receivedQuantity < 0) {
-      return next(new Error("receivedQuantity không được âm"));
+      return next(new Error("receivedQuantity cannot be negative"));
     }
   }
   next();

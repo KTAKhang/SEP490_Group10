@@ -195,7 +195,9 @@ const confirmCheckoutAndCreateOrder = async ({
       if (!product || !product.status)
         throw new Error("The product is unavailable");
       if (isProductExpired(product))
+
         throw new Error(`The product "${product.name}" has expired. It is not possible to place an order.`);
+
       const { effectivePrice, originalPrice } = getEffectivePrice(product);
       totalPrice += item.quantity * effectivePrice;
       orderDetails.push({

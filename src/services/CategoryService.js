@@ -17,6 +17,11 @@ const createCategory = async ({ name, description, image, imagePublicId, status 
     if (descStr.length > 500) {
       return { status: "ERR", message: "Category description must be at most 500 characters" };
     }
+    const imgStr = (image ?? "").toString().trim();
+    const publicIdStr = (imagePublicId ?? "").toString().trim();
+    if (!imgStr || !publicIdStr) {
+      return { status: "ERR", message: "Category image is required" };
+    }
     const existing = await CategoryModel.findOne({
       name: { $regex: new RegExp(`^${normalizedName}$`, "i") },
     });
@@ -28,8 +33,8 @@ const createCategory = async ({ name, description, image, imagePublicId, status 
     const category = new CategoryModel({
       name: normalizedName,
       description: (description ?? "").toString(),
-      image: (image ?? "").toString(),
-      imagePublicId: (imagePublicId ?? "").toString(),
+      image: imgStr,
+      imagePublicId: publicIdStr,
       status: status ?? true,
     });
 

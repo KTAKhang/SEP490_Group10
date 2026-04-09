@@ -260,7 +260,7 @@ const getMyOrders = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: "ERR",
-      message: error.message || "Lấy lịch sử mua hàng thất bại",
+      message: error.message || "Failed to retrieve purchase history",
     });
   }
 };
@@ -273,7 +273,7 @@ const getMyOrderById = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: "ERR",
-      message: error.message || "Lấy chi tiết đơn hàng thất bại",
+      message: error.message || "Failed to retrieve order details",
     });
   }
 };
@@ -288,7 +288,7 @@ const getOrdersAdmin = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: "ERR",
-      message: error.message || "Lấy danh sách đơn hàng thất bại",
+      message: error.message || "Failed to retrieve orders",
     });
   }
 };
@@ -302,7 +302,7 @@ const getOrderDetailAdmin = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: "ERR",
-      message: error.message || "Lấy chi tiết đơn hàng thất bại",
+      message: error.message || "Failed to retrieve order details",
     });
   }
 };
@@ -327,7 +327,7 @@ const getOrderStatusStatsAdmin = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: "ERR",
-      message: error.message || "Lấy thống kê đơn hàng thất bại",
+      message: error.message || "Failed to retrieve order statistics",
     });
   }
 };
@@ -343,7 +343,7 @@ const getOrderStatusLogs = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: "ERR",
-      message: error.message || "Lấy log thay đổi trạng thái thất bại",
+      message: error.message || "Failed to retrieve status change logs",
     });
   }
 };
