@@ -234,7 +234,7 @@ const logoutUser = async (userId) => {
     refreshToken: null,
     currentAccessToken: null,
   });
-  return { status: "OK", message: "Đăng xuất thành công", userId };
+  return { status: "OK", message: "Signed out successfully", userId };
 };
 
 const sendRegisterOTP = async (

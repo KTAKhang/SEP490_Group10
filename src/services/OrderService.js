@@ -190,7 +190,7 @@ const confirmCheckoutAndCreateOrder = async ({
       if (!product || !product.status)
         throw new Error("The product is unavailable");
       if (isProductExpired(product))
-        throw new Error(`Sản phẩm "${product.name}" đã hết hạn sử dụng. Không thể đặt hàng.`);
+        throw new Error(`Product "${product.name}" has expired and cannot be ordered.`);
       const { effectivePrice, originalPrice } = getEffectivePrice(product);
       totalPrice += item.quantity * effectivePrice;
       orderDetails.push({

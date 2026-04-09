@@ -10,17 +10,17 @@ const productBatchHistorySchema = new mongoose.Schema(
       index: true,
     },
 
-    // Snapshot tại thời điểm chốt lô (không đổi khi product được sửa sau này)
+    // Snapshot at batch close (unchanged if product is edited later)
     productNameSnapshot: { type: String, trim: true, default: "" },
     productCategoryNameSnapshot: { type: String, trim: true, default: "" },
     productBrandSnapshot: { type: String, trim: true, default: "" },
-    // Toàn bộ dữ liệu sản phẩm tại thời điểm chốt lô (bản sao độc lập, không tham chiếu Product)
+    // Full product payload at batch close (standalone copy, not a Product ref)
     productSnapshot: {
       type: mongoose.Schema.Types.Mixed,
       default: null,
     },
 
-    // ✅ Liên kết với Harvest Batch (nếu có)
+    // ✅ Optional link to harvest batch
     harvestBatch: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "harvest_batches",
@@ -29,7 +29,7 @@ const productBatchHistorySchema = new mongoose.Schema(
     },
 
 
-    // Số lô (tăng dần theo mỗi lần reset)
+    // Batch sequence number (increments on each reset)
     batchNumber: {
       type: Number,
       required: true,
@@ -37,7 +37,7 @@ const productBatchHistorySchema = new mongoose.Schema(
     },
 
 
-    // Số lượng kế hoạch
+    // Planned quantity
     plannedQuantity: {
       type: Number,
       required: true,
@@ -45,7 +45,7 @@ const productBatchHistorySchema = new mongoose.Schema(
     },
 
 
-    // Số lượng đã nhập kho
+    // Quantity received into warehouse
     receivedQuantity: {
       type: Number,
       required: true,
@@ -53,7 +53,7 @@ const productBatchHistorySchema = new mongoose.Schema(
     },
 
 
-    // Số lượng đã bán (tổng ISSUE transactions từ warehouseEntryDate đến completedDate)
+    // Quantity sold (sum of ISSUE txs from warehouseEntryDate through completedDate)
     soldQuantity: {
       type: Number,
       required: true,
@@ -62,7 +62,7 @@ const productBatchHistorySchema = new mongoose.Schema(
     },
 
 
-    // Số lượng vứt bỏ (hết hạn) = receivedQuantity - soldQuantity
+    // Discarded quantity (e.g. expired) = receivedQuantity - soldQuantity
     discardedQuantity: {
       type: Number,
       required: true,
@@ -71,7 +71,7 @@ const productBatchHistorySchema = new mongoose.Schema(
     },
 
 
-    // Ngày nhập kho
+    // Warehouse entry date
     warehouseEntryDate: {
       type: Date,
       required: true,
@@ -85,7 +85,7 @@ const productBatchHistorySchema = new mongoose.Schema(
     },
 
 
-    // Ngày hết hạn
+    // Expiry date
     expiryDate: {
       type: Date,
       default: null,
@@ -99,7 +99,7 @@ const productBatchHistorySchema = new mongoose.Schema(
     },
 
 
-    // Ngày hoàn thành lô (bán hết hoặc hết hạn)
+    // Batch completion date (sold out or expired)
     completedDate: {
       type: Date,
       required: true,
@@ -113,13 +113,13 @@ const productBatchHistorySchema = new mongoose.Schema(
     },
 
 
-    // Lý do hoàn thành: "SOLD_OUT" | "EXPIRED"
+    // Completion reason: "SOLD_OUT" | "EXPIRED"
     completionReason: {
       type: String,
       enum: ["SOLD_OUT", "EXPIRED"],
       required: true,
     },
-    // ✅ Giá nhập / giá bán tại thời điểm chốt lô (để tính doanh thu, lợi nhuận gộp, tổn thất)
+    // ✅ Unit cost / sell price at batch close (revenue, gross margin, loss)
     unitCostPrice: {
       type: Number,
       default: 0,
@@ -130,7 +130,7 @@ const productBatchHistorySchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
-    // ✅ Bán xả kho / giảm giá: doanh thu và số lượng từ đơn hàng trong kỳ lô
+    // ✅ Clearance / discount: revenue and qty from orders in the batch period
     actualRevenue: {
       type: Number,
       default: 0,
@@ -156,7 +156,7 @@ const productBatchHistorySchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
-    // Trạng thái: luôn là "COMPLETED"
+    // Status: always "COMPLETED"
     status: {
       type: String,
       enum: ["COMPLETED"],
@@ -165,9 +165,9 @@ const productBatchHistorySchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-// Index để query nhanh
+// Indexes for common queries
 productBatchHistorySchema.index({ product: 1, batchNumber: -1 });
 productBatchHistorySchema.index({ product: 1, completedDate: -1 });
 productBatchHistorySchema.index({ completionReason: 1 });
-// Index cho harvestBatch đã được khai báo ở field
+// harvestBatch field index declared on the field above
 module.exports = mongoose.model("product_batch_histories", productBatchHistorySchema);

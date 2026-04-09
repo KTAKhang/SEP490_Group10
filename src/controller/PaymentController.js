@@ -455,7 +455,7 @@ const refundVNPay = async (req, res) => {
           amount: payment.amount,
           status: "SUCCESS",
           provider_response: result,
-          note: "Hoàn tiền VNPay",
+          note: "VNPay refund",
         },
       ],
       { session },

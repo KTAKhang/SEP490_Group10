@@ -52,7 +52,7 @@ const orderDetailSchema = new mongoose.Schema({
     required: true,
     min: 0,
   },
-  // Giá gốc tại thời điểm đặt (để phân biệt bán đúng giá vs bán xả kho / giảm giá)
+  // List price at order time (vs clearance / discounted line)
   original_price: {
     type: Number,
     default: null,

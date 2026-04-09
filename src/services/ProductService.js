@@ -9,12 +9,12 @@ const { getEffectivePrice } = require("../utils/productPrice");
 /** Giá bán: > 0 và phải là bội của 1000. Giá nhập: >= 0 (không bắt buộc bội 1000). */
 function validatePriceStep(value, isSellingPrice) {
   const num = Number(value);
-  if (!Number.isFinite(num)) return { valid: false, message: isSellingPrice ? "Giá bán không hợp lệ" : "Giá nhập không hợp lệ" };
+  if (!Number.isFinite(num)) return { valid: false, message: isSellingPrice ? "Invalid sell price" : "Invalid purchase price" };
   if (isSellingPrice) {
-    if (num <= 0) return { valid: false, message: "Giá bán phải lớn hơn 0" };
-    if (num % 1000 !== 0) return { valid: false, message: "Giá bán phải là bội của 1000 (ví dụ: 1000, 20000, 21000)" };
+    if (num <= 0) return { valid: false, message: "Sell price must be greater than 0" };
+    if (num % 1000 !== 0) return { valid: false, message: "Sell price must be a multiple of 1000 (e.g. 1000, 20000, 21000)" };
   } else {
-    if (num < 0) return { valid: false, message: "Giá nhập phải lớn hơn hoặc bằng 0" };
+    if (num < 0) return { valid: false, message: "Purchase price must be greater than or equal to 0" };
   }
   return { valid: true };
 }
@@ -83,7 +83,7 @@ const createProduct = async (payload = {}) => {
       if (!purchaseCheck.valid) return { status: "ERR", message: purchaseCheck.message };
     } else {
       // Nếu không có trong payload, thử lấy từ Supplier.purchaseCosts (sẽ được set sau khi tạo product)
-      // Hoặc có thể để mặc định 0, QC Staff sẽ update sau
+      // Hoặc có thể để mặc định 0, admin/warehouse cập nhật sau
     }
 
     const sellingPrice = Number(price);

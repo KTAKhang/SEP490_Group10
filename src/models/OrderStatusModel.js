@@ -3,16 +3,16 @@ const mongoose = require('mongoose');
 const orderStatusSchema = new mongoose.Schema({
     name: {
         type: String,
-        required: [true, "Tên trạng thái đơn hàng là bắt buộc"],
+        required: [true, "Order status name is required"],
         trim: true,
-        minlength: [2, "Tên trạng thái phải có ít nhất 2 ký tự"],
-        maxlength: [50, "Tên trạng thái không được vượt quá 50 ký tự"],
+        minlength: [2, "Order status name must be at least 2 characters"],
+        maxlength: [50, "Order status name must be at most 50 characters"],
     },
     description: {
         type: String,
-        required: [true, "Mô tả là bắt buộc"],
+        required: [true, "Description is required"],
         trim: true,
-        maxlength: [200, "Mô tả không được vượt quá 200 ký tự"],
+        maxlength: [200, "Description must be at most 200 characters"],
     },
 });
 

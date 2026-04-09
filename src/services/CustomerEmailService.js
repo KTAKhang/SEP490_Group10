@@ -709,10 +709,10 @@ Smart Fruit Shop
           address: process.env.EMAIL_USER || "noreply@smartfruitshop.vn",
         },
         to: customerEmail,
-        subject: `Thanh toán thành công cho đơn #${orderId} – Smart Fruit Shop`,
+        subject: `Payment successful for order #${orderId} – Smart Fruit Shop`,
         html: `
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -767,28 +767,28 @@ Smart Fruit Shop
   <div class="container">
 
     <div class="header">
-      <h2>✅ Thanh toán thành công</h2>
+      <h2>✅ Payment successful</h2>
     </div>
 
     <div class="content">
-      <p>Xin chào <strong>${customerName || "Quý khách"}</strong>,</p>
+      <p>Hello <strong>${customerName || "Valued customer"}</strong>,</p>
 
-      <p>Cảm ơn bạn đã hoàn tất thanh toán! Đơn hàng của bạn đang được xử lý.</p>
+      <p>Thank you for completing your payment. Your order is being processed.</p>
 
       <div class="order-box">
-        <p><strong>Mã đơn hàng:</strong> #${orderId}</p>
+        <p><strong>Order ID:</strong> #${orderId}</p>
       </div>
 
       <div class="highlight">
-        <strong>Đơn hàng đang được chuẩn bị giao.</strong><br>
-        Bạn có thể theo dõi trạng thái đơn hàng trong mục "Lịch sử đặt hàng".
+        <strong>Your order is being prepared for delivery.</strong><br>
+        You can track its status in <strong>Order history</strong>.
       </div>
 
-      <p>Chúng tôi sẽ thông báo khi đơn hàng được giao cho đơn vị vận chuyển.</p>
+      <p>We will notify you when your order is handed to the carrier.</p>
     </div>
 
     <div class="footer">
-      <p>Trân trọng,<br><strong>Smart Fruit Shop</strong></p>
+      <p>Best regards,<br><strong>Smart Fruit Shop</strong></p>
       <p>Email: support@smartfruitshop.vn</p>
     </div>
 
@@ -797,15 +797,15 @@ Smart Fruit Shop
 </html>
       `,
         text: `
-Xin chào ${customerName || "Quý khách"},
+Hello ${customerName || "Valued customer"},
 
-Cảm ơn bạn đã hoàn tất thanh toán! Đơn hàng của bạn đang được xử lý.
+Thank you for completing your payment. Your order is being processed.
 
-Mã đơn hàng: #${orderId}
+Order ID: #${orderId}
 
-Đơn hàng đang được chuẩn bị giao. Bạn có thể theo dõi trạng thái đơn hàng trong mục "Lịch sử đặt hàng".
+Your order is being prepared for delivery. You can track its status in Order history.
 
-Trân trọng,
+Best regards,
 Smart Fruit Shop
       `.trim(),
       };

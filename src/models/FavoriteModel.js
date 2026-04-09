@@ -18,7 +18,7 @@ const favoriteSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Compound unique index: Một user chỉ có thể yêu thích một sản phẩm một lần
+// Compound unique index: a user can favorite a product only once
 favoriteSchema.index({ user_id: 1, product_id: 1 }, { unique: true });
 
 module.exports = mongoose.model("favorites", favoriteSchema);
