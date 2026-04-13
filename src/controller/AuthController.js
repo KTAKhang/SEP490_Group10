@@ -155,7 +155,6 @@ const logoutController = async (req, res) => {
   }
 };
 
-
 const sendRegisterOTP = async (req, res) => {
   try {
     const { user_name, email, password, fullName, phone, address, birthday, gender } =

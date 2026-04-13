@@ -82,6 +82,18 @@ const sendMessage = async ({
     throw new Error("Invalid senderRole");
   }
 
+  // trim content
+  if (content) {
+    content = content.trim();
+  }
+
+  const MAX_MESSAGE_LENGTH = 1000;
+
+  if (content && content.length > MAX_MESSAGE_LENGTH) {
+    throw new Error(`Message cannot exceed ${MAX_MESSAGE_LENGTH} characters`);
+  }
+
+
   if (!content && images.length === 0) {
     throw new Error("Message cannot be empty.");
   }

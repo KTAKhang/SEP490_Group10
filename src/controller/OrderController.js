@@ -7,7 +7,7 @@ const OrderModel = require("../models/OrderModel");
 const createOrder = async (req, res) => {
   try {
     const user_id = req.user._id;
-    const { selected_product_ids, receiverInfo, payment_method, city, discount_id, isMobile } = req.body;
+    const { selected_product_ids, receiverInfo, payment_method, discount_id, isMobile } = req.body;
 
 
     if (
@@ -30,14 +30,6 @@ const createOrder = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Recipient information is missing",
-      });
-    }
-    if (
-      !city
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing provinces/cities",
       });
     }
 
@@ -104,7 +96,6 @@ const createOrder = async (req, res) => {
       receiverInfo: normalizedReceiver,
       payment_method,
       ip: req.ip,
-      city,
       discount_id: discount_id || null,
       isMobile
     });
