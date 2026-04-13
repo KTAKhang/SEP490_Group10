@@ -141,7 +141,6 @@ const confirmCheckoutAndCreateOrder = async ({
   receiverInfo,
   payment_method,
   ip,
-  city,
   discount_id,
   isMobile = false,
 }) => {
