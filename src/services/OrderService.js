@@ -1344,8 +1344,8 @@ const getOrderStatusCounts = async () => {
 
 /**
  * Revenue/Refund/NetRevenue stats for dashboard (sales-staff).
- * - Revenue: orders with status COMPLETED; date = status_history.changed_at when to_status = COMPLETED; amount = total_price - discount_amount + shipping_fee.
- * - Refund: orders with status REFUND; date = status_history.changed_at when to_status = REFUND; amount = total_price - discount_amount + shipping_fee.
+ * - Revenue: orders with status COMPLETED; date = status_history.changed_at when to_status = COMPLETED; amount = total_price.
+ * - Refund: orders with status REFUND; date = status_history.changed_at when to_status = REFUND; amount = total_price.
  * - Supports groupBy: month (in year), quarter (Q1-Q4), year.
  * @param {Object} options - { groupBy: 'month'|'quarter'|'year', year: number }
  * @returns {Object} { revenue: [{label, value}], refund: [...], netRevenue: [...], totalCompletedOrders, totalRefundOrders, refundRate }
@@ -1364,12 +1364,10 @@ const getOrderRevenueRefundStats = async (options = {}) => {
     const completedId = completedStatus ? completedStatus._id : null;
     const refundId = refundStatus ? refundStatus._id : null;
 
-    const buildAmountField = () => ({
-      $subtract: [
-        { $add: [{ $ifNull: ["$total_price", 0] }, { $ifNull: ["$shipping_fee", 0] }] },
-        { $ifNull: ["$discount_amount", 0] },
-      ],
-    });
+    // NOTE: In this codebase, `total_price` is already the final payable amount
+    // (after discount; and shipping is already accounted for where applicable).
+    // Do not subtract `discount_amount` again, otherwise discounted orders get double-discounted in stats.
+    const buildAmountField = () => ({ $ifNull: ["$total_price", 0] });
 
     const buildDateFromHistory = (statusId) => ({
       $let: {
@@ -1433,8 +1431,11 @@ const getOrderRevenueRefundStats = async (options = {}) => {
       return emptyResult();
     }
 
+    // IMPORTANT:
+    // Do NOT filter by current `order_status_id` here.
+    // A completed order can later transition to REFUND, but it must still be counted as revenue
+    // at the time it was marked COMPLETED. We derive timestamps from `status_history`.
     const revenuePipeline = [
-      { $match: { order_status_id: completedId } },
       {
         $addFields: {
           completedAt: buildDateFromHistory(completedId),
@@ -1451,7 +1452,6 @@ const getOrderRevenueRefundStats = async (options = {}) => {
     ];
 
     const refundPipeline = [
-      { $match: { order_status_id: refundId } },
       {
         $addFields: {
           refundedAt: buildDateFromHistory(refundId),
@@ -1467,12 +1467,36 @@ const getOrderRevenueRefundStats = async (options = {}) => {
       { $project: { label: { $literal: null }, value: "$refund", _id: 1 } },
     ];
 
-    const [revenueDocs, refundDocs, totalCompleted, totalRefund] = await Promise.all([
+    const totalCompletedPipeline = [
+      {
+        $addFields: {
+          completedAt: buildDateFromHistory(completedId),
+        },
+      },
+      { $match: { completedAt: { $ne: null } } },
+      ...(Object.keys(yearMatch("completedAt")).length ? [{ $match: yearMatch("completedAt") }] : []),
+      { $count: "count" },
+    ];
+
+    const totalRefundPipeline = [
+      {
+        $addFields: {
+          refundedAt: buildDateFromHistory(refundId),
+        },
+      },
+      { $match: { refundedAt: { $ne: null } } },
+      ...(Object.keys(yearMatch("refundedAt")).length ? [{ $match: yearMatch("refundedAt") }] : []),
+      { $count: "count" },
+    ];
+
+    const [revenueDocs, refundDocs, totalCompletedAgg, totalRefundAgg] = await Promise.all([
       OrderModel.aggregate(revenuePipeline),
       OrderModel.aggregate(refundPipeline),
-      OrderModel.countDocuments({ order_status_id: completedId }),
-      OrderModel.countDocuments({ order_status_id: refundId }),
+      OrderModel.aggregate(totalCompletedPipeline),
+      OrderModel.aggregate(totalRefundPipeline),
     ]);
+    const totalCompleted = totalCompletedAgg?.[0]?.count ?? 0;
+    const totalRefund = totalRefundAgg?.[0]?.count ?? 0;
 
     const revenue = revenueDocs.map((d) => ({ label: toLabel(d), value: d.value || 0 }));
     const refund = refundDocs.map((d) => ({ label: toLabel(d), value: d.value || 0 }));
