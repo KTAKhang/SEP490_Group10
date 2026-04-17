@@ -53,7 +53,18 @@ const DiscountService = {
             } = data;
 
             // Validate required fields
-            if (!code || !discountPercent || !minOrderValue || !maxDiscountAmount || !startDate || !endDate) {
+            if (
+                !code ||
+                !String(code).trim() ||
+                discountPercent === undefined ||
+                discountPercent === null ||
+                minOrderValue === undefined ||
+                minOrderValue === null ||
+                maxDiscountAmount === undefined ||
+                maxDiscountAmount === null ||
+                !startDate ||
+                !endDate
+            ) {
                 return { status: "ERR", message: "Missing required fields" };
             }
 
@@ -90,6 +101,14 @@ const DiscountService = {
             // Validate discount percentage
             if (discountPercent < 1 || discountPercent > 100) {
                 return { status: "ERR", message: "Discount percentage must be between 1 and 100" };
+            }
+
+            // Validate currency fields (VND) - meaningful minimum
+            if (minOrderValue < 1000) {
+                return { status: "ERR", message: "Minimum order value must be at least 1000" };
+            }
+            if (maxDiscountAmount < 1000) {
+                return { status: "ERR", message: "Maximum discount amount must be at least 1000" };
             }
 
             // Create new discount in PENDING state
@@ -191,6 +210,14 @@ const DiscountService = {
                 return { status: "ERR", message: "Discount percentage must be between 1 and 100" };
             }
 
+            // Validate currency fields (VND) - meaningful minimum
+            if (discount.minOrderValue < 1000) {
+                return { status: "ERR", message: "Minimum order value must be at least 1000" };
+            }
+            if (discount.maxDiscountAmount < 1000) {
+                return { status: "ERR", message: "Maximum discount amount must be at least 1000" };
+            }
+
             await discount.save();
 
             return {
@@ -286,8 +313,8 @@ const DiscountService = {
                 // 1. Notify sales-staff who created the voucher
                 if (discount.createdBy) {
                     await NotificationService.sendToUser(discount.createdBy, {
-                        title: "Voucher đã được duyệt",
-                        body: `Voucher ${discount.code} đã được admin duyệt và đang hoạt động`,
+                        title: "Voucher approved",
+                        body: `Your voucher ${discount.code} has been approved and is now active.`,
                         data: {
                             type: "discount",
                             discountId: discount._id.toString(),
@@ -299,8 +326,8 @@ const DiscountService = {
 
                 // 2. Notify all customers about new voucher
                 await NotificationService.sendToAllCustomers({
-                    title: "Voucher mới đã có sẵn!",
-                    body: `Giảm ${discount.discountPercent}% tối đa ${new Intl.NumberFormat('vi-VN').format(discount.maxDiscountAmount)} VNĐ. Mã: ${discount.code}`,
+                    title: "New voucher available!",
+                    body: `Save ${discount.discountPercent}% up to ${new Intl.NumberFormat("vi-VN").format(discount.maxDiscountAmount)} VND. Code: ${discount.code}`,
                     data: {
                         type: "discount",
                         discountId: discount._id.toString(),
@@ -370,8 +397,8 @@ const DiscountService = {
             try {
                 if (discount.createdBy) {
                     await NotificationService.sendToUser(discount.createdBy, {
-                        title: "Voucher bị từ chối",
-                        body: `Voucher ${discount.code} bị từ chối. Lý do: ${rejectionReason.trim()}`,
+                        title: "Voucher rejected",
+                        body: `Your voucher ${discount.code} has been rejected. Reason: ${rejectionReason.trim()}`,
                         data: {
                             type: "discount",
                             discountId: discount._id.toString(),
