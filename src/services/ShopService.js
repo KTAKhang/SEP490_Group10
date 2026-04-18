@@ -23,6 +23,7 @@ const getShopInfo = async () => {
         logo: "https://via.placeholder.com/150",
         description: "Not Updated",
         workingHours: "Not Updated",
+        mapEmbedUrl: "",
         images: [],
         imagePublicIds: [],
       });
@@ -45,9 +46,17 @@ const getShopInfo = async () => {
  * BR-10: No create/delete allowed (only update)
  * BR-11: Record update timestamp
  */
+const normalizeMapEmbedUrl = (payload) => {
+  const raw = payload.mapEmbedUrl ?? payload.map_embed_url;
+  if (raw === undefined || raw === null) return undefined;
+  const s = String(raw).trim();
+  return s === "" || s === "null" ? "" : s;
+};
+
 const updateShopBasicInfo = async (payload = {}) => {
   try {
     const { shopName, address, email, phone, logo } = payload;
+    const mapEmbedUrlInput = normalizeMapEmbedUrl(payload);
 
     // BR-06: Shop name is required
     if (!shopName || !shopName.toString().trim()) {
@@ -77,6 +86,18 @@ const updateShopBasicInfo = async (payload = {}) => {
       }
     }
 
+    if (mapEmbedUrlInput !== undefined && mapEmbedUrlInput !== "") {
+      if (!/^https?:\/\//i.test(mapEmbedUrlInput)) {
+        return {
+          status: "ERR",
+          message: "URL embed bản đồ phải bắt đầu bằng http:// hoặc https://",
+        };
+      }
+      if (mapEmbedUrlInput.length > 8000) {
+        return { status: "ERR", message: "URL embed bản đồ quá dài (tối đa 8000 ký tự)" };
+      }
+    }
+
     // Get existing shop or create default
     let shop = await ShopModel.findOne();
     if (!shop) {
@@ -89,6 +110,7 @@ const updateShopBasicInfo = async (payload = {}) => {
         logo: logo ? logo.toString().trim() : "",
         description: "",
         workingHours: "",
+        mapEmbedUrl: mapEmbedUrlInput !== undefined ? mapEmbedUrlInput : "",
         images: [],
         imagePublicIds: [],
       });
@@ -99,6 +121,9 @@ const updateShopBasicInfo = async (payload = {}) => {
       shop.email = email ? email.toString().trim().toLowerCase() : "";
       shop.phone = phone ? phone.toString().trim() : "";
       shop.logo = logo ? logo.toString().trim() : "";
+      if (mapEmbedUrlInput !== undefined) {
+        shop.mapEmbedUrl = mapEmbedUrlInput;
+      }
       // BR-11: Timestamp will be updated automatically by mongoose timestamps
     }
 
@@ -159,6 +184,7 @@ const updateShopDescription = async (payload = {}) => {
         logo: "",
         description: "",
         workingHours: "",
+        mapEmbedUrl: "",
         images: [],
         imagePublicIds: [],
       });
@@ -206,6 +232,7 @@ const updateWorkingHours = async (payload = {}) => {
         logo: "",
         description: "",
         workingHours: workingHours.toString().trim(),
+        mapEmbedUrl: "",
         images: [],
         imagePublicIds: [],
       });
@@ -264,6 +291,7 @@ const updateShopImages = async (images = [], imagePublicIds = []) => {
         logo: "",
         description: "",
         workingHours: "",
+        mapEmbedUrl: "",
         images: validImages,
         imagePublicIds: validImagePublicIds,
       });

@@ -38,6 +38,13 @@ const shopSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    /** URL nhúng bản đồ (Google Maps iframe src hoặc link share embed tương đương) — dùng hiển thị map trên storefront */
+    mapEmbedUrl: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: [8000, "Map embed URL must be at most 8000 characters"],
+    },
     images: [{ type: String, trim: true }],
     imagePublicIds: [{ type: String, trim: true }],
   },

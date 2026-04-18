@@ -1,5 +1,25 @@
 const NewsCommentService = require("../services/NewsCommentService");
 
+/** Chuẩn hóa user id từ JWT decoded hoặc User document */
+const actorId = (req) => String(req.user._id);
+
+/** Admin / feedbacked-staff: từ populate role_id (authUserMiddleware) hoặc JWT (role / role_name) */
+const actorIsAdminOrModerator = (req) => {
+  const name =
+    req.user?.role_id?.name ??
+    req.user?.role_name ??
+    req.user?.role ??
+    null;
+  const n = (name ?? "").toString().toLowerCase();
+  return n === "admin" || n === "feedbacked-staff";
+};
+
+/** GET optional-auth: nhận diện admin/moderator để xem HIDDEN (authOptionalMiddleware chỉ có role_name) */
+const viewerIsAdminOrModerator = (req) => {
+  const n = (req.user?.role_name ?? "").toString().toLowerCase();
+  return n === "admin" || n === "feedbacked-staff";
+};
+
 /**
  * Create Comment - Tạo comment mới
  */
@@ -9,7 +29,7 @@ const createComment = async (req, res) => {
     const response = await NewsCommentService.createComment({
       news_id: newsId,
       ...req.body,
-      user_id: req.user._id,
+      user_id: actorId(req),
     });
     if (response.status === "ERR") return res.status(400).json(response);
     return res.status(201).json(response);
@@ -25,8 +45,8 @@ const getComments = async (req, res) => {
   try {
     const { newsId } = req.params;
     const { parent_id } = req.query; // null để lấy comment gốc, hoặc ID để lấy reply
-    const isAdmin = req.user?.role_name === "admin" || req.user?.role_name === "feedbacked-staff";
-    const userId = req.user?._id || null;
+    const isAdmin = viewerIsAdminOrModerator(req);
+    const userId = req.user?._id != null ? String(req.user._id) : null;
 
     // Xử lý parent_id: "null" string hoặc null → null, còn lại → giữ nguyên
     let parentId = null;
@@ -49,8 +69,7 @@ const updateComment = async (req, res) => {
   try {
     const { id } = req.params;
     const { content } = req.body;
-    const userId = req.user._id;
-    const isAdmin = req.user.role_name === "admin" || req.user.role_name === "feedbacked-staff";
+    const userId = actorId(req);
 
     if (!content) {
       return res.status(400).json({
@@ -59,7 +78,7 @@ const updateComment = async (req, res) => {
       });
     }
 
-    const response = await NewsCommentService.updateComment(id, content, userId, isAdmin);
+    const response = await NewsCommentService.updateComment(id, content, userId);
     if (response.status === "ERR") return res.status(400).json(response);
     return res.status(200).json(response);
   } catch (error) {
@@ -73,8 +92,8 @@ const updateComment = async (req, res) => {
 const deleteComment = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user._id;
-    const isAdmin = req.user.role_name === "admin" || req.user.role_name === "feedbacked-staff";
+    const userId = actorId(req);
+    const isAdmin = actorIsAdminOrModerator(req);
 
     const response = await NewsCommentService.deleteComment(id, userId, isAdmin);
     if (response.status === "ERR") return res.status(400).json(response);

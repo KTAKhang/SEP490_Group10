@@ -83,8 +83,9 @@ const routes = (app) => {
     app.use("/inventory", InventoryRouter);
     // News
     app.use("/news", NewsRouter);
-    // News Comments
+    // News Comments (FE primary path uses /api/news-comments)
     app.use("/news-comments", NewsCommentRouter);
+    app.use("/api/news-comments", NewsCommentRouter);
     app.use("/api/homepage-assets", HomepageAssetRouter);
     // Public routes (không cần authentication)
     app.use("/products", PublicProductRouter);
