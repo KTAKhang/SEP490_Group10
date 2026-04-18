@@ -148,7 +148,17 @@ const checkCommentDepth = async (parentId) => {
  */
 const createComment = async (payload = {}) => {
   try {
-    const { news_id, user_id, content, parent_id } = payload;
+    const { news_id, user_id, content } = payload;
+    const parentRaw = payload.parent_id ?? payload.parentId;
+    let parent_id = null;
+    if (
+      parentRaw !== undefined &&
+      parentRaw !== null &&
+      String(parentRaw).trim() !== "" &&
+      String(parentRaw).trim() !== "null"
+    ) {
+      parent_id = String(parentRaw).trim();
+    }
 
     // Validate required fields
     if (!news_id) {
@@ -183,7 +193,7 @@ const createComment = async (payload = {}) => {
     }
 
     // Kiểm tra user tồn tại
-    const user = await UserModel.findById(user_id);
+    const user = await UserModel.findById(user_id).populate("role_id", "name");
     if (!user) {
       return { status: "ERR", message: "Người dùng không tồn tại" };
     }
@@ -218,10 +228,17 @@ const createComment = async (payload = {}) => {
       }
     }
 
-    // Chống spam (BR-COMMENT-06)
-    const spamCheck = await checkSpamLimit(user_id, news_id);
-    if (!spamCheck.valid) {
-      return { status: "ERR", message: spamCheck.message };
+    // Chống spam (BR-COMMENT-06) — bỏ qua với staff nội bộ (tránh chặn trả lời nhanh)
+    const roleName = user.role_id?.name?.toLowerCase?.() ?? "";
+    const skipSpamCheck =
+      roleName === "admin" ||
+      roleName === "feedbacked-staff" ||
+      roleName === "sales-staff";
+    if (!skipSpamCheck) {
+      const spamCheck = await checkSpamLimit(user_id, news_id);
+      if (!spamCheck.valid) {
+        return { status: "ERR", message: spamCheck.message };
+      }
     }
 
     // Tạo comment
@@ -343,8 +360,7 @@ const getComments = async (newsId, parentId = null, isAdmin = false, userId = nu
  * - Nếu không tìm thấy → trả về lỗi
  * 
  * BƯỚC 2: Kiểm tra quyền chỉnh sửa (BR-COMMENT-02)
- * - Admin: Có thể sửa tất cả comment
- * - User: Chỉ có thể sửa comment của chính mình
+ * - Chỉ chủ comment (user_id khớp) được sửa — kể cả admin (tránh sửa thay nội dung khách)
  * - Không cho phép sửa comment có status = DELETED
  * 
  * BƯỚC 3: Validate content mới
@@ -359,18 +375,17 @@ const getComments = async (newsId, parentId = null, isAdmin = false, userId = nu
  * @param {string} commentId - ID của comment
  * @param {string} newContent - Nội dung mới
  * @param {string} userId - ID của user đang update
- * @param {boolean} isAdmin - User có phải admin không
  * @returns {Promise<object>} - { status: "OK"|"ERR", message: string, data?: NewsCommentModel }
  */
-const updateComment = async (commentId, newContent, userId, isAdmin = false) => {
+const updateComment = async (commentId, newContent, userId) => {
   try {
     const comment = await NewsCommentModel.findById(commentId);
     if (!comment) {
       return { status: "ERR", message: "Comment không tồn tại" };
     }
 
-    // BR-COMMENT-02: Kiểm tra quyền chỉnh sửa
-    if (!isAdmin && comment.user_id.toString() !== userId) {
+    // BR-COMMENT-02: chỉ chủ comment được sửa
+    if (comment.user_id.toString() !== String(userId)) {
       return {
         status: "ERR",
         message: "Bạn không có quyền chỉnh sửa comment này",

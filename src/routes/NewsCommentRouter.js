@@ -2,7 +2,7 @@ const express = require("express");
 const NewsCommentController = require("../controller/NewsCommentController");
 const {
   authAdminOrFeedbackedStaffMiddleware,
-  authStaffOrAdminMiddleware,
+  authUserMiddleware,
   authOptionalMiddleware,
 } = require("../middleware/authMiddleware");
 
@@ -14,9 +14,9 @@ NewsCommentRouter.put("/:id/moderate", authAdminOrFeedbackedStaffMiddleware, New
 // Public endpoints (có thể xem comment mà không cần đăng nhập)
 NewsCommentRouter.get("/:newsId", authOptionalMiddleware, NewsCommentController.getComments);
 
-// User endpoints (cần đăng nhập)
-NewsCommentRouter.post("/:newsId", authStaffOrAdminMiddleware, NewsCommentController.createComment);
-NewsCommentRouter.put("/:id", authStaffOrAdminMiddleware, NewsCommentController.updateComment);
-NewsCommentRouter.delete("/:id", authStaffOrAdminMiddleware, NewsCommentController.deleteComment);
+// Authenticated users (customer, staff, admin) — quyền sửa/xóa từng comment do service kiểm soát
+NewsCommentRouter.post("/:newsId", authUserMiddleware, NewsCommentController.createComment);
+NewsCommentRouter.put("/:id", authUserMiddleware, NewsCommentController.updateComment);
+NewsCommentRouter.delete("/:id", authUserMiddleware, NewsCommentController.deleteComment);
 
 module.exports = NewsCommentRouter;
