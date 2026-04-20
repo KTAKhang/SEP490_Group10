@@ -291,18 +291,15 @@ const updateProductAdmin = async (id, payload = {}) => {
     }
 
     // ✅ Cho phép update đầy đủ chỉ khi chưa có hàng trong kho: receivedQuantity = 0 và onHandQuantity = 0
-    // (gồm: sản phẩm mới tạo chưa nhập, hoặc đã reset lô). Khi đã có hàng nhập/tồn → chỉ được sửa mô tả.
+    // (gồm: sản phẩm mới tạo chưa nhập, hoặc đã reset lô). Khi đã có hàng nhập/tồn → chỉ được sửa mô tả
+    // và bật/tắt hiển thị (status). Các field khác sẽ bị bỏ qua âm thầm để FE có thể gửi nguyên object
+    // sản phẩm mà vẫn toggle được show/hide hoặc cập nhật mô tả.
     const noStockInWarehouse =
       (product.receivedQuantity ?? 0) === 0 && (product.onHandQuantity ?? 0) === 0;
-    const allowedWhenHasStock = ["short_desc", "detail_desc"];
+    const allowedWhenHasStock = ["short_desc", "detail_desc", "status"];
     if (!noStockInWarehouse) {
-      const disallowedKeys = Object.keys(payload).filter((k) => !allowedWhenHasStock.includes(k));
-      if (disallowedKeys.length > 0) {
-        return {
-          status: "ERR",
-          message:
-            "When the product already has stock in warehouse (received or on hand), only short_desc and detail_desc can be updated. To change price, quantity, images, etc., clear stock and reset the batch first.",
-        };
+      for (const key of Object.keys(payload)) {
+        if (!allowedWhenHasStock.includes(key)) delete payload[key];
       }
     }
 
