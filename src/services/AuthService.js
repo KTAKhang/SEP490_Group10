@@ -236,7 +236,7 @@ const logoutUser = async (userId) => {
   });
 
   return { status: "OK", message: "Logout successful", userId };
-
+};
 
 const sendRegisterOTP = async (
   user_name,

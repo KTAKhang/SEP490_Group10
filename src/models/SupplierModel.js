@@ -200,14 +200,11 @@ const buildSupplierCode = async (supplierDoc) => {
 };
 
 supplierSchema.pre("save", async function (next) {
+  // BR-SUP-02: Supplier phải có cả phone VÀ email, áp dụng cho cả create và update.
   const phoneOk = this.phone != null && String(this.phone).trim() !== "";
   const emailOk = this.email != null && String(this.email).trim() !== "";
-  if (this.isNew) {
-    if (!phoneOk || !emailOk) {
-      return next(new Error("Phone number and email are both required"));
-    }
-  } else if (!phoneOk && !emailOk) {
-    return next(new Error("At least one phone number or email is required"));
+  if (!phoneOk || !emailOk) {
+    return next(new Error("Phone number and email are both required"));
   }
 
   if (this.isNew) {

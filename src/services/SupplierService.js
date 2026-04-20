@@ -225,14 +225,15 @@ const updateSupplier = async (supplierId, userId, payload = {}) => {
     }
 
 
-    // ✅ BR-SUP-02: Validate phone hoặc email (nếu cập nhật)
+    // ✅ BR-SUP-02: Supplier phải có đầy đủ phone VÀ email.
+    // Sau khi apply payload, cả 2 trường đều bắt buộc (giống lúc tạo mới).
     const newPhone = payload.phone !== undefined ? payload.phone?.toString().trim() || "" : supplier.phone || "";
     const newEmail = payload.email !== undefined ? payload.email?.toString().trim() || "" : supplier.email || "";
-    if (!newPhone && !newEmail) {
-      return {
-        status: "ERR",
-        message: "At least one phone number or email is required",
-      };
+    if (!newPhone) {
+      return { status: "ERR", message: "Phone number is required" };
+    }
+    if (!newEmail) {
+      return { status: "ERR", message: "Email is required" };
     }
 
 
