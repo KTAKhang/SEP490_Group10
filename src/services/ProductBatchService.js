@@ -196,7 +196,7 @@ const aggregateOrderRevenueByBatch = async (productId, warehouseEntryDate, compl
         { $match: { "order.createdAt": { $gte: rangeStart, $lte: rangeEnd } } },
         { $lookup: { from: "order_statuses", localField: "order.order_status_id", foreignField: "_id", as: "orderStatus" } },
         { $unwind: { path: "$orderStatus", preserveNullAndEmptyArrays: true } },
-        { $match: { "orderStatus.name": { $regex: /^COMPLETED$/i } } },
+        { $match: { "orderStatus.name": { $in: [/^COMPLETED$/i, /^REFUND$/i] } } },
         { $project: { quantity: 1, price: 1, original_price: 1, orderCreatedAt: "$order.createdAt" } },
         { $sort: { orderCreatedAt: -1, _id: -1 } },
       ]);

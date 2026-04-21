@@ -497,8 +497,10 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
     const nextStatusName = normalizeStatusName(newStatus.name);
     const paymentMethod = normalizeToken(order.payment_method);
     const normalizedRole = (role || "").toString().trim().toLowerCase();
+    const isTransitionToCancelled =
+      currentStatusName !== "CANCELLED" && nextStatusName === "CANCELLED";
     const isShippingToCancelled =
-      currentStatusName === "SHIPPING" && nextStatusName === "CANCELLED";
+      currentStatusName === "SHIPPING" && isTransitionToCancelled;
     const autoShippingCancelNote =
       "Customer refused to receive, restocked inventory";
     const statusHistoryNote = isShippingToCancelled
@@ -640,8 +642,8 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
       }
     }
 
-    // SHIPPING -> CANCELLED: hoàn kho lại cho các sản phẩm trong đơn
-    if (isShippingToCancelled) {
+    // Bất kỳ transition -> CANCELLED: hoàn kho lại cho các sản phẩm trong đơn
+    if (isTransitionToCancelled) {
       const details = await OrderDetailModel.find({ order_id: order._id })
         .select("product_id quantity")
         .session(session);
