@@ -266,7 +266,7 @@ const getProductReviews = async (productId, filters = {}) => {
 
     const {
       page = 1,
-      limit = 4,
+      limit = 2,
       search = "",
       sortBy = "createdAt",
       sortOrder = "desc",
@@ -296,7 +296,7 @@ const getProductReviews = async (productId, filters = {}) => {
 
     const [data, total] = await Promise.all([
       ReviewModel.find(query)
-        .populate("user_id", "user_name")
+        .populate("user_id", "user_name fullName avatar")
         .sort(sortObj)
         .skip(skip)
         .limit(limitNum)
@@ -428,7 +428,7 @@ const getReviewsForAdmin = async (filters = {}) => {
 
     const [data, total] = await Promise.all([
       ReviewModel.find(query)
-        .populate("user_id", "user_name email")
+        .populate("user_id", "user_name fullName email avatar")
         .populate("product_id", "name")
         .sort(sortObj)
         .skip(skip)
