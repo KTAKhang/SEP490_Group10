@@ -669,13 +669,20 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
         const details = await OrderDetailModel.find({ order_id: order._id }).select("product_id").lean();
         const productIds = [...new Set(details.map((d) => d.product_id?.toString()).filter(Boolean))];
         if (productIds.length > 0) {
-          // Bước an toàn: chỉ auto-reset khi sản phẩm đã thực sự hết hàng và có kỳ lô đang mở.
+          const { formatDateVN, getTodayInVietnam } = require("../utils/dateVN");
+          const todayStr = formatDateVN(getTodayInVietnam());
+
           const products = await ProductModel.find({
             _id: { $in: productIds.map((id) => new mongoose.Types.ObjectId(id)) },
           })
-            .select("onHandQuantity warehouseEntryDate warehouseEntryDateStr")
+            .select("onHandQuantity warehouseEntryDate warehouseEntryDateStr expiryDateStr expiryDate")
             .lean();
-          const eligibleProductIds = products
+
+          const ProductBatchService = require("./ProductBatchService");
+          const orderIdStr = order._id?.toString?.();
+
+          // Chốt lô bán hết: onHandQuantity = 0
+          const soldOutIds = products
             .filter(
               (p) =>
                 (p.onHandQuantity ?? 0) === 0 &&
@@ -683,13 +690,32 @@ const updateOrder = async (order_id, new_status_name, userId, role, note) => {
             )
             .map((p) => p._id.toString());
 
-          const ProductBatchService = require("./ProductBatchService");
-          const orderIdStr = order._id?.toString?.();
-          for (const pid of eligibleProductIds) {
+          for (const pid of soldOutIds) {
             try {
               await ProductBatchService.autoResetSoldOutProduct(pid, { excludeOrderId: orderIdStr });
             } catch (e) {
               console.error("Auto-reset sold out product after COMPLETED failed:", pid, e);
+            }
+          }
+
+          // Chốt lô hết hạn: sản phẩm đã hết hạn nhưng còn tồn kho và không còn đơn pending
+          // (bắt trường hợp: hết hạn hôm qua nhưng cron miss vì lúc đó có đơn pending)
+          const expiredWithStockIds = products
+            .filter((p) => {
+              if ((p.onHandQuantity ?? 0) <= 0) return false;
+              if (!p.warehouseEntryDate && !p.warehouseEntryDateStr) return false;
+              const expStr = p.expiryDateStr ?? null;
+              if (expStr) return expStr <= todayStr;
+              if (p.expiryDate) return new Date(p.expiryDate) <= new Date();
+              return false;
+            })
+            .map((p) => p._id.toString());
+
+          for (const pid of expiredWithStockIds) {
+            try {
+              await ProductBatchService.autoResetExpiredProduct(pid, { excludeOrderId: orderIdStr });
+            } catch (e) {
+              console.error("Auto-reset expired product after COMPLETED failed:", pid, e);
             }
           }
         }

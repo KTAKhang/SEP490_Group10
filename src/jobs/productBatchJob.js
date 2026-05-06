@@ -71,6 +71,10 @@ const runSoldOutCatchUpOnce = async () => {
  * - 2) Sold-out catch-up: chốt lô đã bán hết nhưng chưa reset (chờ qua ngày hoặc nhận đủ).
  */
 const startProductBatchJob = () => {
+  // Chạy startup check ngay khi server khởi động (bắt lại các lô bị miss khi server tắt qua đêm)
+  runExpiredCheckOnce();
+  runSoldOutCatchUpOnce();
+
   cron.schedule("0 0 * * *", async () => {
     console.log(`[${formatDateTimeVN()}] Starting product batch jobs...`);
     try {
