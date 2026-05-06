@@ -865,10 +865,43 @@ const autoResetSoldOutProductsCatchUp = async () => {
     return { status: "ERR", message: error.message };
   }
 };
+/**
+ * Chốt lô hết hạn cho một sản phẩm cụ thể (gọi từ OrderService khi order COMPLETED).
+ * Chỉ chốt khi sản phẩm đã hết hạn VÀ không còn đơn nào đang pending (trừ đơn vừa complete).
+ * @param {String} productId
+ * @param {Object} [options] - { excludeOrderId: string }
+ */
+const autoResetExpiredProduct = async (productId, options = {}) => {
+  try {
+    const product = await ProductModel.findById(productId);
+    if (!product) return { status: "ERR", message: "Product does not exist" };
+    if ((product.onHandQuantity ?? 0) <= 0) return { status: "OK", message: "No stock to reset" };
+    if (!product.warehouseEntryDate && !product.warehouseEntryDateStr) {
+      return { status: "OK", message: "No active batch" };
+    }
+
+    const today = getTodayInVietnam();
+    const todayStr = formatDateVN(today);
+    const expStr = product.expiryDateStr ?? null;
+    const isExpired = expStr ? expStr <= todayStr : (product.expiryDate ? new Date(product.expiryDate) <= new Date() : false);
+    if (!isExpired) return { status: "OK", message: "Product not expired" };
+
+    const inTransition = await hasOrdersInTransitionForProduct(productId, options.excludeOrderId ?? null);
+    if (inTransition) {
+      return { status: "OK", message: "Skipped: orders still in transition" };
+    }
+
+    return await resetProductForNewBatch(productId, "EXPIRED");
+  } catch (error) {
+    return { status: "ERR", message: error.message };
+  }
+};
+
 module.exports = {
   calculateSoldQuantity,
   resetProductForNewBatch,
   autoResetExpiredProducts,
+  autoResetExpiredProduct,
   autoResetSoldOutProduct,
   autoResetSoldOutProductsCatchUp,
   getProductBatchHistory,
