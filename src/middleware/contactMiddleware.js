@@ -53,7 +53,7 @@ const contactAuthMiddleware = async (req, res, next) => {
         if (!token) {
             return res.status(401).json({
                 status: "ERR",
-                message: "Token không được cung cấp",
+                message: "Token is required",
             });
         }
 
@@ -65,7 +65,7 @@ const contactAuthMiddleware = async (req, res, next) => {
         if (!user) {
             return res.status(404).json({
                 status: "ERR",
-                message: "Người dùng không tồn tại",
+                message: "User does not exist",
             });
         }
 
@@ -73,7 +73,7 @@ const contactAuthMiddleware = async (req, res, next) => {
         if (user.status === false) {
             return res.status(403).json({
                 status: "ERR",
-                message: "Tài khoản bị khóa",
+                message: "Account is locked",
             });
         }
 
@@ -93,13 +93,13 @@ const contactAuthMiddleware = async (req, res, next) => {
         if (error.name === "TokenExpiredError") {
             return res.status(401).json({
                 status: "ERR",
-                message: "Token đã hết hạn",
+                message: "Token has expired",
             });
         }
         if (error.name === "JsonWebTokenError") {
             return res.status(401).json({
                 status: "ERR",
-                message: "Token không hợp lệ",
+                message: "Invalid token",
             });
         }
         return res.status(500).json({
@@ -127,7 +127,7 @@ const contactAdminMiddleware = async (req, res, next) => {
         if (!token) {
             return res.status(401).json({
                 status: "ERR",
-                message: "Token không được cung cấp",
+                message: "Token is required",
             });
         }
 
@@ -137,14 +137,14 @@ const contactAdminMiddleware = async (req, res, next) => {
         if (!user) {
             return res.status(404).json({
                 status: "ERR",
-                message: "Người dùng không tồn tại",
+                message: "User does not exist",
             });
         }
 
         if (user.status === false) {
             return res.status(403).json({
                 status: "ERR",
-                message: "Tài khoản bị khóa",
+                message: "Account is locked",
             });
         }
 
@@ -153,7 +153,7 @@ const contactAdminMiddleware = async (req, res, next) => {
         if (!isContactAdminRole(roleName)) {
             return res.status(403).json({
                 status: "ERR",
-                message: "Chỉ Admin mới có quyền truy cập",
+                message: "Only admins can access this resource",
             });
         }
 
@@ -170,13 +170,13 @@ const contactAdminMiddleware = async (req, res, next) => {
         if (error.name === "TokenExpiredError") {
             return res.status(401).json({
                 status: "ERR",
-                message: "Token đã hết hạn",
+                message: "Token has expired",
             });
         }
         if (error.name === "JsonWebTokenError") {
             return res.status(401).json({
                 status: "ERR",
-                message: "Token không hợp lệ",
+                message: "Invalid token",
             });
         }
         return res.status(500).json({
@@ -204,7 +204,7 @@ const contactUserMiddleware = async (req, res, next) => {
         if (!token) {
             return res.status(401).json({
                 status: "ERR",
-                message: "Token không được cung cấp",
+                message: "Token is required",
             });
         }
 
@@ -214,14 +214,14 @@ const contactUserMiddleware = async (req, res, next) => {
         if (!user) {
             return res.status(404).json({
                 status: "ERR",
-                message: "Người dùng không tồn tại",
+                message: "User does not exist",
             });
         }
 
         if (user.status === false) {
             return res.status(403).json({
                 status: "ERR",
-                message: "Tài khoản bị khóa",
+                message: "Account is locked",
             });
         }
 
@@ -230,7 +230,7 @@ const contactUserMiddleware = async (req, res, next) => {
         if (roleName === "admin") {
             return res.status(403).json({
                 status: "ERR",
-                message: "Admin không thể sử dụng endpoint này",
+                message: "Admin cannot use this endpoint",
             });
         }
 
@@ -247,13 +247,13 @@ const contactUserMiddleware = async (req, res, next) => {
         if (error.name === "TokenExpiredError") {
             return res.status(401).json({
                 status: "ERR",
-                message: "Token đã hết hạn",
+                message: "Token has expired",
             });
         }
         if (error.name === "JsonWebTokenError") {
             return res.status(401).json({
                 status: "ERR",
-                message: "Token không hợp lệ",
+                message: "Invalid token",
             });
         }
         return res.status(500).json({
