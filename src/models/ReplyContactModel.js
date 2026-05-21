@@ -9,28 +9,28 @@ const replyContactSchema = new mongoose.Schema(
         contact_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "contacts",
-            required: [true, "Contact ID là bắt buộc"],
+            required: [true, "Contact ID is required"],
             index: true,
         },
         sender_type: {
             type: String,
-            required: [true, "Sender type là bắt buộc"],
+            required: [true, "Sender type is required"],
             enum: {
                 values: ["USER", "ADMIN"],
-                message: "Sender type phải là USER hoặc ADMIN",
+                message: "Sender type must be USER or ADMIN",
             },
         },
         sender_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "users",
-            required: [true, "Sender ID là bắt buộc"],
+            required: [true, "Sender ID is required"],
         },
         message: {
             type: String,
-            required: [true, "Message là bắt buộc"],
+            required: [true, "Message is required"],
             trim: true,
-            minlength: [1, "Message không được để trống"],
-            maxlength: [5000, "Message không được vượt quá 5000 ký tự"],
+            minlength: [1, "Message cannot be empty"],
+            maxlength: [5000, "Message cannot exceed 5000 characters"],
         },
     },
     {

@@ -38,7 +38,7 @@ const createContact = async (userId, { subject, message, category }) => {
         if (!user || user.status === false) {
             return {
                 status: "ERR",
-                message: "User không hợp lệ hoặc đã bị khóa",
+                message: "Invalid user or account is locked",
             };
         }
 
@@ -46,7 +46,7 @@ const createContact = async (userId, { subject, message, category }) => {
         if (!subject || subject.trim().length < 5 || subject.trim().length > 200) {
             return {
                 status: "ERR",
-                message: "Subject phải có từ 5 đến 200 ký tự",
+                message: "Subject must be between 5 and 200 characters",
             };
         }
 
@@ -54,7 +54,7 @@ const createContact = async (userId, { subject, message, category }) => {
         if (!message || message.trim().length < 10 || message.trim().length > 5000) {
             return {
                 status: "ERR",
-                message: "Message phải có từ 10 đến 5000 ký tự",
+                message: "Message must be between 10 and 5000 characters",
             };
         }
 
@@ -81,7 +81,7 @@ const createContact = async (userId, { subject, message, category }) => {
 
         return {
             status: "OK",
-            message: "Tạo Contact thành công",
+            message: "Contact created successfully",
             data: populatedContact,
         };
     } catch (error) {
@@ -126,7 +126,7 @@ const getContacts = async (userId, isAdmin, filters = {}) => {
 
         return {
             status: "OK",
-            message: "Lấy danh sách Contact thành công",
+            message: "Contacts retrieved successfully",
             data: contacts,
             pagination: {
                 page,
@@ -155,7 +155,7 @@ const getContactById = async (contactId, userId, isAdmin) => {
         if (!contact) {
             return {
                 status: "ERR",
-                message: "Contact không tồn tại",
+                message: "Contact does not exist",
             };
         }
 
@@ -166,7 +166,7 @@ const getContactById = async (contactId, userId, isAdmin) => {
             if (contactUserId !== userId.toString()) {
                 return {
                     status: "ERR",
-                    message: "Bạn không có quyền xem Contact này",
+                    message: "You do not have permission to view this contact",
                 };
             }
         }
@@ -199,7 +199,7 @@ const getContactById = async (contactId, userId, isAdmin) => {
 
         return {
             status: "OK",
-            message: "Lấy Contact thành công",
+            message: "Contact retrieved successfully",
             data: {
                 ...contact.toObject(),
                 replies,
@@ -228,7 +228,7 @@ const updateContactStatus = async (contactId, userId, isAdmin, { status, assigne
         if (!isAdmin) {
             return {
                 status: "ERR",
-                message: "Chỉ Admin mới có quyền thay đổi trạng thái Contact",
+                message: "Only admins can change contact status",
             };
         }
 
@@ -236,7 +236,7 @@ const updateContactStatus = async (contactId, userId, isAdmin, { status, assigne
         if (!contact) {
             return {
                 status: "ERR",
-                message: "Contact không tồn tại",
+                message: "Contact does not exist",
             };
         }
 
@@ -245,7 +245,7 @@ const updateContactStatus = async (contactId, userId, isAdmin, { status, assigne
         if (status && !validStatuses.includes(status)) {
             return {
                 status: "ERR",
-                message: "Status không hợp lệ. Phải là OPEN, IN_PROGRESS, RESOLVED hoặc CLOSED",
+                message: "Invalid status. Must be OPEN, IN_PROGRESS, RESOLVED, or CLOSED",
             };
         }
 
@@ -261,14 +261,14 @@ const updateContactStatus = async (contactId, userId, isAdmin, { status, assigne
             if (!admin) {
                 return {
                     status: "ERR",
-                    message: "Admin không tồn tại",
+                    message: "Admin does not exist",
                 };
             }
             // Kiểm tra admin có phải là role admin trong module Contact không (admin hoặc customer support)
             if (!isContactAdminRole(admin.role_id?.name)) {
                 return {
                     status: "ERR",
-                    message: "User được gán không phải là Admin/Customer Support",
+                    message: "Assigned user is not an Admin/Customer Support",
                 };
             }
             updateData.assigned_admin_id = assigned_admin_id;
@@ -284,7 +284,7 @@ const updateContactStatus = async (contactId, userId, isAdmin, { status, assigne
 
         return {
             status: "OK",
-            message: "Cập nhật Contact thành công",
+            message: "Contact updated successfully",
             data: updatedContact,
         };
     } catch (error) {
@@ -309,7 +309,7 @@ const createReply = async (contactId, userId, isAdmin, { message }) => {
         if (!contact) {
             return {
                 status: "ERR",
-                message: "Contact không tồn tại",
+                message: "Contact does not exist",
             };
         }
 
@@ -318,7 +318,7 @@ const createReply = async (contactId, userId, isAdmin, { message }) => {
         if (contact.status === "CLOSED" || contact.status === "RESOLVED") {
             return {
                 status: "ERR",
-                message: "Không thể reply Contact đã được đóng hoặc đã được giải quyết",
+                message: "Cannot reply to a closed or resolved contact",
             };
         }
 
@@ -331,7 +331,7 @@ const createReply = async (contactId, userId, isAdmin, { message }) => {
         if (!sender) {
             return {
                 status: "ERR",
-                message: "Sender không tồn tại",
+                message: "Sender does not exist",
             };
         }
 
@@ -339,7 +339,7 @@ const createReply = async (contactId, userId, isAdmin, { message }) => {
         if (!message || message.trim().length < 1 || message.trim().length > 5000) {
             return {
                 status: "ERR",
-                message: "Message phải có từ 1 đến 5000 ký tự",
+                message: "Message must be between 1 and 5000 characters",
             };
         }
 
@@ -367,8 +367,8 @@ const createReply = async (contactId, userId, isAdmin, { message }) => {
                 const customerId = contact.user_id.toString();
                 const contactIdStr = contactId.toString();
                 await NotificationService.sendToUser(customerId, {
-                    title: "Admin đã phản hồi yêu cầu của bạn",
-                    body: "Bạn có phản hồi mới từ admin. Nhấn để xem chi tiết.",
+                    title: "Admin replied to your request",
+                    body: "You have a new reply from admin. Tap to view details.",
                     type: "contact",
                     data: {
                         type: "contact",
@@ -386,7 +386,7 @@ const createReply = async (contactId, userId, isAdmin, { message }) => {
 
         return {
             status: "OK",
-            message: "Tạo Reply thành công",
+            message: "Reply created successfully",
             data: populatedReply,
         };
     } catch (error) {
@@ -406,7 +406,7 @@ const getReplies = async (contactId, userId, isAdmin) => {
         if (!contact) {
             return {
                 status: "ERR",
-                message: "Contact không tồn tại",
+                message: "Contact does not exist",
             };
         }
 
@@ -416,7 +416,7 @@ const getReplies = async (contactId, userId, isAdmin) => {
             if (contactUserId !== userId.toString()) {
                 return {
                     status: "ERR",
-                    message: "Bạn không có quyền xem Contact này",
+                    message: "You do not have permission to view this contact",
                 };
             }
         }
@@ -427,7 +427,7 @@ const getReplies = async (contactId, userId, isAdmin) => {
 
         return {
             status: "OK",
-            message: "Lấy danh sách Reply thành công",
+            message: "Replies retrieved successfully",
             data: replies,
         };
     } catch (error) {
@@ -448,7 +448,7 @@ const updateReply = async (contactId, replyId, userId, isAdmin, { message }) => 
         if (!isAdmin) {
             return {
                 status: "ERR",
-                message: "Chỉ Admin mới có quyền chỉnh sửa Reply",
+                message: "Only admins can edit replies",
             };
         }
 
@@ -457,7 +457,7 @@ const updateReply = async (contactId, replyId, userId, isAdmin, { message }) => 
         if (!contact) {
             return {
                 status: "ERR",
-                message: "Contact không tồn tại",
+                message: "Contact does not exist",
             };
         }
 
@@ -466,7 +466,7 @@ const updateReply = async (contactId, replyId, userId, isAdmin, { message }) => 
         if (!reply) {
             return {
                 status: "ERR",
-                message: "Reply không tồn tại",
+                message: "Reply does not exist",
             };
         }
 
@@ -474,7 +474,7 @@ const updateReply = async (contactId, replyId, userId, isAdmin, { message }) => 
         if (reply.contact_id.toString() !== contactId.toString()) {
             return {
                 status: "ERR",
-                message: "Reply không thuộc về Contact này",
+                message: "Reply does not belong to this contact",
             };
         }
 
@@ -482,7 +482,7 @@ const updateReply = async (contactId, replyId, userId, isAdmin, { message }) => 
         if (reply.sender_type !== "ADMIN") {
             return {
                 status: "ERR",
-                message: "Chỉ có thể chỉnh sửa Reply của Admin",
+                message: "Only admin replies can be edited",
             };
         }
 
@@ -490,7 +490,7 @@ const updateReply = async (contactId, replyId, userId, isAdmin, { message }) => 
         if (reply.sender_id.toString() !== userId.toString()) {
             return {
                 status: "ERR",
-                message: "Bạn chỉ có thể chỉnh sửa Reply của chính mình",
+                message: "You can only edit your own reply",
             };
         }
 
@@ -498,7 +498,7 @@ const updateReply = async (contactId, replyId, userId, isAdmin, { message }) => 
         if (!message || message.trim().length < 1 || message.trim().length > 5000) {
             return {
                 status: "ERR",
-                message: "Message phải có từ 1 đến 5000 ký tự",
+                message: "Message must be between 1 and 5000 characters",
             };
         }
 
@@ -514,7 +514,7 @@ const updateReply = async (contactId, replyId, userId, isAdmin, { message }) => 
 
         return {
             status: "OK",
-            message: "Cập nhật Reply thành công",
+            message: "Reply updated successfully",
             data: updatedReply,
         };
     } catch (error) {
@@ -535,7 +535,7 @@ const deleteReply = async (contactId, replyId, userId, isAdmin) => {
         if (!isAdmin) {
             return {
                 status: "ERR",
-                message: "Chỉ Admin mới có quyền xóa Reply",
+                message: "Only admins can delete replies",
             };
         }
 
@@ -544,7 +544,7 @@ const deleteReply = async (contactId, replyId, userId, isAdmin) => {
         if (!contact) {
             return {
                 status: "ERR",
-                message: "Contact không tồn tại",
+                message: "Contact does not exist",
             };
         }
 
@@ -553,7 +553,7 @@ const deleteReply = async (contactId, replyId, userId, isAdmin) => {
         if (!reply) {
             return {
                 status: "ERR",
-                message: "Reply không tồn tại",
+                message: "Reply does not exist",
             };
         }
 
@@ -561,7 +561,7 @@ const deleteReply = async (contactId, replyId, userId, isAdmin) => {
         if (reply.contact_id.toString() !== contactId.toString()) {
             return {
                 status: "ERR",
-                message: "Reply không thuộc về Contact này",
+                message: "Reply does not belong to this contact",
             };
         }
 
@@ -569,7 +569,7 @@ const deleteReply = async (contactId, replyId, userId, isAdmin) => {
         if (reply.sender_type !== "ADMIN") {
             return {
                 status: "ERR",
-                message: "Chỉ có thể xóa Reply của Admin",
+                message: "Only admin replies can be deleted",
             };
         }
 
@@ -577,7 +577,7 @@ const deleteReply = async (contactId, replyId, userId, isAdmin) => {
         if (reply.sender_id.toString() !== userId.toString()) {
             return {
                 status: "ERR",
-                message: "Bạn chỉ có thể xóa Reply của chính mình",
+                message: "You can only delete your own reply",
             };
         }
 
@@ -589,7 +589,7 @@ const deleteReply = async (contactId, replyId, userId, isAdmin) => {
 
         return {
             status: "OK",
-            message: "Xóa Reply thành công",
+            message: "Reply deleted successfully",
         };
     } catch (error) {
         return {
@@ -612,7 +612,7 @@ const uploadAttachment = async (contactId, userId, isAdmin, file) => {
         if (!contact) {
             return {
                 status: "ERR",
-                message: "Contact không tồn tại",
+                message: "Contact does not exist",
             };
         }
 
@@ -622,7 +622,7 @@ const uploadAttachment = async (contactId, userId, isAdmin, file) => {
             if (contactUserId !== userId.toString()) {
                 return {
                     status: "ERR",
-                    message: "Bạn không có quyền upload file cho Contact này",
+                    message: "You do not have permission to upload files for this contact",
                 };
             }
         }
@@ -630,7 +630,7 @@ const uploadAttachment = async (contactId, userId, isAdmin, file) => {
         if (!file) {
             return {
                 status: "ERR",
-                message: "File không được cung cấp",
+                message: "File is required",
             };
         }
 
@@ -638,7 +638,7 @@ const uploadAttachment = async (contactId, userId, isAdmin, file) => {
         if (!ALLOWED_FILE_TYPES.includes(file.mimetype)) {
             return {
                 status: "ERR",
-                message: `Loại file không được phép. Chỉ chấp nhận: ${ALLOWED_FILE_TYPES.join(", ")}`,
+                message: `Unsupported file type. Allowed types: ${ALLOWED_FILE_TYPES.join(", ")}`,
             };
         }
 
@@ -646,7 +646,7 @@ const uploadAttachment = async (contactId, userId, isAdmin, file) => {
         if (file.size > MAX_FILE_SIZE) {
             return {
                 status: "ERR",
-                message: `File quá lớn. Kích thước tối đa là ${MAX_FILE_SIZE / 1024 / 1024}MB`,
+                message: `File is too large. Maximum size is ${MAX_FILE_SIZE / 1024 / 1024}MB`,
             };
         }
 
@@ -655,7 +655,7 @@ const uploadAttachment = async (contactId, userId, isAdmin, file) => {
         if (existingAttachments >= MAX_FILES_PER_CONTACT) {
             return {
                 status: "ERR",
-                message: `Đã đạt giới hạn số lượng file (tối đa ${MAX_FILES_PER_CONTACT} file)`,
+                message: `File limit reached (maximum ${MAX_FILES_PER_CONTACT} files)`,
             };
         }
 
@@ -670,7 +670,7 @@ const uploadAttachment = async (contactId, userId, isAdmin, file) => {
                     if (error) {
                         return resolve({
                             status: "ERR",
-                            message: "Lỗi khi upload file: " + error.message,
+                            message: "File upload failed: " + error.message,
                         });
                     }
 
@@ -688,13 +688,13 @@ const uploadAttachment = async (contactId, userId, isAdmin, file) => {
 
                         resolve({
                             status: "OK",
-                            message: "Upload file thành công",
+                            message: "File uploaded successfully",
                             data: attachment,
                         });
                     } catch (saveError) {
                         resolve({
                             status: "ERR",
-                            message: "Lỗi khi lưu thông tin file: " + saveError.message,
+                            message: "Failed to save file info: " + saveError.message,
                         });
                     }
                 }
@@ -723,7 +723,7 @@ const getAttachments = async (contactId, userId, isAdmin) => {
         if (!contact) {
             return {
                 status: "ERR",
-                message: "Contact không tồn tại",
+                message: "Contact does not exist",
             };
         }
 
@@ -733,7 +733,7 @@ const getAttachments = async (contactId, userId, isAdmin) => {
             if (contactUserId !== userId.toString()) {
                 return {
                     status: "ERR",
-                    message: "Bạn không có quyền xem Contact này",
+                    message: "You do not have permission to view this contact",
                 };
             }
         }
@@ -743,7 +743,7 @@ const getAttachments = async (contactId, userId, isAdmin) => {
 
         return {
             status: "OK",
-            message: "Lấy danh sách Attachment thành công",
+            message: "Attachments retrieved successfully",
             data: attachments,
         };
     } catch (error) {
@@ -763,7 +763,7 @@ const deleteAttachment = async (attachmentId, userId, isAdmin) => {
         if (!attachment) {
             return {
                 status: "ERR",
-                message: "Attachment không tồn tại",
+                message: "Attachment does not exist",
             };
         }
 
@@ -771,7 +771,7 @@ const deleteAttachment = async (attachmentId, userId, isAdmin) => {
         if (!contact) {
             return {
                 status: "ERR",
-                message: "Contact không tồn tại",
+                message: "Contact does not exist",
             };
         }
 
@@ -781,7 +781,7 @@ const deleteAttachment = async (attachmentId, userId, isAdmin) => {
             if (contactUserId !== userId.toString()) {
                 return {
                     status: "ERR",
-                    message: "Bạn không có quyền xóa Attachment này",
+                    message: "You do not have permission to delete this attachment",
                 };
             }
         }
@@ -794,7 +794,7 @@ const deleteAttachment = async (attachmentId, userId, isAdmin) => {
 
         return {
             status: "OK",
-            message: "Xóa Attachment thành công",
+            message: "Attachment deleted successfully",
         };
     } catch (error) {
         return {
